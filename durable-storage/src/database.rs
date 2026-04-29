@@ -527,6 +527,8 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     }
 }
 
+mod traced_database;
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -543,7 +545,7 @@ mod tests {
     use tokio::runtime::Handle;
 
     use super::Database;
-    use super::DatabaseMode;
+    use super::traced_database::TracedDatabase;
     use crate::avl::tree::Tree;
     use crate::database::MAX_VALUE_SIZE;
     use crate::errors::Error;
@@ -551,7 +553,6 @@ mod tests {
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
-    use crate::merkle_layer::new_verify_layer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::storage::KeyValueStore;
@@ -561,24 +562,24 @@ mod tests {
     fn new_database<KV: BackgroundKeyValueStore>(
         handle: &Handle,
         repo: &KV::Repo,
-    ) -> Database<KV, Normal> {
-        Database::try_new(handle, repo).expect("Creating a test database should succeed")
+    ) -> TracedDatabase<KV> {
+        TracedDatabase::try_new(handle, repo).expect("Creating a test database should succeed")
     }
 
-    fn new_verify_database<KV: KeyValueStore>(repo: &KV::Repo) -> Database<KV, Verify> {
-        Database {
-            inner: super::VerifyImpl {
-                merkle: new_verify_layer::<KV>(repo),
-            },
-        }
+    fn new_verify_database<KV: KeyValueStore + TestKeyValueStoreSetup>(
+        repo: &KV::Repo,
+    ) -> TracedDatabase<KV, Verify> {
+        TracedDatabase::<KV, Verify>::new_verify(repo)
     }
 
-    fn new_prove_database<KV: KeyValueStore>(persistence: Arc<KV>) -> Database<KV, Prove<'static>> {
-        Database {
+    fn new_prove_database<KV: KeyValueStore>(
+        persistence: Arc<KV>,
+    ) -> TracedDatabase<KV, Prove<'static>> {
+        TracedDatabase::from(Database {
             inner: super::ProveImpl {
                 merkle: MerkleLayer::from_prove_tree(persistence, Tree::default()),
             },
-        }
+        })
     }
 
     #[cfg(feature = "rocksdb")]
@@ -586,7 +587,7 @@ mod tests {
         tokio::runtime::Runtime,
         KV::Keepalive,
         KV::Repo,
-        Database<KV, Normal>,
+        TracedDatabase<KV>,
     )
     where
         KV: BackgroundKeyValueStore + TestKeyValueStoreSetup,
@@ -597,37 +598,9 @@ mod tests {
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
         let (keepalive, repo) = KV::setup_repo();
-        let database =
-            Database::try_new(handle, &repo).expect("Creating a test database should succeed");
+        let database = new_database::<KV>(handle, &repo);
 
         (runtime, keepalive, repo, database)
-    }
-
-    fn insert_entries<KV: BackgroundKeyValueStore, M: DatabaseMode>(
-        database: &mut Database<KV, M>,
-        entries: Vec<(Vec<u8>, Vec<u8>)>,
-    ) -> std::collections::HashMap<Key, Bytes> {
-        let mut expected = std::collections::HashMap::new();
-        for (key, value) in entries {
-            let key = Key::new(&key).expect("Size less than KEY_MAX_SIZE");
-            let value = Bytes::copy_from_slice(&value);
-            database
-                .set(key.clone(), value.clone())
-                .expect("Writing should succeed");
-            expected.insert(key, value);
-        }
-
-        expected
-    }
-
-    fn assert_database_missing<KV: BackgroundKeyValueStore, M: DatabaseMode>(
-        database: &Database<KV, M>,
-        key: &Key,
-    ) {
-        assert!(matches!(
-            database.read_bytes(key, 0, 0),
-            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
-        ));
     }
 
     kv_test!(test_database_commit_and_checkout, KV: BackgroundPersistentKeyValueStore,
@@ -648,12 +621,12 @@ mod tests {
         ),
     ], {
         let mut database = new_database::<KV>(handle, repo);
-        let expected = insert_entries(&mut database, entries);
+        let expected = database.insert_entries(entries);
 
         let expected_hash = database.hash().expect("Hash should be calculated");
         let commit_id = database.commit(repo).expect("Commit should succeed");
 
-        let checked_out = Database::<KV, _>::checkout(handle, repo, commit_id)
+        let checked_out = TracedDatabase::<KV>::checkout(handle, repo, commit_id)
             .expect("Checkout should succeed");
 
         prop_assert_eq!(checked_out.hash().expect("Hash should be calculated"), expected_hash);
@@ -661,6 +634,8 @@ mod tests {
         for (key, value) in expected {
             checked_out.assert_database_value(&key, value.as_ref());
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_delete, KV: BackgroundKeyValueStore,
@@ -691,6 +666,8 @@ mod tests {
             assert_ne!(before, after);
             prop_assert!(!database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_delete_nonexistent, KV: BackgroundKeyValueStore, {
@@ -725,6 +702,8 @@ mod tests {
         // Ensure the root hash is unchanged
         let after = database.hash().expect("Hash should be calculated");
         assert_eq!(before, after);
+
+        database.into_trace()
     });
 
     // Test to verify the fix for RV-955 (deletion after checkout failed).
@@ -747,7 +726,7 @@ mod tests {
         let commit = db.commit(&repo).expect("Commit should succeed");
 
         // Act
-        let mut db = Database::<KV, _>::checkout(handle, &repo, commit).expect("Checkout should succeed");
+        let mut db = TracedDatabase::<KV>::checkout(handle, &repo, commit).expect("Checkout should succeed");
 
         db.delete(key).expect("Delete should succeed");
 
@@ -755,6 +734,8 @@ mod tests {
         // - we emit another operation to actually observe any crash.
         let final_hash = db.hash().expect("Hashing should succeed");
         assert_eq!(initial_hash, final_hash, "Empty DB should always hash to the same value");
+
+        db.into_trace()
     });
 
     kv_test!(test_database_checkout_commit_creates_new_snapshot, KV: BackgroundPersistentKeyValueStore, {
@@ -775,9 +756,8 @@ mod tests {
 
         let original_commit = original.commit(&repo).expect("Commit should succeed");
 
-        let mut checked_out =
-            Database::<KV, _>::checkout(handle, &repo, original_commit)
-                .expect("Checkout should succeed");
+        let mut checked_out = TracedDatabase::<KV>::checkout(handle, &repo, original_commit)
+            .expect("Checkout should succeed");
         checked_out
             .set(persisted_key.clone(), Bytes::from_static(b"after"))
             .expect("Writing should succeed");
@@ -788,17 +768,17 @@ mod tests {
         let derived_commit = checked_out.commit(&repo).expect("Commit should succeed");
         assert_ne!(derived_commit, original_commit);
 
-        let original_reloaded =
-            Database::<KV, _>::checkout(handle, &repo, original_commit)
-                .expect("Checkout should succeed");
+        let original_reloaded = TracedDatabase::<KV>::checkout(handle, &repo, original_commit)
+            .expect("Checkout should succeed");
         original_reloaded.assert_database_value(&persisted_key, b"before");
-        assert_database_missing(&original_reloaded, &derived_key);
+        original_reloaded.assert_traced_database_missing(&derived_key);
 
-        let derived_reloaded =
-            Database::<KV, _>::checkout(handle, &repo, derived_commit)
-                .expect("Checkout should succeed");
+        let derived_reloaded = TracedDatabase::<KV>::checkout(handle, &repo, derived_commit)
+            .expect("Checkout should succeed");
         derived_reloaded.assert_database_value(&persisted_key, b"after");
         derived_reloaded.assert_database_value(&derived_key, b"new");
+
+        (original.into_trace(), checked_out.into_trace())
     });
 
     #[cfg(feature = "rocksdb")]
@@ -806,6 +786,7 @@ mod tests {
     fn test_database_checkout_missing_root_blob_fails_operationally() {
         use rocksdb::ColumnFamilyDescriptor;
 
+        use super::Database;
         use crate::errors::Error;
         use crate::errors::OperationalError;
         use crate::persistence_layer::PersistenceLayer;
@@ -860,14 +841,16 @@ mod tests {
             .expect("Creating a Tokio runtime should succeed");
         let handle = runtime.handle();
         let (_keepalive, repo) = KV::setup_repo();
-        let _database = new_database::<KV>(handle, &repo);
+        let database = new_database::<KV>(handle, &repo);
 
         let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-commit"));
 
         assert!(matches!(
-            Database::<KV, _>::checkout(handle, &repo, missing_commit),
+            TracedDatabase::<KV>::checkout(handle, &repo, missing_commit),
             Err(Error::Operational(OperationalError::CommitNotFound))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_database_exists, KV: BackgroundKeyValueStore,
@@ -900,6 +883,8 @@ mod tests {
                 .expect("Writing should succeed");
             prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_hash, KV: BackgroundKeyValueStore,
@@ -940,6 +925,8 @@ mod tests {
                 prop_assert_ne!(before, after);
             }
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_hash_revert, KV: BackgroundKeyValueStore, {
@@ -977,6 +964,8 @@ mod tests {
             .expect("Writing should succeed");
         let reverted = database.hash().expect("Hash should be calculated");
         assert_eq!(before, reverted);
+
+        database.into_trace()
     });
 
     kv_test!(test_database_read, KV: BackgroundKeyValueStore,
@@ -1055,6 +1044,8 @@ mod tests {
             prop_assert_eq!(read, small_buffer.len());
             prop_assert_eq!(&small_buffer, &data[0..3]);
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_read_bytes, KV: BackgroundKeyValueStore,
@@ -1087,20 +1078,22 @@ mod tests {
             let result = database
                 .read_bytes(&key, 0, data.len())
                 .expect("Reading from offset 0 should succeed");
-            prop_assert_eq!(result.as_ref(), data.as_slice());
+            prop_assert_eq!(result.as_slice(), data.as_slice());
 
             // Zero-sized read at end of value
             let result = database
                 .read_bytes(&key, 0, 0)
                 .expect("A zero-sized read should succeed");
-            prop_assert_eq!(result.as_ref(), &[] as &[u8]);
+            prop_assert_eq!(result.as_slice(), &[] as &[u8]);
 
             // Partial read from last byte
             let result = database
                 .read_bytes(&key, data.len() - 1, 1)
                 .expect("A partial read should succeed");
-            prop_assert_eq!(result.as_ref(), &data[data.len() - 1..]);
+            prop_assert_eq!(result.as_slice(), &data[data.len() - 1..]);
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_read_bytes_no_key, KV: BackgroundKeyValueStore, {
@@ -1118,6 +1111,8 @@ mod tests {
             database.read_bytes(&key, 0, 1),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_database_read_no_key, KV: BackgroundKeyValueStore, {
@@ -1138,6 +1133,8 @@ mod tests {
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
         assert_eq!(read_data_before, read_data);
+
+        database.into_trace()
     });
 
     kv_test!(test_database_read_bytes_io_too_large, KV: BackgroundKeyValueStore, {
@@ -1158,6 +1155,8 @@ mod tests {
                 InvalidArgumentError::IoRequestTooLarge
             ))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_database_read_io_too_large, KV: BackgroundKeyValueStore, {
@@ -1181,6 +1180,8 @@ mod tests {
             ))
         ));
         assert_eq!(read_data_before, read_data);
+
+        database.into_trace()
     });
 
     kv_test!(test_database_value_length, KV: BackgroundKeyValueStore,
@@ -1212,6 +1213,8 @@ mod tests {
                 data.len()
             );
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_write, KV: BackgroundKeyValueStore,
@@ -1248,6 +1251,8 @@ mod tests {
                 prop_assert_eq!(database.value_length(&key).unwrap(), expected_length);
             }
         }
+
+        database.into_trace()
     });
 
     kv_test!(test_database_write_new_nonzero_offset, KV: BackgroundKeyValueStore, {
@@ -1270,6 +1275,8 @@ mod tests {
             ),
             "Values that don't exist are implicitly zero in size when written. Got {res:?}"
         );
+
+        database.into_trace()
     });
 
     kv_test!(test_database_write_io_too_large, KV: BackgroundKeyValueStore, {
@@ -1292,6 +1299,8 @@ mod tests {
                 InvalidArgumentError::IoRequestTooLarge
             ))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_database_write_no_truncation, KV: BackgroundKeyValueStore, {
@@ -1317,6 +1326,8 @@ mod tests {
         let mut output = vec![0; data.len()];
         assert!(database.read(&key, 0, output.as_mut_slice()).is_ok());
         assert_eq!(output.as_slice(), "nother value".as_bytes());
+
+        database.into_trace()
     });
 
     kv_test!(test_database_write_offset_append, KV: BackgroundKeyValueStore, {
@@ -1339,6 +1350,8 @@ mod tests {
         let mut output = vec![0; 2 * data.len()];
         assert!(database.read(&key, 0, output.as_mut_slice()).is_ok());
         assert_eq!(output.as_slice(), [1, 2, 3, 1, 2, 3]);
+
+        database.into_trace()
     });
 
     kv_test!(test_database_write_oversized_offset, KV: BackgroundKeyValueStore, {
@@ -1354,6 +1367,8 @@ mod tests {
 
         assert!(database.set(key.clone(), data.clone()).is_ok());
         assert!(database.write(key.clone(), data.len() + 1, data).is_err());
+
+        database.into_trace()
     });
 
     kv_test!(test_database_set_io_too_large, KV: BackgroundKeyValueStore, {
@@ -1375,6 +1390,8 @@ mod tests {
                 InvalidArgumentError::IoRequestTooLarge
             ))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_database_write_value_too_large, KV: BackgroundKeyValueStore, {
@@ -1390,7 +1407,7 @@ mod tests {
         let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
         let bytes = Bytes::from(vec![42; MAX_VALUE_SIZE - can_write]);
 
-        <Normal as super::DatabaseMode>::set(&mut database, key.clone(), bytes)
+        <Normal as super::DatabaseMode>::set(database.inner_mut(), key.clone(), bytes)
             .expect("Setting should succeed (bypassing API layer)");
 
         let value_len = database
@@ -1460,6 +1477,8 @@ mod tests {
             "Appending zero bytes to maximum length value does not change size"
         );
         assert_eq!(MAX_VALUE_SIZE, database.value_length(&key).unwrap());
+
+        database.into_trace()
     });
 
     kv_test!(test_verify_database_delete, KV: BackgroundKeyValueStore, {
@@ -1495,6 +1514,8 @@ mod tests {
         database
             .delete(nonexistent_key)
             .expect("Verify mode does not return `OperationError`s");
+
+        database.into_trace()
     });
 
     kv_test!(test_verify_database_set_and_read, KV: BackgroundKeyValueStore,
@@ -1512,7 +1533,9 @@ mod tests {
         let result = database
             .read_bytes(&key, 0, data.len())
             .expect("Verify mode does not return `OperationError`s");
-        prop_assert_eq!(result.as_ref(), data.as_slice());
+        prop_assert_eq!(result.as_slice(), data.as_slice());
+
+        database.into_trace()
     });
 
     kv_test!(test_verify_database_value_length, KV: BackgroundKeyValueStore,
@@ -1533,6 +1556,8 @@ mod tests {
                 .expect("Verify mode does not return `OperationError`s"),
             data.len()
         );
+
+        database.into_trace()
     });
 
     kv_test!(test_verify_database_write_partial, KV: BackgroundKeyValueStore,
@@ -1564,7 +1589,9 @@ mod tests {
 
         let mut expected = initial.clone();
         expected[offset..offset + patch_len].copy_from_slice(patch);
-        prop_assert_eq!(result.as_ref(), expected.as_slice());
+        prop_assert_eq!(result.as_slice(), expected.as_slice());
+
+        database.into_trace()
     });
 
     fn new_persistence<KV>() -> (KV::Keepalive, Arc<KV>)
@@ -1611,6 +1638,8 @@ mod tests {
         database
             .delete(nonexistent_key)
             .expect("Deleting a non-existent key in Prove mode should succeed");
+
+        database.into_trace()
     });
 
     kv_test!(test_prove_database_set_and_read, KV: BackgroundKeyValueStore,
@@ -1631,7 +1660,9 @@ mod tests {
         let result = database
             .read_bytes(&key, 0, data.len())
             .expect("Reading a key in Prove mode should succeed");
-        prop_assert_eq!(result.as_ref(), data.as_slice());
+        prop_assert_eq!(result.as_slice(), data.as_slice());
+
+        database.into_trace()
     });
 
     kv_test!(test_prove_database_value_length, KV: BackgroundKeyValueStore,
@@ -1655,6 +1686,8 @@ mod tests {
                 .expect("Reading the length in Prove mode should succeed"),
             data.len()
         );
+
+        database.into_trace()
     });
 
     kv_test!(test_prove_database_write_partial, KV: BackgroundKeyValueStore,
@@ -1689,7 +1722,9 @@ mod tests {
 
         let mut expected = initial.clone();
         expected[offset..offset + patch_len].copy_from_slice(patch);
-        prop_assert_eq!(result.as_ref(), expected.as_slice());
+        prop_assert_eq!(result.as_slice(), expected.as_slice());
+
+        database.into_trace()
     });
 
     kv_test!(test_prove_database_missing_key, KV: BackgroundKeyValueStore, {
@@ -1742,6 +1777,8 @@ mod tests {
             database.read_bytes(&key, 0, 1),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_prove_database_read_bytes_partial, KV: BackgroundKeyValueStore,
@@ -1767,19 +1804,19 @@ mod tests {
         let result = database
             .read_bytes(&key, offset, length)
             .expect("Reading a sub-range in Prove mode should succeed");
-        prop_assert_eq!(result.as_ref(), &data[offset..offset + length]);
+        prop_assert_eq!(result.as_slice(), &data[offset..offset + length]);
 
         // Zero-sized read at the end of the value.
         let result = database
             .read_bytes(&key, data.len(), 0)
             .expect("A zero-sized read at end of value should succeed");
-        prop_assert_eq!(result.as_ref(), &[] as &[u8]);
+        prop_assert_eq!(result.as_slice(), &[] as &[u8]);
 
         // Single-byte read of the last byte.
         let result = database
             .read_bytes(&key, data.len() - 1, 1)
             .expect("A partial read of the last byte should succeed");
-        prop_assert_eq!(result.as_ref(), &data[data.len() - 1..]);
+        prop_assert_eq!(result.as_slice(), &data[data.len() - 1..]);
 
         // Offset beyond value length is rejected.
         prop_assert!(matches!(
@@ -1792,6 +1829,8 @@ mod tests {
             database.read_bytes(&key, 0, MAX_FILE_CHUNK_SIZE + 1),
             Err(Error::InvalidArgument(InvalidArgumentError::IoRequestTooLarge))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_prove_database_read_bytes_records_only_accessed_range, KV: BackgroundKeyValueStore, {
@@ -1807,18 +1846,16 @@ mod tests {
             .expect("populating the normal layer should succeed");
 
         // Convert to Prove and read a small range entirely contained in page 1.
-        let prove_db: Database<KV, Prove<'static>> = Database {
+        let prove_db: TracedDatabase<KV, Prove<'static>> = TracedDatabase::from(Database {
             inner: super::ProveImpl {
                 merkle: normal_ml.start_proof(),
             },
-        };
+        });
         let read_offset = 5000usize;
         let read_len = 4usize;
         let read_back = prove_db
             .read_bytes(&key, read_offset, read_len)
-            .expect("Prove-mode read should succeed")
-            .as_ref()
-            .to_vec();
+            .expect("Prove-mode read should succeed");
         assert_eq!(
             read_back,
             &value[read_offset..read_offset + read_len],
@@ -1826,8 +1863,8 @@ mod tests {
         );
 
         // Generate the proof and produce a Verify-mode database from it.
-        let prove_ml = prove_db.inner.merkle;
-        let verify_ml: MerkleLayer<KV, Verify> = prove_ml.into_verify();
+        let (prove_inner, prove_trace) = prove_db.into_parts();
+        let verify_ml: MerkleLayer<KV, Verify> = prove_inner.inner.merkle.into_verify();
         let verify_db: Database<KV, Verify> = Database {
             inner: super::VerifyImpl { merkle: verify_ml },
         };
@@ -1855,6 +1892,8 @@ mod tests {
             "Verify-mode read of an un-recorded range must trigger not_found, \
              but the read succeeded — Prove-mode `get` is over-recording"
         );
+
+        prove_trace
     });
 
     kv_test!(test_prove_database_write_append, KV: BackgroundKeyValueStore, {
@@ -1899,6 +1938,8 @@ mod tests {
             database.write(key, MAX_VALUE_SIZE, Bytes::copy_from_slice(&[1])),
             Err(Error::InvalidArgument(InvalidArgumentError::ValueSizeTooLarge))
         ));
+
+        database.into_trace()
     });
 
     kv_test!(test_prove_database_hash, KV: BackgroundKeyValueStore, {
@@ -1935,5 +1976,7 @@ mod tests {
             .hash()
             .expect("Hashing in Prove mode should succeed");
         assert_eq!(before, reverted);
+
+        database.into_trace()
     });
 }
