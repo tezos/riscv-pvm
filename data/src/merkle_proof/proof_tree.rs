@@ -515,6 +515,13 @@ impl<'t> Deserialiser for ProofTree<'t> {
     fn into_node(self) -> Result<Self::DeserialiserNode, Self::Error> {
         Ok(self.as_node()?.map_present(Vec::into_iter))
     }
+
+    fn capture_owned_proof(&self) -> Option<MerkleProof> {
+        match self {
+            ProofPart::Absent => None,
+            ProofPart::Present(proof) => Some((*proof).clone()),
+        }
+    }
 }
 
 /// Similar to [`ProofTree`], but owns the underlying [`MerkleProof`]

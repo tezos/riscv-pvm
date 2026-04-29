@@ -398,6 +398,14 @@ impl Foldable<MerkleProofFold> for Tree<ProveNodeId> {
 
 impl Foldable<PartialHashFold> for Tree<VerifyNodeId> {
     fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        // SAFETY: Extra care is required in folding for `Verify` in the MAVL tree, due to
+        // consequences from restructuring due to AVL balancing. This fold correctness relies
+        // on:
+        // (a) the `bool_leaf` always folding to `PartialHash::Present(...)` so its `prev_hash` is
+        // never substituted from the popped proof child.
+        // (b) the inner `VerifyNodeId` overrides the proof with its own captured sub-proof, before
+        // delegating to `Node::fold`. Otherwise, using `previous` could result in incorrect
+        // substitution.
         let mut node = builder.into_node_fold();
 
         let present = self.0.is_some();

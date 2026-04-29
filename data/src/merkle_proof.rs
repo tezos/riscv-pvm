@@ -20,6 +20,7 @@ use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
+use crate::merkle_proof::proof_tree::MerkleProof;
 
 /// Possible outcomes when parsing a node or a leaf from a Merkle proof
 /// where the leaf is assumed to have type `T`.
@@ -153,6 +154,21 @@ pub trait Deserialiser {
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode, Self::Error>;
+
+    /// Capture an owned snapshot of the proof at the current position, if available.
+    ///
+    /// Deserialisers backed by an in-memory proof tree (e.g. [`crate::merkle_proof::proof_tree`])
+    /// can clone their internal `MerkleProof`. Stream deserialisers cannot reconstruct the proof
+    /// without re-parsing, so they return `None` (the default).
+    ///
+    /// Used by verify-mode types (notably the AVL `VerifyNodeId` / `VerifyTreeId`) that need to
+    /// retain their original sub-proof so they can fold against it later, even after the working
+    /// tree has been structurally rearranged.
+    ///
+    /// TODO RV-994: Investigate avoiding the extra allocation required for this.
+    fn capture_owned_proof(&self) -> Option<MerkleProof> {
+        None
+    }
 }
 
 /// The trait used for deserialising a proof's node.
