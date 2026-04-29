@@ -32,7 +32,6 @@ workspace = true
 optional = true
 
 [dev-dependencies]
-paste.workspace = true
 proptest.workspace = true
 criterion.workspace = true
 octez-riscv-test-utils.workspace = true
