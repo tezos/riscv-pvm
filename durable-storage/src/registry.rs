@@ -408,6 +408,7 @@ pub(super) mod tests {
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::repo::RegistryRepo;
+    use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
     pub(super) fn setup_registry<KV: BackgroundKeyValueStore>(

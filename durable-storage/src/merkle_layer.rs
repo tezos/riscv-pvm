@@ -58,8 +58,6 @@ use crate::storage::Loadable;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
-#[cfg(test)]
-use crate::storage::TestKeyValueStoreSetup;
 
 /// A layer for transforming data into a Merkle-ised representation before commitment to a
 /// [`PersistentKeyValueStore`].
@@ -589,10 +587,8 @@ impl<KV> MerkleLayer<KV, Verify> {
 /// Construct a verify-mode [`MerkleLayer`] for an empty initial state. Used in tests that exercise
 /// verify-mode mutation primitives in isolation.
 #[cfg(test)]
-pub(crate) fn new_verify_layer<KV: KeyValueStore + TestKeyValueStoreSetup>()
--> MerkleLayer<KV, Verify> {
-    let (_keepalive, repo) = KV::setup_repo();
-    let normal_ml = new_merkle_layer::<KV>(&repo);
+pub(crate) fn new_verify_layer<KV: KeyValueStore>(repo: &KV::Repo) -> MerkleLayer<KV, Verify> {
+    let normal_ml = new_merkle_layer::<KV>(repo);
     let prove_ml = normal_ml.start_proof();
     let proof = MerkleProof::from_foldable(&prove_ml);
     MerkleLayer::from_proof(proof).expect("empty-tree proof should deserialise")
@@ -621,7 +617,6 @@ mod tests {
     use octez_riscv_data::mode::utils::catch_not_found;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
-    use proptest::proptest;
 
     use super::MerkleLayer;
     use super::MerkleLayerMode;
@@ -932,58 +927,60 @@ mod tests {
             .expect("the tree should be retrieved successfully.");
     });
 
-    kv_test!(test_mavl_cow_prop, KV, {
-        proptest!(|(keys1 in prop::collection::vec(any::<[u8; 2]>(), 0..500), keys2 in prop::collection::vec(any::<[u8; 2]>(), 0..500))| {
-            let data1 = bytes::Bytes::from("property");
-            let data2 = bytes::Bytes::from("cow");
+    kv_test!(test_mavl_cow_prop, KV,
+        setup |repo| = { KV::setup_repo() },
+    [
+        keys1 in prop::collection::vec(any::<[u8; 2]>(), 0..500),
+        keys2 in prop::collection::vec(any::<[u8; 2]>(), 0..500),
+    ], {
+        let data1 = bytes::Bytes::from("property");
+        let data2 = bytes::Bytes::from("cow");
 
-            let (_keepalive, repo) = KV::setup_repo();
-            let mut ml = new_merkle_layer::<KV>(&repo);
+        let mut ml = new_merkle_layer::<KV>(repo);
 
-            // Set all the keys in the tree
-            for bytes in &keys1 {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, &data1).expect("setting node should succeed");
-            }
+        // Set all the keys in the tree
+        for bytes in &keys1 {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            ml.set(&key, &data1).expect("setting node should succeed");
+        }
 
-            // Create a cheap copy
-            let original_hash = ml.hash();
-            let mut ml2 = ml.try_clone_with(ml.inner.persistence.clone());
+        // Create a cheap copy
+        let original_hash = ml.hash();
+        let mut ml2 = ml.try_clone_with(ml.inner.persistence.clone());
+        prop_assert_eq!(original_hash, ml2.hash());
+
+        // Delete all the keys in the copy
+        for bytes in &keys1 {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            ml2.delete(&key).expect("deleting node should succeed.");
+            prop_assert_eq!(ml2.get(&key).expect(""), None);
+        }
+
+        // Set new keys in the copy
+        for bytes in &keys2 {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            ml2.set(&key, &data2).expect("setting node should succeed");
+        }
+
+        if keys1.is_empty() && keys2.is_empty() {
             prop_assert_eq!(original_hash, ml2.hash());
+        } else {
+            prop_assert_ne!(original_hash, ml2.hash());
+        }
+        prop_assert_eq!(original_hash, ml.hash());
 
-            // Delete all the keys in the copy
-            for bytes in &keys1 {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml2.delete(&key).expect("deleting node should succeed.");
-                prop_assert_eq!(ml2.get(&key).expect(""), None);
-            }
+        // Check both trees are still correct
+        for bytes in &keys1 {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully").expect("The data should exist."), &data1);
+        }
+        for bytes in &keys2 {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            prop_assert_eq!(ml2.get(&key).expect("The node should be retrieved successfully").expect("The data should exist."), &data2);
+        }
 
-            // Set new keys in the copy
-            for bytes in &keys2 {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml2.set(&key, &data2).expect("setting node should succeed");
-            }
-
-            if keys1.is_empty() && keys2.is_empty() {
-                prop_assert_eq!(original_hash, ml2.hash());
-            } else {
-                prop_assert_ne!(original_hash, ml2.hash());
-            }
-            prop_assert_eq!(original_hash, ml.hash());
-
-            // Check both trees are still correct
-            for bytes in &keys1 {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully").expect("The data should exist."), &data1);
-            }
-            for bytes in &keys2 {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                prop_assert_eq!(ml2.get(&key).expect("The node should be retrieved successfully").expect("The data should exist."), &data2);
-            }
-
-            ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
-            ml2.tree().check(&ml2.inner.resolver).expect("the tree should be retrieved successfully.");
-        });
+        ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
+        ml2.tree().check(&ml2.inner.resolver).expect("the tree should be retrieved successfully.");
     });
 
     kv_test!(test_mavl_create, KV, {
@@ -1249,29 +1246,30 @@ mod tests {
         }
     });
 
-    kv_test!(test_mavl_create_prop, KV, {
-        proptest!(|(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500))| {
-            let data = bytes::Bytes::from("property");
-            let (_keepalive, repo) = KV::setup_repo();
-            let mut ml = new_merkle_layer::<KV>(&repo);
-            let old_hash = ml.hash();
+    kv_test!(test_mavl_create_prop, KV,
+        setup |repo| = { KV::setup_repo() },
+    [
+        keys in prop::collection::vec(any::<[u8; 2]>(), 0..500),
+    ], {
+        let data = bytes::Bytes::from("property");
+        let mut ml = new_merkle_layer::<KV>(repo);
+        let old_hash = ml.hash();
 
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, &data).expect("setting node should succeed");
-            }
+        for bytes in &keys {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            ml.set(&key, &data).expect("setting node should succeed");
+        }
 
-            if !keys.is_empty() {
-                assert_ne!(old_hash, ml.hash());
-            }
+        if !keys.is_empty() {
+            assert_ne!(old_hash, ml.hash());
+        }
 
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully").expect("The data should exist."), &data);
-            }
+        for bytes in &keys {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully").expect("The data should exist."), &data);
+        }
 
-            ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
-        });
+        ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
     });
 
     kv_test!(test_mavl_delete, KV, {
@@ -1297,32 +1295,33 @@ mod tests {
             .expect("the tree should be retrieved successfully.");
     });
 
-    kv_test!(test_mavl_delete_prop, KV, {
-        proptest!(|(keys in prop::collection::vec(any::<[u8; 2]>(), 0..500))| {
-            let data = bytes::Bytes::from("delete_prop");
-            let (_keepalive, repo) = KV::setup_repo();
-            let mut ml = new_merkle_layer::<KV>(&repo);
-            let empty_hash = ml.hash();
+    kv_test!(test_mavl_delete_prop, KV,
+        setup |repo| = { KV::setup_repo() },
+    [
+        keys in prop::collection::vec(any::<[u8; 2]>(), 0..500),
+    ], {
+        let data = bytes::Bytes::from("delete_prop");
+        let mut ml = new_merkle_layer::<KV>(repo);
+        let empty_hash = ml.hash();
 
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, &data).expect("setting node should succeed");
-            }
+        for bytes in &keys {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            ml.set(&key, &data).expect("setting node should succeed");
+        }
 
-            if !keys.is_empty() {
-                prop_assert_ne!(empty_hash, ml.hash());
-            }
+        if !keys.is_empty() {
+            prop_assert_ne!(empty_hash, ml.hash());
+        }
 
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.delete(&key).expect("delete should succeed.");
-                prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully."), None);
-            }
+        for bytes in &keys {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            ml.delete(&key).expect("delete should succeed.");
+            prop_assert_eq!(ml.get(&key).expect("The node should be retrieved successfully."), None);
+        }
 
-            prop_assert_eq!(empty_hash, ml.hash());
+        prop_assert_eq!(empty_hash, ml.hash());
 
-            ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
-        });
+        ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
     });
 
     fn test_mavl_delete_keys<KV: KeyValueStore>(repo: &KV::Repo, keys: &[Key]) {
@@ -1556,42 +1555,43 @@ mod tests {
             .expect("the tree should be retrieved successfully.");
     });
 
-    kv_test!(test_mavl_write_prop, KV, {
-        proptest!(|(keys in prop::collection::vec(any::<[u8; 2]>(), 0..10))| {
-            let data = bytes::Bytes::from(vec![0; 500]);
-            let alternating = bytes::Bytes::from([1, 0]
-                .iter()
-                .cycle()
-                .take(500)
-                .cloned()
-                .collect::<Vec<_>>());
+    kv_test!(test_mavl_write_prop, KV,
+        setup |repo| = { KV::setup_repo() },
+    [
+        keys in prop::collection::vec(any::<[u8; 2]>(), 0..10),
+    ], {
+        let data = bytes::Bytes::from(vec![0; 500]);
+        let alternating = bytes::Bytes::from([1, 0]
+            .iter()
+            .cycle()
+            .take(500)
+            .cloned()
+            .collect::<Vec<_>>());
 
-            let (_keepalive, repo) = KV::setup_repo();
-            let mut ml = new_merkle_layer::<KV>(&repo);
-            let old_hash = ml.hash();
+        let mut ml = new_merkle_layer::<KV>(repo);
+        let old_hash = ml.hash();
 
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                ml.set(&key, &data).expect("setting node should succeed");
-                for offset in 0..250 {
-                    ml.write(&key, offset * 2, &[1]).expect("write should succeed.");
-                }
+        for bytes in &keys {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            ml.set(&key, &data).expect("setting node should succeed");
+            for offset in 0..250 {
+                ml.write(&key, offset * 2, &[1]).expect("write should succeed.");
             }
+        }
 
-            if !keys.is_empty() {
-                assert_ne!(old_hash, ml.hash());
-            }
+        if !keys.is_empty() {
+            assert_ne!(old_hash, ml.hash());
+        }
 
-            for bytes in &keys {
-                let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
-                prop_assert_eq!(ml.get(&key)
-                                .expect("The node should be retrieved successfully")
-                                .expect("The data should exist."),
-                                &alternating);
-            }
+        for bytes in &keys {
+            let key = Key::new(bytes).expect("Sizes less than KEY_MAX_SIZE");
+            prop_assert_eq!(ml.get(&key)
+                            .expect("The node should be retrieved successfully")
+                            .expect("The data should exist."),
+                            &alternating);
+        }
 
-            ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
-        });
+        ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
     });
 
     #[derive(Debug, Clone)]
@@ -1636,93 +1636,94 @@ mod tests {
             })
     }
 
-    kv_test!(test_merkle_layer_checkout_lazy_from_commit, KV: PersistentKeyValueStore, {
-        proptest!(|(operations in (1usize..100usize).prop_flat_map(generated_operations_strategy))| {
-            use std::collections::BTreeMap;
-            use std::collections::BTreeSet;
+    kv_test!(test_merkle_layer_checkout_lazy_from_commit, KV: PersistentKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        operations in (1usize..100usize).prop_flat_map(generated_operations_strategy),
+    ], {
+        use std::collections::BTreeMap;
+        use std::collections::BTreeSet;
 
-            let (_keepalive, repo) = KV::setup_repo();
-            let persistence: Arc<KV> = KV::new(&repo)
-                .expect("Creating a persistence layer should succeed")
-                .into();
+        let persistence: Arc<KV> = KV::new(repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
 
-            let mut merkle_layer = MerkleLayer::new(persistence.clone());
-            let mut reference: BTreeMap<Key, Vec<u8>> = BTreeMap::new();
-            let mut touched: BTreeSet<Key> = BTreeSet::new();
+        let mut merkle_layer = MerkleLayer::new(persistence.clone());
+        let mut reference: BTreeMap<Key, Vec<u8>> = BTreeMap::new();
+        let mut touched: BTreeSet<Key> = BTreeSet::new();
 
-            for operation in operations {
-                match operation {
-                    GeneratedOperation::Set(bytes, value) => {
-                        let key = Key::new(&bytes).expect("Size less than KEY_MAX_SIZE");
-                        merkle_layer
-                            .set(&key, &value)
-                            .expect("Set operation should succeed");
-                        reference.insert(key.clone(), value);
-                        touched.insert(key);
-                    }
-                    GeneratedOperation::Write(bytes, value, offset_hint) => {
-                        let key = Key::new(&bytes).expect("Size less than KEY_MAX_SIZE");
-                        let offset = match reference.get(&key) {
-                            Some(existing) if !existing.is_empty() => {
-                                1 + (offset_hint as usize % existing.len())
-                            }
-                            _ => 0,
-                        };
-
-                        merkle_layer
-                            .write(&key, offset, &value)
-                            .expect("Write operation should succeed");
-
-                        let entry = reference.entry(key.clone()).or_default();
-                        let new_len = offset
-                            .checked_add(value.len())
-                            .expect("Generated offset and value length should not overflow");
-                        if entry.len() < new_len {
-                            entry.resize(new_len, 0);
+        for operation in operations {
+            match operation {
+                GeneratedOperation::Set(bytes, value) => {
+                    let key = Key::new(&bytes).expect("Size less than KEY_MAX_SIZE");
+                    merkle_layer
+                        .set(&key, &value)
+                        .expect("Set operation should succeed");
+                    reference.insert(key.clone(), value);
+                    touched.insert(key);
+                }
+                GeneratedOperation::Write(bytes, value, offset_hint) => {
+                    let key = Key::new(&bytes).expect("Size less than KEY_MAX_SIZE");
+                    let offset = match reference.get(&key) {
+                        Some(existing) if !existing.is_empty() => {
+                            1 + (offset_hint as usize % existing.len())
                         }
-                        entry[offset..new_len].copy_from_slice(&value);
-                        touched.insert(key);
+                        _ => 0,
+                    };
+
+                    merkle_layer
+                        .write(&key, offset, &value)
+                        .expect("Write operation should succeed");
+
+                    let entry = reference.entry(key.clone()).or_default();
+                    let new_len = offset
+                        .checked_add(value.len())
+                        .expect("Generated offset and value length should not overflow");
+                    if entry.len() < new_len {
+                        entry.resize(new_len, 0);
                     }
-                    GeneratedOperation::Delete(bytes) => {
-                        let key = Key::new(&bytes).expect("Sizes less than KEY_MAX_SIZE");
-                        merkle_layer
-                            .delete(&key)
-                            .expect("Delete operation should succeed");
-                        reference.remove(&key);
-                        touched.insert(key);
-                    }
+                    entry[offset..new_len].copy_from_slice(&value);
+                    touched.insert(key);
+                }
+                GeneratedOperation::Delete(bytes) => {
+                    let key = Key::new(&bytes).expect("Sizes less than KEY_MAX_SIZE");
+                    merkle_layer
+                        .delete(&key)
+                        .expect("Delete operation should succeed");
+                    reference.remove(&key);
+                    touched.insert(key);
                 }
             }
+        }
 
-            let expected_hash = merkle_layer.hash();
-            let commit_opts = crate::storage::StoreOptions::default().with_deep().with_node_data();
-            let commit_id = merkle_layer.commit(&commit_opts).expect("Commit operation should succeed");
+        let expected_hash = merkle_layer.hash();
+        let commit_opts = crate::storage::StoreOptions::default().with_deep().with_node_data();
+        let commit_id = merkle_layer.commit(&commit_opts).expect("Commit operation should succeed");
 
-            let mut lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
-                .expect("Lazy checkout should succeed");
-            let loaded_hash = lazy_loaded.hash();
+        let mut lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
+            .expect("Lazy checkout should succeed");
+        let loaded_hash = lazy_loaded.hash();
 
-            prop_assert_eq!(loaded_hash, expected_hash);
+        prop_assert_eq!(loaded_hash, expected_hash);
 
-            for key in touched {
-                let expected = reference.get(&key);
-                let loaded = lazy_loaded
-                    .get(&key)
-                    .expect("Lookup in lazy-loaded tree should succeed");
+        for key in touched {
+            let expected = reference.get(&key);
+            let loaded = lazy_loaded
+                .get(&key)
+                .expect("Lookup in lazy-loaded tree should succeed");
 
-                match (expected, loaded) {
-                    (Some(expected), Some(loaded)) => {
-                        let mut loaded_bytes = vec![0; loaded.len()];
-                        let bytes_read = loaded.read(0, &mut loaded_bytes);
-                        prop_assert_eq!(bytes_read, loaded_bytes.len());
-                        prop_assert_eq!(loaded_bytes.as_slice(), expected.as_slice());
-                    }
-                    (None, None) => {}
-                    (Some(_), None) => panic!("Expected an existing key in lazy-loaded tree: {key:?}"),
-                    (None, Some(_)) => panic!("Expected a missing key in lazy-loaded tree: {key:?}"),
+            match (expected, loaded) {
+                (Some(expected), Some(loaded)) => {
+                    let mut loaded_bytes = vec![0; loaded.len()];
+                    let bytes_read = loaded.read(0, &mut loaded_bytes);
+                    prop_assert_eq!(bytes_read, loaded_bytes.len());
+                    prop_assert_eq!(loaded_bytes.as_slice(), expected.as_slice());
                 }
+                (None, None) => {}
+                (Some(_), None) => panic!("Expected an existing key in lazy-loaded tree: {key:?}"),
+                (None, Some(_)) => panic!("Expected a missing key in lazy-loaded tree: {key:?}"),
             }
-        });
+        }
     });
 
     // - Add some data to the Merkle layer.
@@ -1966,7 +1967,8 @@ mod tests {
     kv_test!(test_verify_delete, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>(&repo);
         ml.delete(&key)
             .expect("deleting a key that doesn't exist should succeed");
 
@@ -1985,7 +1987,8 @@ mod tests {
             .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
         let data: [&[u8]; 3] = [b"too cold", b"too hot", b"just right"];
 
-        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>(&repo);
         for (key, datum) in keys.iter().zip(data.iter()) {
             ml.set(key, datum).expect("setting node should succeed");
         }
@@ -2002,12 +2005,12 @@ mod tests {
     kv_test!(test_verify_try_clone_with_cow, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>(&repo);
         let cow_data = "🐮<(verify a moo!)";
         ml.set(&key, cow_data.as_bytes())
             .expect("setting node should succeed");
 
-        let (_keepalive, repo) = KV::setup_repo();
         let kv: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
@@ -2035,7 +2038,8 @@ mod tests {
     kv_test!(test_verify_write_partial, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>(&repo);
         ml.set(&key, b"partial")
             .expect("setting node should succeed");
         ml.write(&key, 4, b"ying").expect("write should succeed");
@@ -2181,127 +2185,134 @@ mod tests {
         );
     });
 
-    kv_test!(prove_verify_round_trips_mixed, KV, {
-        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), seed in 0..100usize)| {
-            let keys: Vec<Key> = setup_keys
-                .iter()
-                .map(|b| Key::new(b).expect("key should be valid"))
-                .collect();
+    kv_test!(prove_verify_round_trips_mixed, KV,
+    [
+        setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
+        seed in 0..100usize,
+    ], {
+        let keys: Vec<Key> = setup_keys
+            .iter()
+            .map(|b| Key::new(b).expect("key should be valid"))
+            .collect();
 
-            let mut operations = Vec::new();
-            // TODO RV-985: Expand to more operations in each test.
-            // This is currently limited to one operation, as this is the minimum requirement,
-            // and proof semantics are not supported for more than one operation yet.
-            let ops_count = 1;
-            for i in 0..ops_count {
-                let key = keys[i % keys.len()].clone();
-                let data = vec![seed as u8; 5];
-                match (i + seed) % 3 {
-                    0 => operations.push(Operation::Set(key, data)),
-                    1 => operations.push(Operation::Delete(key)),
-                    _ => {
-                        // All setup keys have data set to 10 bytes long.
-                        // Data length is 5 bytes, so valid offsets are 0..=5.
-                        let offset = (i + seed) % 5;
-                        operations.push(Operation::Write(key, offset, data));
-                    }
+        let mut operations = Vec::new();
+        // TODO RV-985: Expand to more operations in each test.
+        // This is currently limited to one operation, as this is the minimum requirement,
+        // and proof semantics are not supported for more than one operation yet.
+        let ops_count = 1;
+        for i in 0..ops_count {
+            let key = keys[i % keys.len()].clone();
+            let data = vec![seed as u8; 5];
+            match (i + seed) % 3 {
+                0 => operations.push(Operation::Set(key, data)),
+                1 => operations.push(Operation::Delete(key)),
+                _ => {
+                    // All setup keys have data set to 10 bytes long.
+                    // Data length is 5 bytes, so valid offsets are 0..=5.
+                    let offset = (i + seed) % 5;
+                    operations.push(Operation::Write(key, offset, data));
                 }
             }
+        }
 
-            assert_prove_mode_correct::<KV>(&setup_keys, &operations);
-        });
+        assert_prove_mode_correct::<KV>(&setup_keys, &operations);
     });
 
-    kv_test!(prove_verify_round_trips_writes_only, KV, {
-        // no structural change as every key already exists.
-        proptest!(|(
-            setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
-            // Setup keys are written with their own 2-byte representation as data, so the only
-            // valid offsets for an in-place / appending write are 0..=2.
-            offsets in prop::collection::vec(0usize..=2, 1..30),
-        )| {
-            let keys: Vec<Key> = setup_keys
-                .iter()
-                .map(|b| Key::new(b).expect("key should be valid"))
-                .collect();
+    // no structural change as every key already exists.
+    kv_test!(prove_verify_round_trips_writes_only, KV,
+    [
+        setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
+        // Setup keys are written with their own 2-byte representation as data, so the only
+        // valid offsets for an in-place / appending write are 0..=2.
+        offsets in prop::collection::vec(0usize..=2, 1..30),
+    ], {
+        let keys: Vec<Key> = setup_keys
+            .iter()
+            .map(|b| Key::new(b).expect("key should be valid"))
+            .collect();
 
-            let step_ops: Vec<Operation> = keys
-                .iter()
-                .enumerate()
-                .map(|(i, key)| {
-                    let offset = offsets[i % offsets.len()];
-                    Operation::Write(key.clone(), offset, vec![0xAA; 1 + (i % 8)])
-                })
-                .collect();
+        let step_ops: Vec<Operation> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| {
+                let offset = offsets[i % offsets.len()];
+                Operation::Write(key.clone(), offset, vec![0xAA; 1 + (i % 8)])
+            })
+            .collect();
 
-            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
-        });
+        assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
     });
 
-    kv_test!(prove_verify_round_trips_deletes_only, KV, {
-        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), delete_indices in prop::collection::vec(any::<usize>(), 1..10))| {
-            let keys: Vec<Key> = setup_keys
-                .iter()
-                .map(|b| Key::new(b).expect("key should be valid"))
-                .collect();
+    kv_test!(prove_verify_round_trips_deletes_only, KV,
+    [
+        setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
+        delete_indices in prop::collection::vec(any::<usize>(), 1..10),
+    ], {
+        let keys: Vec<Key> = setup_keys
+            .iter()
+            .map(|b| Key::new(b).expect("key should be valid"))
+            .collect();
 
-            let step_ops: Vec<Operation> = delete_indices
-                .iter()
-                .map(|&i| Operation::Delete(keys[i % keys.len()].clone()))
-                .collect();
+        let step_ops: Vec<Operation> = delete_indices
+            .iter()
+            .map(|&i| Operation::Delete(keys[i % keys.len()].clone()))
+            .collect();
 
-            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
-        });
+        assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
     });
 
-    kv_test!(prove_verify_round_trips_insertions, KV, {
-        // prove_verify_insertions: sets on new keys (insertions + rotations)
-        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..20), new_keys in prop::collection::vec(any::<[u8; 2]>(), 1..10))| {
-            let step_ops: Vec<Operation> = new_keys
-                .iter()
-                // ensure we don't accidentally mix insertions with overwritting old keys
-                // - the proof system doesn't currently support this
-                // TODO (RV-985): remove this line
-                .filter(|bytes| !setup_keys.contains(bytes))
-                .enumerate()
-                .map(|(i, bytes)| {
-                    let key = Key::new(bytes).expect("key should be valid");
-                    Operation::Set(key, vec![0xBB; 1 + (i % 8)])
-                })
-                .collect();
-
-            assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
-        });
-    });
-
-    kv_test!(prove_verify_round_trip_reads_only, KV, {
-        proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30), read_indices in prop::collection::vec(any::<usize>(), 1..15))| {
-            let (_keepalive, repo) = KV::setup_repo();
-            let mut normal_ml = new_merkle_layer::<KV>(&repo);
-
-            for bytes in &setup_keys {
+    // prove_verify_insertions: sets on new keys (insertions + rotations)
+    kv_test!(prove_verify_round_trips_insertions, KV,
+    [
+        setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..20),
+        new_keys in prop::collection::vec(any::<[u8; 2]>(), 1..10),
+    ], {
+        let step_ops: Vec<Operation> = new_keys
+            .iter()
+            // ensure we don't accidentally mix insertions with overwritting old keys
+            // - the proof system doesn't currently support this
+            // TODO (RV-985): remove this line
+            .filter(|bytes| !setup_keys.contains(bytes))
+            .enumerate()
+            .map(|(i, bytes)| {
                 let key = Key::new(bytes).expect("key should be valid");
-                normal_ml.set(&key, bytes).expect("set should succeed");
-            }
+                Operation::Set(key, vec![0xBB; 1 + (i % 8)])
+            })
+            .collect();
 
-            let normal_hash = normal_ml.hash();
-            let prove_ml = normal_ml.start_proof();
+        assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
+    });
 
-            for &i in &read_indices {
-                let key = Key::new(&setup_keys[i % setup_keys.len()]).expect("key should be valid");
-                let _ = prove_ml.get(&key).expect("get should succeed");
-            }
+    kv_test!(prove_verify_round_trip_reads_only, KV,
+    [
+        setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
+        read_indices in prop::collection::vec(any::<usize>(), 1..15),
+    ], {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut normal_ml = new_merkle_layer::<KV>(&repo);
 
-            prop_assert_eq!(
-                normal_hash,
-                prove_ml.hash(),
-            );
+        for bytes in &setup_keys {
+            let key = Key::new(bytes).expect("key should be valid");
+            normal_ml.set(&key, bytes).expect("set should succeed");
+        }
 
-            let proof = MerkleProof::from_foldable(&prove_ml);
-            prop_assert_eq!(
-                normal_hash,
-                proof.root_hash(),
-            );
-        });
+        let normal_hash = normal_ml.hash();
+        let prove_ml = normal_ml.start_proof();
+
+        for &i in &read_indices {
+            let key = Key::new(&setup_keys[i % setup_keys.len()]).expect("key should be valid");
+            let _ = prove_ml.get(&key).expect("get should succeed");
+        }
+
+        prop_assert_eq!(
+            normal_hash,
+            prove_ml.hash(),
+        );
+
+        let proof = MerkleProof::from_foldable(&prove_ml);
+        prop_assert_eq!(
+            normal_hash,
+            proof.root_hash(),
+        );
     });
 }

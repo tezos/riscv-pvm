@@ -312,6 +312,7 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::MerkleWorker;
+    use crate::storage::KeyValueStore;
     use crate::storage::kv_test;
 
     fn key_strategy() -> impl Strategy<Value = Key> {
@@ -451,31 +452,33 @@ mod tests {
         }
     }
 
-    kv_test!(commands, KV: super::BackgroundPersistentKeyValueStore, {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
+    kv_test!(commands, KV: super::BackgroundPersistentKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        commands in proptest::collection::vec(TestCommand::strategy(), 1..100),
+    ], {
+        let persistence_layer = KV::new(repo).expect("Creating a persistence layer should succeed");
+        let persistence_layer = Arc::new(persistence_layer);
+        let mut merkle_layer = MerkleLayer::new(persistence_layer);
 
-        let (_keepalive, repo) = KV::setup_repo();
+        let persistence_worker = KV::new(repo).expect("Creating a persistence layer should succeed");
+        let persistence_worker = Arc::new(persistence_worker);
+        let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
 
-        proptest::proptest!(|(commands in proptest::collection::vec(TestCommand::strategy(), 1..100))| {
-            let persistence_layer = KV::new(&repo).expect("Creating a persistence layer should succeed");
-            let persistence_layer = Arc::new(persistence_layer);
-            let mut merkle_layer = MerkleLayer::new(persistence_layer);
+        for command in commands {
+            command.run::<KV>(handle, repo, &mut merkle_worker, &mut merkle_layer);
+        }
 
-            let persistence_worker = KV::new(&repo).expect("Creating a persistence layer should succeed");
-            let persistence_worker = Arc::new(persistence_worker);
-            let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
-
-            for command in commands {
-                command.run::<KV>(handle, &repo, &mut merkle_worker, &mut merkle_layer);
-            }
-
-            let layer_hash = merkle_layer.hash();
-            let worker_hash = merkle_worker.hash().unwrap();
-            prop_assert_eq!(layer_hash, worker_hash);
-        });
+        let layer_hash = merkle_layer.hash();
+        let worker_hash = merkle_worker.hash().unwrap();
+        prop_assert_eq!(layer_hash, worker_hash);
     });
 }

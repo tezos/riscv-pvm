@@ -479,7 +479,6 @@ mod tests {
     use octez_riscv_data::mode::Verify;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
-    use proptest::proptest;
     use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
     use tokio::runtime::Handle;
 
@@ -493,6 +492,7 @@ mod tests {
     use crate::merkle_layer::new_verify_layer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+    use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
@@ -503,14 +503,15 @@ mod tests {
         Database::try_new(handle, repo).expect("Creating a test database should succeed")
     }
 
-    fn new_verify_database<KV: TestKeyValueStoreSetup>() -> Database<KV, Verify> {
+    fn new_verify_database<KV: KeyValueStore>(repo: &KV::Repo) -> Database<KV, Verify> {
         Database {
             inner: super::VerifyImpl {
-                merkle: new_verify_layer::<KV>(),
+                merkle: new_verify_layer::<KV>(repo),
             },
         }
     }
 
+    #[cfg(feature = "rocksdb")]
     fn new_persistent_database<KV>() -> (
         tokio::runtime::Runtime,
         KV::Keepalive,
@@ -559,59 +560,67 @@ mod tests {
         ));
     }
 
-    kv_test!(test_database_commit_and_checkout, KV: BackgroundPersistentKeyValueStore, {
-        let (runtime, _keepalive, repo, _database) = new_persistent_database::<KV>();
-        let handle = runtime.handle();
-        proptest!(|(
-            entries in prop::collection::vec(
-                (prop::collection::vec(any::<u8>(), 1..=KEY_MAX_SIZE),
-                 prop::collection::vec(any::<u8>(), 0..200)),
-                1..50,
-            ),
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
-            let expected = insert_entries(&mut database, entries);
+    kv_test!(test_database_commit_and_checkout, KV: BackgroundPersistentKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        entries in prop::collection::vec(
+            (prop::collection::vec(any::<u8>(), 1..=KEY_MAX_SIZE),
+             prop::collection::vec(any::<u8>(), 0..200)),
+            1..50,
+        ),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
+        let expected = insert_entries(&mut database, entries);
 
-            let expected_hash = database.hash().expect("Hash should be calculated");
-            let commit_id = database.commit(&repo).expect("Commit should succeed");
+        let expected_hash = database.hash().expect("Hash should be calculated");
+        let commit_id = database.commit(repo).expect("Commit should succeed");
 
-            let checked_out = Database::<KV, _>::checkout(handle, &repo, commit_id)
-                .expect("Checkout should succeed");
+        let checked_out = Database::<KV, _>::checkout(handle, repo, commit_id)
+            .expect("Checkout should succeed");
 
-            prop_assert_eq!(checked_out.hash().expect("Hash should be calculated"), expected_hash);
+        prop_assert_eq!(checked_out.hash().expect("Hash should be calculated"), expected_hash);
 
-            for (key, value) in expected {
-                checked_out.assert_database_value(&key, value.as_ref());
-            }
-        });
+        for (key, value) in expected {
+            checked_out.assert_database_value(&key, value.as_ref());
+        }
     });
 
-    kv_test!(test_database_delete, KV: BackgroundKeyValueStore, {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let (_keepalive, repo) = KV::setup_repo();
-        proptest!(|(
-            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
-            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100)
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
+    kv_test!(test_database_delete, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+        data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
 
-            for (key, data) in keys.iter().zip(data.iter()) {
-                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                database
-                    .set(key.clone(), Bytes::copy_from_slice(data))
-                    .expect("Writing should succeed");
-                prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
+        for (key, data) in keys.iter().zip(data.iter()) {
+            let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+            database
+                .set(key.clone(), Bytes::copy_from_slice(data))
+                .expect("Writing should succeed");
+            prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
 
-                let before = database.hash().expect("Hash should be calculated");
-                database.delete(key.clone()).expect("Deleting should succeed");
-                let after = database.hash().expect("Hash should be calculated");
-                assert_ne!(before, after);
-                prop_assert!(!database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
-            }
-        });
+            let before = database.hash().expect("Hash should be calculated");
+            database.delete(key.clone()).expect("Deleting should succeed");
+            let after = database.hash().expect("Hash should be calculated");
+            assert_ne!(before, after);
+            prop_assert!(!database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
+        }
     });
 
     kv_test!(test_database_delete_nonexistent, KV: BackgroundKeyValueStore, {
@@ -761,72 +770,76 @@ mod tests {
         ));
     });
 
-    kv_test!(test_database_exists, KV: BackgroundKeyValueStore, {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let (_keepalive, repo) = KV::setup_repo();
-        proptest!(|(
-            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100)
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
+    kv_test!(test_database_exists, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+        data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
 
-            let mut seen = HashSet::new();
+        let mut seen = HashSet::new();
 
-            for (key, data) in keys.iter().zip(data.iter()) {
-                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let data: &[u8] = data;
+        for (key, data) in keys.iter().zip(data.iter()) {
+            let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+            let data: &[u8] = data;
 
-                prop_assert_ne!(database.exists(&key)
-                        .expect("There should be no other `PersistenceLayerError`s"),
-                    seen.insert(key.clone()));
+            prop_assert_ne!(database.exists(&key)
+                    .expect("There should be no other `PersistenceLayerError`s"),
+                seen.insert(key.clone()));
 
-                database
-                    .set(key.clone(), Bytes::copy_from_slice(data))
-                    .expect("Writing should succeed");
-                prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
-            }
-        });
+            database
+                .set(key.clone(), Bytes::copy_from_slice(data))
+                .expect("Writing should succeed");
+            prop_assert!(database.exists(&key).expect("There should be no other `PersistenceLayerError`s"));
+        }
     });
 
-    kv_test!(test_database_hash, KV: BackgroundKeyValueStore, {
-        // Needs a thread for sending and a thread for receiving
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let (_keepalive, repo) = KV::setup_repo();
-        proptest!(|(
-            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
-            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100)
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
+    kv_test!(test_database_hash, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            // Needs a thread for sending and a thread for receiving
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE), 0..100),
+        data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..100),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
 
-            let mut seen = HashSet::new();
+        let mut seen = HashSet::new();
 
-            for (key, data) in keys.iter().zip(data.iter()) {
-                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let data: &[u8] = data;
+        for (key, data) in keys.iter().zip(data.iter()) {
+            let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+            let data: &[u8] = data;
 
-                let before = database.hash().expect("Hash should be calculated");
+            let before = database.hash().expect("Hash should be calculated");
 
-                database
-                    .set(key.clone(), Bytes::copy_from_slice(data))
-                    .expect("Writing should succeed");
+            database
+                .set(key.clone(), Bytes::copy_from_slice(data))
+                .expect("Writing should succeed");
 
-                let after = database.hash().expect("Hash should be calculated");
+            let after = database.hash().expect("Hash should be calculated");
 
-                let existing_pair = !seen.insert((key, data));
-                // Avoid the edge case of an identical hash from a previously seen identical
-                // key-value pair, where no other keys were written to in between.
-                if !existing_pair {
-                    prop_assert_ne!(before, after);
-                }
+            let existing_pair = !seen.insert((key, data));
+            // Avoid the edge case of an identical hash from a previously seen identical
+            // key-value pair, where no other keys were written to in between.
+            if !existing_pair {
+                prop_assert_ne!(before, after);
             }
-        });
+        }
     });
 
     kv_test!(test_database_hash_revert, KV: BackgroundKeyValueStore, {
@@ -866,124 +879,128 @@ mod tests {
         assert_eq!(before, reverted);
     });
 
-    kv_test!(test_database_read, KV: BackgroundKeyValueStore, {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let (_keepalive, repo) = KV::setup_repo();
-        proptest!(|(
-            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100)
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
+    kv_test!(test_database_read, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+        data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
 
-            for (key, data) in keys.iter().zip(data.iter()) {
-                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let mut read_data: [u8; 100] = [42; 100];
+        for (key, data) in keys.iter().zip(data.iter()) {
+            let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+            let mut read_data: [u8; 100] = [42; 100];
 
-                let read_data_before = read_data;
+            let read_data_before = read_data;
 
-                // Set the data
+            // Set the data
+            database
+                .set(key.clone(), Bytes::copy_from_slice(data))
+                .expect("Setting should succeed");
+
+            // The offset is bigger than the value
+            prop_assert!(database.read(&key, data.len() + 1, read_data.as_mut_slice()).is_err());
+            prop_assert_eq!(read_data, read_data_before);
+
+            // Partial value write, where the output parameter is smaller than the data.
+            prop_assert_eq!(
                 database
-                    .set(key.clone(), Bytes::copy_from_slice(data))
-                    .expect("Setting should succeed");
+                    .read(&key, 0, read_data[1..data.len()].as_mut())
+                    .expect(
+                        "Reading a value larger than the output parameter's size should succeed"
+                    ),
+                data.len() - 1
+            );
+            prop_assert_eq!(read_data[0], read_data_before[0]);
+            prop_assert_eq!(&read_data[1..data.len()], &data[..data.len() - 1]);
+            prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
+            let read_data_before = read_data;
 
-                // The offset is bigger than the value
-                prop_assert!(database.read(&key, data.len() + 1, read_data.as_mut_slice()).is_err());
-                prop_assert_eq!(read_data, read_data_before);
+            let read = database
+                .read(&key, data.len(), read_data.as_mut_slice())
+                .expect("A zero-sized write should succeed");
+            prop_assert_eq!(read, 0);
+            prop_assert_eq!(read_data, read_data_before);
 
-                // Partial value write, where the output parameter is smaller than the data.
-                prop_assert_eq!(
-                    database
-                        .read(&key, 0, read_data[1..data.len()].as_mut())
-                        .expect(
-                            "Reading a value larger than the output parameter's size should succeed"
-                        ),
-                    data.len() - 1
-                );
-                prop_assert_eq!(read_data[0], read_data_before[0]);
-                prop_assert_eq!(&read_data[1..data.len()], &data[..data.len() - 1]);
-                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
-                let read_data_before = read_data;
+            // Whole value write
+            let read = database
+                .read(&key, 0, read_data.as_mut_slice())
+                .expect("Writing the whole value should succeed");
+            prop_assert_eq!(read, data.len());
+            prop_assert_eq!(&read_data[..data.len()], data.as_slice());
+            prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
 
-                let read = database
-                    .read(&key, data.len(), read_data.as_mut_slice())
-                    .expect("A zero-sized write should succeed");
-                prop_assert_eq!(read, 0);
-                prop_assert_eq!(read_data, read_data_before);
+            // Partial value write
+            prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
+            let read = database
+                .read(&key, data.len() - 1, read_data[1..2].as_mut())
+                .expect("A partial write should succeed");
+            prop_assert_eq!(read, 1);
+            prop_assert_eq!(&read_data[1..2], &data[data.len() - 1..]);
+            prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
+            prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
 
-                // Whole value write
-                let read = database
-                    .read(&key, 0, read_data.as_mut_slice())
-                    .expect("Writing the whole value should succeed");
-                prop_assert_eq!(read, data.len());
-                prop_assert_eq!(&read_data[..data.len()], data.as_slice());
-                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
-
-                // Partial value write
-                prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
-                let read = database
-                    .read(&key, data.len() - 1, read_data[1..2].as_mut())
-                    .expect("A partial write should succeed");
-                prop_assert_eq!(read, 1);
-                prop_assert_eq!(&read_data[1..2], &data[data.len() - 1..]);
-                prop_assert_eq!(&read_data[2..data.len()], &data[2..]);
-                prop_assert_eq!(&read_data[data.len()..], &read_data_before[data.len()..]);
-
-                // Write limited by buffer
-                let mut small_buffer: [u8; 3] = [0, 0 ,0];
-                let read = database
-                    .read(&key, 0, small_buffer.as_mut_slice())
-                    .expect("Writing into a smaller buffer should succeed");
-                prop_assert_eq!(read, small_buffer.len());
-                prop_assert_eq!(&small_buffer, &data[0..3]);
-            }
-        });
+            // Write limited by buffer
+            let mut small_buffer: [u8; 3] = [0, 0 ,0];
+            let read = database
+                .read(&key, 0, small_buffer.as_mut_slice())
+                .expect("Writing into a smaller buffer should succeed");
+            prop_assert_eq!(read, small_buffer.len());
+            prop_assert_eq!(&small_buffer, &data[0..3]);
+        }
     });
 
-    kv_test!(test_database_read_bytes, KV: BackgroundKeyValueStore, {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let (_keepalive, repo) = KV::setup_repo();
-        proptest!(|(
-            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100)
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
+    kv_test!(test_database_read_bytes, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+        data in prop::collection::vec(prop::collection::vec(any::<u8>(), 3..100), 0..100),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
 
-            for (key, data) in keys.iter().zip(data.iter()) {
-                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+        for (key, data) in keys.iter().zip(data.iter()) {
+            let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
 
-                // Set the data
-                database
-                    .set(key.clone(), Bytes::copy_from_slice(data))
-                    .expect("Setting should succeed");
+            // Set the data
+            database
+                .set(key.clone(), Bytes::copy_from_slice(data))
+                .expect("Setting should succeed");
 
-                // The offset is bigger than the value
-                prop_assert!(database.read_bytes(&key, data.len() + 1, 1).is_err());
+            // The offset is bigger than the value
+            prop_assert!(database.read_bytes(&key, data.len() + 1, 1).is_err());
 
-                // Whole value read
-                let result = database
-                    .read_bytes(&key, 0, data.len())
-                    .expect("Reading from offset 0 should succeed");
-                prop_assert_eq!(result.as_ref(), data.as_slice());
+            // Whole value read
+            let result = database
+                .read_bytes(&key, 0, data.len())
+                .expect("Reading from offset 0 should succeed");
+            prop_assert_eq!(result.as_ref(), data.as_slice());
 
-                // Zero-sized read at end of value
-                let result = database
-                    .read_bytes(&key, 0, 0)
-                    .expect("A zero-sized read should succeed");
-                prop_assert_eq!(result.as_ref(), &[] as &[u8]);
+            // Zero-sized read at end of value
+            let result = database
+                .read_bytes(&key, 0, 0)
+                .expect("A zero-sized read should succeed");
+            prop_assert_eq!(result.as_ref(), &[] as &[u8]);
 
-                // Partial read from last byte
-                let result = database
-                    .read_bytes(&key, data.len() - 1, 1)
-                    .expect("A partial read should succeed");
-                prop_assert_eq!(result.as_ref(), &data[data.len() - 1..]);
-            }
-        });
+            // Partial read from last byte
+            let result = database
+                .read_bytes(&key, data.len() - 1, 1)
+                .expect("A partial read should succeed");
+            prop_assert_eq!(result.as_ref(), &data[data.len() - 1..]);
+        }
     });
 
     kv_test!(test_database_read_bytes_no_key, KV: BackgroundKeyValueStore, {
@@ -1066,67 +1083,71 @@ mod tests {
         assert_eq!(read_data_before, read_data);
     });
 
-    kv_test!(test_database_value_length, KV: BackgroundKeyValueStore, {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let (_keepalive, repo) = KV::setup_repo();
-        proptest!(|(
-            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
-            data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..100), 0..100)
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
+    kv_test!(test_database_value_length, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..100),
+        data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..100), 0..100),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
 
-            for (key, data) in keys.iter().zip(data.iter()) {
-                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
-                let data = Bytes::copy_from_slice(data);
+        for (key, data) in keys.iter().zip(data.iter()) {
+            let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+            let data = Bytes::copy_from_slice(data);
 
+            database
+                .set(key.clone(), Bytes::copy_from_slice(&data))
+                .expect("Writing should succeed");
+            prop_assert_eq!(
                 database
-                    .set(key.clone(), Bytes::copy_from_slice(&data))
-                    .expect("Writing should succeed");
-                prop_assert_eq!(
-                    database
-                        .value_length(&key)
-                        .expect("Getting the value length should succeed"),
-                    data.len()
-                );
-            }
-        });
+                    .value_length(&key)
+                    .expect("Getting the value length should succeed"),
+                data.len()
+            );
+        }
     });
 
-    kv_test!(test_database_write, KV: BackgroundKeyValueStore, {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("Creating a Tokio runtime should succeed");
-        let handle = runtime.handle();
-        let (_keepalive, repo) = KV::setup_repo();
-        proptest!(|(
-            keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..10),
-            offsets in prop::collection::vec(0..10usize, 0..10),
-            initial_data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10),
-            patch in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10)
-        )| {
-            let mut database = new_database::<KV>(handle, &repo);
+    kv_test!(test_database_write, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        keys in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..KEY_MAX_SIZE), 0..10),
+        offsets in prop::collection::vec(0..10usize, 0..10),
+        initial_data in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10),
+        patch in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..200), 0..10),
+    ], {
+        let mut database = new_database::<KV>(handle, repo);
 
-            for (((key, offset), initial_data), patch) in keys.iter().zip(offsets.iter()).zip(initial_data.iter()).zip(patch.iter()) {
-                let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
+        for (((key, offset), initial_data), patch) in keys.iter().zip(offsets.iter()).zip(initial_data.iter()).zip(patch.iter()) {
+            let key = Key::new(key).expect("Size less than KEY_MAX_SIZE");
 
-                let initial_data = Bytes::copy_from_slice(initial_data);
-                assert!(database.set(key.clone(), initial_data.clone()).is_ok());
+            let initial_data = Bytes::copy_from_slice(initial_data);
+            assert!(database.set(key.clone(), initial_data.clone()).is_ok());
 
-                let patch = Bytes::copy_from_slice(patch);
-                let expected_written = patch.len();
-                let result = database.write(key.clone(), *offset, patch.clone());
-                if *offset > initial_data.len() {
-                    prop_assert!(result.is_err());
-                } else {
-                    prop_assert_eq!(result.unwrap(), expected_written);
-                    let expected_length = std::cmp::max(initial_data.len(), offset + patch.len());
-                    prop_assert_eq!(database.value_length(&key).unwrap(), expected_length);
-                }
+            let patch = Bytes::copy_from_slice(patch);
+            let expected_written = patch.len();
+            let result = database.write(key.clone(), *offset, patch.clone());
+            if *offset > initial_data.len() {
+                prop_assert!(result.is_err());
+            } else {
+                prop_assert_eq!(result.unwrap(), expected_written);
+                let expected_length = std::cmp::max(initial_data.len(), offset + patch.len());
+                prop_assert_eq!(database.value_length(&key).unwrap(), expected_length);
             }
-        });
+        }
     });
 
     kv_test!(test_database_write_new_nonzero_offset, KV: BackgroundKeyValueStore, {
@@ -1342,7 +1363,8 @@ mod tests {
     });
 
     kv_test!(test_verify_database_delete, KV: BackgroundKeyValueStore, {
-        let mut database = new_verify_database::<KV>();
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut database = new_verify_database::<KV>(&repo);
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
         database
@@ -1375,69 +1397,73 @@ mod tests {
             .expect("Verify mode does not return `OperationError`s");
     });
 
-    kv_test!(test_verify_database_set_and_read, KV: BackgroundKeyValueStore, {
-        proptest!(|(data in prop::collection::vec(any::<u8>(), 0..200))| {
-            let mut database = new_verify_database::<KV>();
-            let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+    kv_test!(test_verify_database_set_and_read, KV: BackgroundKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        data in prop::collection::vec(any::<u8>(), 0..200),
+    ], {
+        let mut database = new_verify_database::<KV>(repo);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-            database
-                .set(key.clone(), Bytes::copy_from_slice(&data))
-                .expect("Verify mode does not return `OperationError`s");
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&data))
+            .expect("Verify mode does not return `OperationError`s");
 
-            let result = database
-                .read_bytes(&key, 0, data.len())
-                .expect("Verify mode does not return `OperationError`s");
-            prop_assert_eq!(result.as_ref(), data.as_slice());
-        });
+        let result = database
+            .read_bytes(&key, 0, data.len())
+            .expect("Verify mode does not return `OperationError`s");
+        prop_assert_eq!(result.as_ref(), data.as_slice());
     });
 
-    kv_test!(test_verify_database_value_length, KV: BackgroundKeyValueStore, {
-        proptest!(|(data in prop::collection::vec(any::<u8>(), 0..200))| {
-            let mut database = new_verify_database::<KV>();
-            let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+    kv_test!(test_verify_database_value_length, KV: BackgroundKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        data in prop::collection::vec(any::<u8>(), 0..200),
+    ], {
+        let mut database = new_verify_database::<KV>(repo);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&data))
+            .expect("Verify mode does not return `OperationError`s");
+
+        prop_assert_eq!(
             database
-                .set(key.clone(), Bytes::copy_from_slice(&data))
-                .expect("Verify mode does not return `OperationError`s");
-
-            prop_assert_eq!(
-                database
-                    .value_length(&key)
-                    .expect("Verify mode does not return `OperationError`s"),
-                data.len()
-            );
-        });
+                .value_length(&key)
+                .expect("Verify mode does not return `OperationError`s"),
+            data.len()
+        );
     });
 
-    kv_test!(test_verify_database_write_partial, KV: BackgroundKeyValueStore, {
-        proptest!(|(
-            initial in prop::collection::vec(any::<u8>(), 1..200),
-            patch in prop::collection::vec(any::<u8>(), 0..200),
-            offset_frac in 0_usize..=100,
-        )| {
-            let offset = offset_frac * initial.len() / 100;
-            let patch_len = patch.len().min(initial.len() - offset);
-            let patch = &patch[..patch_len];
+    kv_test!(test_verify_database_write_partial, KV: BackgroundKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        initial in prop::collection::vec(any::<u8>(), 1..200),
+        patch in prop::collection::vec(any::<u8>(), 0..200),
+        offset_frac in 0_usize..=100,
+    ], {
+        let offset = offset_frac * initial.len() / 100;
+        let patch_len = patch.len().min(initial.len() - offset);
+        let patch = &patch[..patch_len];
 
-            let mut database = new_verify_database::<KV>();
-            let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let mut database = new_verify_database::<KV>(repo);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-            database
-                .set(key.clone(), Bytes::copy_from_slice(&initial))
-                .expect("Verify mode does not return `OperationError`s");
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&initial))
+            .expect("Verify mode does not return `OperationError`s");
 
-            let written = database
-                .write(key.clone(), offset, Bytes::copy_from_slice(patch))
-                .expect("Verify mode does not return `OperationError`s");
-            prop_assert_eq!(written, patch_len);
+        let written = database
+            .write(key.clone(), offset, Bytes::copy_from_slice(patch))
+            .expect("Verify mode does not return `OperationError`s");
+        prop_assert_eq!(written, patch_len);
 
-            let result = database
-                .read_bytes(&key, 0, initial.len())
-                .expect("Verify mode does not return `OperationError`s");
+        let result = database
+            .read_bytes(&key, 0, initial.len())
+            .expect("Verify mode does not return `OperationError`s");
 
-            let mut expected = initial.clone();
-            expected[offset..offset + patch_len].copy_from_slice(patch);
-            prop_assert_eq!(result.as_ref(), expected.as_slice());
-        });
+        let mut expected = initial.clone();
+        expected[offset..offset + patch_len].copy_from_slice(patch);
+        prop_assert_eq!(result.as_ref(), expected.as_slice());
     });
 }
