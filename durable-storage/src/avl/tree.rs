@@ -265,17 +265,13 @@ impl<NodeId> Tree<NodeId> {
     {
         let node = self.root_mut();
         let Some(node) = node else {
-            // We can't create a new `Node` with a non-zero offset.
+            // The key does not exist and a new `Node` will be created unless the call to `data` fails.
             //
-            // This shouldn't happen: it's prevented by the `Database` API.
-            assert_eq!(offset, 0);
-
             // TODO: RV-895: Dynamic creation of the `Bytes<M>` state component may cause
             // problems with proof generation
             let mut new_data = Bytes::<M>::default();
             data(&mut new_data)?;
 
-            // The key does not exist and a new `Node` shall be created.
             let new_node: Node<TreeId, M> = Node::new(key.clone(), new_data);
             let new_id = NodeId::from(new_node);
             self.0 = Some(new_id);
