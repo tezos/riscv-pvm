@@ -47,6 +47,11 @@ use crate::storage::Loadable;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
 
+/// Hash of the empty AVL tree (`Tree::<NodeId>(None)`).
+/// The empty-tree hash is independent of the `NodeId` type parameter.
+static EMPTY_TREE_HASH: LazyLock<Hash> =
+    LazyLock::new(|| Hash::from_foldable(&Tree::<LazyNodeId>::default()));
+
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[perfect_derive(Clone, Default, Debug)]
 #[derive(derive_more::From)]
@@ -68,6 +73,11 @@ impl<NodeId: FromProof> Tree<NodeId> {
     ) -> Result<(D, Partial<Self>), <D::Parent as Deserialiser>::Error> {
         match ctx.presence() {
             Partial::Absent => Ok((ctx, Partial::Absent)),
+            // TODO: RV-895: The proof should include the empty tree rather
+            // than blinding it.
+            Partial::Blinded(hash) if hash == *EMPTY_TREE_HASH => {
+                Ok((ctx, Partial::Present(Tree::default())))
+            }
             Partial::Blinded(hash) => Ok((ctx, Partial::Blinded(hash))),
             Partial::Present(()) => {
                 let (ctx, present) = ctx.next_branch_with(|proof| proof.into_leaf::<bool>())?;
@@ -451,12 +461,9 @@ impl<NodeId: Storable> Storable for Tree<NodeId> {
 
 impl<NodeId: Loadable> Loadable for Tree<NodeId> {
     fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
-        static EMPTY_HASH: LazyLock<Hash> =
-            LazyLock::new(|| Hash::from_foldable(&Tree::<LazyNodeId>(None)));
-
         // Empty trees are not stored. We can short-circuit here, if we detect the requested hash
         // corresponds to the hash of the empty tree.
-        if id == *EMPTY_HASH {
+        if id == *EMPTY_TREE_HASH {
             return Ok(Self(None));
         }
 

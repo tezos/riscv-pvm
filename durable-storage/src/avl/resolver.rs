@@ -48,6 +48,7 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -757,22 +758,40 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
 ///
 /// Absent nodes are not a valid variant as they indicate a bad proof: any node accessed during
 /// validation should be present or blinded from being accessed in the proof.
+///
+/// `Present` carries the [`MerkleProof`] sub-tree the node was originally deserialised from. The
+/// [`Foldable<PartialHashFold>`] implementation overrides the inherited proof with that captured
+/// sub-proof, so the node folds against the proof of *its initial-tree position* even after AVL
+/// rebalancing has moved it elsewhere in the working tree. Without this, structural drift between
+/// the proof and the working tree causes wrong `prev_hash` substitutions or [`PartialHash::InvalidProof`].
 #[derive(Clone, Debug)]
 pub enum VerifyNodeId {
-    Present(Arc<Node<VerifyTreeId, Verify>>),
+    Present {
+        node: Arc<Node<VerifyTreeId, Verify>>,
+        original_proof: Option<Arc<MerkleProof>>,
+    },
     Blinded(Hash),
 }
 
 impl From<Node<VerifyTreeId, Verify>> for VerifyNodeId {
     fn from(node: Node<VerifyTreeId, Verify>) -> Self {
-        VerifyNodeId::Present(Arc::new(node))
+        VerifyNodeId::Present {
+            node: Arc::new(node),
+            original_proof: None,
+        }
     }
 }
 
 impl Foldable<PartialHashFold> for VerifyNodeId {
     fn fold(&self, builder: PartialHashFold) -> PartialHash {
         match self {
-            VerifyNodeId::Present(inner) => inner.as_ref().fold(builder),
+            VerifyNodeId::Present {
+                node,
+                original_proof,
+            } => {
+                let builder = builder.with_proof(original_proof.clone());
+                node.as_ref().fold(builder)
+            }
             VerifyNodeId::Blinded(hash) => builder.present(*hash),
         }
     }
@@ -780,12 +799,17 @@ impl Foldable<PartialHashFold> for VerifyNodeId {
 
 impl FromProof for VerifyNodeId {
     fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        // Capture the sub-proof BEFORE consuming `proof`; `into_node` moves it.
+        let original_proof = proof.capture_owned_proof().map(Arc::new);
         let ctx = proof.into_node()?;
         match ctx.presence() {
             Partial::Blinded(hash) => ctx.done(VerifyNodeId::Blinded(hash)),
             Partial::Present(()) => {
                 let (ctx, node) = Node::from_branches(ctx)?;
-                ctx.done(VerifyNodeId::Present(Arc::new(node)))
+                ctx.done(VerifyNodeId::Present {
+                    node: Arc::new(node),
+                    original_proof,
+                })
             }
             // SAFETY: called only in `Verify` mode
             Partial::Absent => unsafe { not_found() },
@@ -794,9 +818,12 @@ impl FromProof for VerifyNodeId {
 }
 
 /// Identifier for a tree resolved in [`Verify`] mode.
+///
+/// `Present` carries the [`MerkleProof`] sub-tree this tree slot was deserialised from; see
+/// [`VerifyNodeId`] for the rationale.
 #[derive(Clone, Debug)]
 pub enum VerifyTreeId {
-    Present(Tree<VerifyNodeId>),
+    Present { tree: Tree<VerifyNodeId> },
     Blinded(Hash),
     Absent,
 }
@@ -804,7 +831,7 @@ pub enum VerifyTreeId {
 impl Foldable<PartialHashFold> for VerifyTreeId {
     fn fold(&self, builder: PartialHashFold) -> PartialHash {
         match self {
-            VerifyTreeId::Present(inner) => inner.fold(builder),
+            VerifyTreeId::Present { tree } => tree.fold(builder),
             VerifyTreeId::Blinded(hash) => builder.present(*hash),
             VerifyTreeId::Absent => builder.previous(),
         }
@@ -818,7 +845,7 @@ impl FromProof for VerifyTreeId {
         let tree_id = match partial {
             Partial::Absent => VerifyTreeId::Absent,
             Partial::Blinded(hash) => VerifyTreeId::Blinded(hash),
-            Partial::Present(tree) => VerifyTreeId::Present(tree),
+            Partial::Present(tree) => VerifyTreeId::Present { tree },
         };
         ctx.done(tree_id)
     }
@@ -828,7 +855,9 @@ impl FromProof for VerifyTreeId {
 // `Tree::replace_with_successor`, may cause issues with round-trip verification.
 impl Default for VerifyTreeId {
     fn default() -> Self {
-        Self::Present(Tree::default())
+        Self::Present {
+            tree: Tree::default(),
+        }
     }
 }
 
@@ -842,7 +871,7 @@ impl Resolver<VerifyNodeId, Node<VerifyTreeId, Verify>> for VerifyResolver {
         id: &'a VerifyNodeId,
     ) -> Result<&'a Node<VerifyTreeId, Verify>, OperationalError> {
         match id {
-            VerifyNodeId::Present(inner) => Ok(inner),
+            VerifyNodeId::Present { node, .. } => Ok(node),
             // SAFETY: called only in `Verify` mode
             VerifyNodeId::Blinded(_) => unsafe { not_found() },
         }
@@ -853,7 +882,7 @@ impl Resolver<VerifyNodeId, Node<VerifyTreeId, Verify>> for VerifyResolver {
         id: &'a mut VerifyNodeId,
     ) -> Result<&'a mut Node<VerifyTreeId, Verify>, OperationalError> {
         match id {
-            VerifyNodeId::Present(inner) => Ok(Arc::make_mut(inner)),
+            VerifyNodeId::Present { node, .. } => Ok(Arc::make_mut(node)),
             // SAFETY: called only in `Verify` mode
             VerifyNodeId::Blinded(_) => unsafe { not_found() },
         }
@@ -866,7 +895,7 @@ impl Resolver<VerifyTreeId, Tree<VerifyNodeId>> for VerifyResolver {
         id: &'a VerifyTreeId,
     ) -> Result<&'a Tree<VerifyNodeId>, OperationalError> {
         match id {
-            VerifyTreeId::Present(inner) => Ok(inner),
+            VerifyTreeId::Present { tree, .. } => Ok(tree),
             // SAFETY: called only in `Verify` mode
             VerifyTreeId::Blinded(_) | VerifyTreeId::Absent => unsafe { not_found() },
         }
@@ -877,7 +906,7 @@ impl Resolver<VerifyTreeId, Tree<VerifyNodeId>> for VerifyResolver {
         id: &'a mut VerifyTreeId,
     ) -> Result<&'a mut Tree<VerifyNodeId>, OperationalError> {
         match id {
-            VerifyTreeId::Present(inner) => Ok(inner),
+            VerifyTreeId::Present { tree, .. } => Ok(tree),
             // SAFETY: called only in `Verify` mode
             VerifyTreeId::Blinded(_) | VerifyTreeId::Absent => unsafe { not_found() },
         }
@@ -1550,7 +1579,10 @@ mod tests {
     fn test_verify_resolver_resolve_mut_node() {
         let key = Key::new(&[2]).expect("key should be valid");
         let node: Node<VerifyTreeId, Verify> = Node::new(key.clone(), Bytes::<Verify>::new(0));
-        let mut id = VerifyNodeId::Present(Arc::new(node));
+        let mut id = VerifyNodeId::Present {
+            node: Arc::new(node),
+            original_proof: None,
+        };
 
         let mut resolver = VerifyResolver;
 
@@ -1583,9 +1615,12 @@ mod tests {
     fn test_verify_resolver_resolves_tree() {
         let key = Key::new(&[1]).expect("key should be valid");
         let node: Node<VerifyTreeId, Verify> = Node::new(key, Bytes::<Verify>::new(0));
-        let node_id = VerifyNodeId::Present(Arc::new(node));
+        let node_id = VerifyNodeId::Present {
+            node: Arc::new(node),
+            original_proof: None,
+        };
         let tree: Tree<VerifyNodeId> = Some(node_id).into();
-        let id = VerifyTreeId::Present(tree);
+        let id = VerifyTreeId::Present { tree };
 
         let resolver = VerifyResolver;
         let resolved = resolver

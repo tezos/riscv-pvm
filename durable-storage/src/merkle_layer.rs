@@ -22,6 +22,8 @@ use std::sync::Arc;
 
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -35,6 +37,7 @@ use crate::avl::resolver::ProveNodeId;
 use crate::avl::resolver::ProveResolver;
 use crate::avl::resolver::VerifyNodeId;
 use crate::avl::resolver::VerifyResolver;
+use crate::avl::resolver::VerifyTreeId;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::errors::Error;
@@ -250,12 +253,22 @@ impl MerkleLayerMode for Verify {
             inner: VerifyImpl {
                 tree: this.inner.tree.clone(),
                 resolver: VerifyResolver,
+                original_proof: this.inner.original_proof.clone(),
             },
         }
     }
 
-    fn hash<KV>(_this: &MerkleLayer<KV, Self>) -> Hash {
-        unimplemented!("Blocked by RV-961")
+    fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash {
+        // The wrapping `original_proof: None` is intentional: it lets each per-node sub-proof
+        // captured on `VerifyNodeId::Present` drive its own subtree fold (via
+        // `PartialHashFold::with_proof`), while the top-level `Some(proof)` we pass in is the
+        // fallback consumed by the root `into_node_fold` call.
+        let tree_id = VerifyTreeId::Present {
+            tree: this.inner.tree.clone(),
+        };
+        PartialHash::from_foldable(Some((*this.inner.original_proof).clone()), &tree_id)
+            .to_hash()
+            .expect("verify-mode hash should resolve to Present")
     }
 
     fn delete<KV: KeyValueStore>(
@@ -391,6 +404,9 @@ struct ProveImpl<KV> {
 struct VerifyImpl {
     tree: Tree<VerifyNodeId>,
     resolver: VerifyResolver,
+    /// Original proof the verify-mode tree was deserialised from. Required by [`MerkleLayer::hash`]
+    /// to resolve `prev_hash` substitutions in [`PartialHashFold::previous`] for blinded subtrees.
+    original_proof: Arc<MerkleProof>,
 }
 
 impl<KV> MerkleLayer<KV, Verify> {
@@ -400,13 +416,21 @@ impl<KV> MerkleLayer<KV, Verify> {
     }
 }
 
+/// Construct a verify-mode [`MerkleLayer`] for an empty initial state. Used in tests that exercise
+/// verify-mode mutation primitives in isolation.
+#[cfg(test)]
+pub(crate) fn new_verify_layer<KV>() -> MerkleLayer<KV, Verify> {
+    let proof = MerkleProof::from_foldable(&Tree::<ProveNodeId>::default());
+    MerkleLayer::from_proof(proof).expect("The proof should be deserialisable")
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use octez_riscv_data::components::bytes::Bytes;
-    use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::ProofError;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
@@ -419,13 +443,13 @@ mod tests {
 
     use super::MerkleLayer;
     use super::ProveImpl;
+    use super::new_verify_layer;
     use crate::avl::node::Node;
     use crate::avl::resolver::ArcTreeId;
     use crate::avl::resolver::LazyNodeId;
     use crate::avl::resolver::LazyResolver;
     use crate::avl::resolver::LazyTreeId;
     use crate::avl::resolver::ProveResolver;
-    use crate::avl::resolver::VerifyNodeId;
     use crate::avl::resolver::VerifyResolver;
     use crate::avl::resolver::VerifyTreeId;
     use crate::avl::tree::Tree;
@@ -459,14 +483,28 @@ mod tests {
     }
 
     impl<KV> MerkleLayer<KV, Verify> {
-        /// Construct a Verify-mode MerkleLayer from a deserialised tree.
-        pub(crate) fn from_verify_tree(tree: Tree<VerifyNodeId>) -> Self {
-            MerkleLayer {
+        /// Construct a Verify-mode [`MerkleLayer`] by deserialising a [`MerkleProof`].
+        ///
+        /// The proof is retained so [`MerkleLayer::hash`] can resolve `prev_hash` substitutions for
+        /// blinded subtrees that fold to [`PartialHash::Previous`].
+        pub fn from_proof(proof: MerkleProof) -> Result<Self, ProofError> {
+            let proof = Arc::new(proof);
+            let tree_id = VerifyTreeId::from_proof(ProofTree::Present(&proof))?.into_result();
+            let VerifyTreeId::Present { tree, .. } = tree_id else {
+                // The top-level fold for a Normal-mode `Tree<LazyNodeId>` always emits a node fold,
+                // so a well-formed proof's root deserialises as `Present`. `Blinded`/`Absent` here
+                // would mean the entire state has been hidden — an unusable verify layer.
+                return Err(ProofError::Custom(
+                    "malformed proof - deserialising MAVL tree without being present.".into(),
+                ));
+            };
+            Ok(MerkleLayer {
                 inner: VerifyImpl {
                     tree,
                     resolver: VerifyResolver,
+                    original_proof: proof,
                 },
-            }
+            })
         }
     }
 
@@ -1581,17 +1619,10 @@ mod tests {
         assert_eq!(node, b"prove to verify");
 
         // Verify mode
+
         let proof = MerkleProof::from_foldable(&prove_ml.inner.tree);
-        let verify_tree_id = VerifyTreeId::from_proof(ProofTree::Present(&proof))
-            .expect("The proof should be deserialisable")
-            .into_result();
-
-        let tree = match verify_tree_id {
-            VerifyTreeId::Present(tree) => tree,
-            _ => panic!("Should be present"),
-        };
-
-        let verify_ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(tree);
+        let verify_ml: MerkleLayer<KV, Verify> =
+            MerkleLayer::from_proof(proof).expect("The proof should be deserialisable");
 
         let node = verify_ml
             .get(&keys[1])
@@ -1603,7 +1634,7 @@ mod tests {
     kv_test!(test_verify_delete, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
         ml.delete(&key)
             .expect("deleting a key that doesn't exist should succeed");
 
@@ -1622,7 +1653,7 @@ mod tests {
             .map(|r| r.expect("Size less than KEY_MAX_SIZE"));
         let data: [&[u8]; 3] = [b"too cold", b"too hot", b"just right"];
 
-        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
         for (key, datum) in keys.iter().zip(data.iter()) {
             ml.set(key, datum).expect("setting node should succeed");
         }
@@ -1639,7 +1670,7 @@ mod tests {
     kv_test!(test_verify_try_clone_with_cow, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
         let cow_data = "🐮<(verify a moo!)";
         ml.set(&key, cow_data.as_bytes())
             .expect("setting node should succeed");
@@ -1672,7 +1703,7 @@ mod tests {
     kv_test!(test_verify_write_partial, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(Tree::default());
+        let mut ml: MerkleLayer<KV, Verify> = new_verify_layer::<KV>();
         ml.set(&key, b"partial")
             .expect("setting node should succeed");
         ml.write(&key, 4, b"ying").expect("write should succeed");
@@ -1765,15 +1796,8 @@ mod tests {
         let merkle_proof = MerkleProof::from_foldable(&prove_ml.inner.tree);
 
         // ---- Verify: deserialize proof, replay identical ops ----
-        let verify_tree_id = VerifyTreeId::from_proof(ProofTree::Present(&merkle_proof))
-            .expect("proof deserialization should succeed")
-            .into_result();
-
-        let VerifyTreeId::Present(verify_tree) = verify_tree_id else {
-            panic!("expected Present tree from proof");
-        };
-
-        let mut verify_ml: MerkleLayer<KV, Verify> = MerkleLayer::from_verify_tree(verify_tree);
+        let mut verify_ml: MerkleLayer<KV, Verify> =
+            MerkleLayer::from_proof(merkle_proof).expect("proof deserialization should succeed");
 
         let final_hash = catch_not_found(move || {
             let data = verify_ml
@@ -1786,10 +1810,7 @@ mod tests {
                 .write(&keys[1], 0, b"BETA")
                 .expect("write should succeed");
 
-            let verify_tree_id = VerifyTreeId::Present(verify_ml.inner.tree);
-            PartialHash::from_foldable(Some(merkle_proof), &verify_tree_id)
-                .to_hash()
-                .expect("verify hash should be computable")
+            verify_ml.hash()
         })
         .expect("verify operations should not trigger not_found");
 
