@@ -1039,4 +1039,50 @@ mod tests {
 
         golden.write_all(&serialised).unwrap();
     }
+
+    #[test]
+    fn test_write_non_existent_key_non_zero_offset() {
+        let mut tree: Tree<ArcNodeId> = Default::default();
+        let mut resolver = ArcResolver;
+
+        let new = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
+        let result = tree.write(&new, 1, b"offset too large", &mut resolver);
+        assert!(matches!(
+            result,
+            Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge))
+        ));
+        assert!(
+            tree.root().is_none(),
+            "A failed write must not insert a node into an empty tree."
+        );
+
+        let existing = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        tree.set(&existing, b"zero offset", &mut resolver)
+            .expect("Setting an existing key should succeed.");
+        let new = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        let result = tree.write(&new, 1, b"nonzero offset", &mut resolver);
+        assert!(matches!(
+            result,
+            Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge))
+        ));
+
+        let value = tree
+            .get(&existing, &resolver)
+            .expect("Resolver failure not expected.")
+            .expect("Pre-existing key should still be present.");
+        let mut buf = [0u8; 11];
+        value.read(0, &mut buf);
+        assert_eq!(&buf, b"zero offset");
+        assert!(matches!(tree.get(&new, &resolver), Ok(None)));
+
+        tree.write(&existing, 1, b"o", &mut resolver)
+            .expect("Writing to an existing key with a non-zero offset should succeed.");
+        let value = tree
+            .get(&existing, &resolver)
+            .expect("Resolver failure not expected.")
+            .expect("Pre-existing key should still be present.");
+        let mut buf = [0u8; 11];
+        value.read(0, &mut buf);
+        assert_eq!(&buf, b"zoro offset");
+    }
 }
