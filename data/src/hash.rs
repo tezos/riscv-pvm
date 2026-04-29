@@ -8,6 +8,7 @@
 use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::ops::Deref;
+use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -277,7 +278,9 @@ impl PartialHash {
         proof: Option<MerkleProof>,
         foldable: &impl Foldable<PartialHashFold>,
     ) -> PartialHash {
-        foldable.fold(PartialHashFold { proof })
+        foldable.fold(PartialHashFold {
+            proof: proof.map(Arc::new),
+        })
     }
 }
 
@@ -293,8 +296,12 @@ impl Foldable<PartialHashFold> for PartialHash {
 
 /// [`Fold`] implementation for computing the [`PartialHash`] of a state
 pub struct PartialHashFold {
-    /// Original proof which is the source of previous hashes
-    proof: Option<MerkleProof>,
+    /// Original proof which is the source of previous hashes.
+    ///
+    /// Stored as `Arc` so that callers (notably the verify-mode AVL fold) can attach a node-local
+    /// override cheaply: the override site only bumps the refcount instead of automatically
+    /// deep-cloning the proof.
+    proof: Option<Arc<MerkleProof>>,
 }
 
 impl PartialHashFold {
@@ -314,6 +321,15 @@ impl PartialHashFold {
         }
     }
 
+    /// Replace the reference proof outright.
+    ///
+    /// Use when a sub-structure carries its own captured proof that should override whatever the
+    /// parent fold passed down. Unlike [`PartialHashFold::map_reference_proof`], this does not
+    /// require the existing proof to be `Some`.
+    pub fn with_proof(self, proof: Option<Arc<MerkleProof>>) -> PartialHashFold {
+        PartialHashFold { proof }
+    }
+
     /// Modify the reference proof that `PartialHashFold` uses when traversing the described
     /// foldable structure.
     ///
@@ -325,7 +341,10 @@ impl PartialHashFold {
         proj: impl FnOnce(MerkleProof) -> Option<MerkleProof>,
     ) -> PartialHashFold {
         PartialHashFold {
-            proof: self.proof.and_then(proj),
+            proof: self
+                .proof
+                .and_then(|arc| proj(Arc::unwrap_or_clone(arc)))
+                .map(Arc::new),
         }
     }
 }
@@ -343,6 +362,10 @@ impl Fold for PartialHashFold {
                 child_hashes: VecDeque::new(),
             };
         };
+
+        // Unwrap the `Arc` cheaply when it has a single owner; clone the inner proof when shared
+        // (e.g. when the same captured proof is reused after multiple Arc clones at fold time).
+        let tree = Arc::unwrap_or_clone(tree);
 
         match tree {
             Tree::Node(node) => PartialHashNodeFold {
@@ -385,7 +408,9 @@ impl NodeFold for PartialHashNodeFold {
         let hash = match self.children.pop_front() {
             Some(tree) => {
                 let prev_hash = tree.root_hash();
-                let hash = child.fold(PartialHashFold { proof: Some(tree) });
+                let hash = child.fold(PartialHashFold {
+                    proof: Some(Arc::new(tree)),
+                });
 
                 // If the child is absent but we have the previous hash, we can use it here.
                 match hash {
