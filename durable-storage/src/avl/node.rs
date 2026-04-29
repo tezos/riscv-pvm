@@ -56,6 +56,7 @@ pub(crate) struct Meta {
 #[derive(Encode, Decode)]
 struct StoredNode {
     meta: Meta,
+    data: Hash,
     left: Hash,
     right: Hash,
 }
@@ -835,6 +836,7 @@ impl<TreeId: Storable> Storable for Node<TreeId, Normal> {
         // should be written to the KV store separately.
         let repr = StoredNode {
             meta: self.meta.deref().clone(),
+            data: Hash::from_foldable(&self.data),
             left: Hash::from_foldable(&self.left),
             right: Hash::from_foldable(&self.right),
         };
@@ -861,7 +863,12 @@ impl<TreeId: Storable> Storable for Node<TreeId, Normal> {
 
 impl<TreeId: Loadable> Loadable for Node<TreeId, Normal> {
     fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
-        let StoredNode { meta, left, right } = {
+        let StoredNode {
+            meta,
+            left,
+            right,
+            data: _,
+        } = {
             let bytes =
                 store
                     .blob_get(id)
