@@ -485,13 +485,12 @@ mod tests {
 
     use super::Database;
     use super::DatabaseMode;
-    use crate::avl::tree::Tree;
     use crate::database::MAX_VALUE_SIZE;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
-    use crate::merkle_layer::MerkleLayer;
+    use crate::merkle_layer::new_verify_layer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
@@ -507,7 +506,7 @@ mod tests {
     fn new_verify_database<KV>() -> Database<KV, Verify> {
         Database {
             inner: super::VerifyImpl {
-                merkle: MerkleLayer::from_verify_tree(Tree::default()),
+                merkle: new_verify_layer(),
             },
         }
     }
