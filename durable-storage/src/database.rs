@@ -727,6 +727,35 @@ mod tests {
         assert_eq!(before, after);
     });
 
+    kv_test!(#[ignore] test_database_delete_after_checkout, KV: BackgroundPersistentKeyValueStore, {
+        // Arrange
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut db = new_database::<KV>(handle, &repo);
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+
+        let initial_hash = db.hash().expect("Hashing should succeed");
+
+        db.set(key.clone(), Bytes::new()).expect("Writing should succeed");
+
+        let commit = db.commit(&repo).expect("Commit should succeed");
+
+        // Act
+        let mut db = Database::<KV, _>::checkout(handle, &repo, commit).expect("Checkout should succeed");
+
+        db.delete(key).expect("Delete should succeed");
+
+        // Assert
+        // - we emit another operation to actually observe any crash.
+        let final_hash = db.hash().expect("Hashing should succeed");
+        assert_eq!(initial_hash, final_hash, "Empty DB should always hash to the same value");
+    });
+
     kv_test!(test_database_checkout_commit_creates_new_snapshot, KV: BackgroundPersistentKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
