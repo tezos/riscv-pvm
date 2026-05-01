@@ -31,6 +31,15 @@
             "pages": ["state-framework/index", "state-framework/components"]
           }
         ]
+      },
+      {
+        "tab": "Durable Storage",
+        "groups": [
+          {
+            "group": "Merkle Proofs",
+            "pages": ["durable-storage/mavl-proof-semantics"]
+          }
+        ]
       }
     ]
   },
