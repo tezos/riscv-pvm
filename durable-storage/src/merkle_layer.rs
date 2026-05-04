@@ -2258,6 +2258,10 @@ mod tests {
         proptest!(|(setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..20), new_keys in prop::collection::vec(any::<[u8; 2]>(), 1..10))| {
             let step_ops: Vec<Operation> = new_keys
                 .iter()
+                // ensure we don't accidentally mix insertions with overwritting old keys
+                // - the proof system doesn't currently support this
+                // TODO (RV-985): remove this line
+                .filter(|bytes| !setup_keys.contains(bytes))
                 .enumerate()
                 .map(|(i, bytes)| {
                     let key = Key::new(bytes).expect("key should be valid");
