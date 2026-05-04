@@ -60,6 +60,7 @@ use super::node::Node;
 use super::tree::Tree;
 use crate::avl::node::Meta;
 use crate::errors::OperationalError;
+use crate::key::Key;
 use crate::storage::KeyValueStore;
 use crate::storage::Loadable;
 use crate::storage::Storable;
@@ -74,24 +75,40 @@ pub trait Resolver<Id, Value> {
     fn resolve_mut<'a>(&mut self, id: &'a mut Id) -> Result<&'a mut Value, OperationalError>;
 }
 
+/// Trait for resolving data identifiers to bytes.
+///
+/// This requires additional data beyond just the id itself - as
+/// the data of nodes are stored separately.
+pub trait DataResolver<Id, M: Mode> {
+    /// Resolve a data identifier to bytes, using the key.
+    fn resolve_bytes<'a>(&self, id: &'a Id, key: &Key) -> Result<&'a Bytes<M>, OperationalError>;
+
+    /// Resolve a data identifier to mutable bytes, using the key.
+    fn resolve_mut_bytes<'a>(
+        &self,
+        id: &'a mut Id,
+        key: &Key,
+    ) -> Result<&'a mut Bytes<M>, OperationalError>;
+}
+
 trait_set! {
     /// Specialised [`Resolver`] for MAVL nodes
-    pub trait NodeResolver<NodeId, TreeId, M: Mode> = Resolver<NodeId, Node<TreeId, M>>;
+    pub trait NodeResolver<NodeId, DataId, TreeId, M: Mode> = Resolver<NodeId, Node<TreeId, DataId, M>> + DataResolver<DataId, M>;
 
     /// Specialised [`Resolver`] for MAVL trees
     pub trait TreeResolver<NodeId, TreeId> = Resolver<TreeId, Tree<NodeId>>;
 
     /// Specialised [`Resolver`] for MAVL nodes and trees
-    pub trait AvlResolver<NodeId, TreeId, M: Mode> = NodeResolver<NodeId, TreeId, M> + TreeResolver<NodeId, TreeId>;
+    pub trait AvlResolver<NodeId, DataId, TreeId, M: Mode> = NodeResolver<NodeId, DataId, TreeId, M> + TreeResolver<NodeId, TreeId>;
 }
 
 /// Node value materialised in [`Prove`] mode.
-pub(crate) type ProveNode = Node<ProveTreeId, Prove<'static>>;
+pub(crate) type ProveNode = Node<ProveTreeId, Bytes<Prove<'static>>, Prove<'static>>;
 
 /// Identifier for a node that is always present.
 #[derive(Debug, Clone, derive_more::From)]
-#[from(Node<ArcTreeId, Normal>)]
-pub struct ArcNodeId(Arc<Node<ArcTreeId, Normal>>);
+#[from(Node<ArcTreeId, Bytes<Normal>, Normal>)]
+pub struct ArcNodeId(Arc<Node<ArcTreeId, Bytes<Normal>, Normal>>);
 
 impl Foldable<HashFold> for ArcNodeId {
     fn fold(&self, _builder: HashFold) -> <HashFold as Fold>::Folded {
@@ -148,18 +165,18 @@ impl Loadable for ArcTreeId {
 #[derive(Clone, Debug)]
 pub struct ArcResolver;
 
-impl Resolver<ArcNodeId, Node<ArcTreeId, Normal>> for ArcResolver {
+impl Resolver<ArcNodeId, Node<ArcTreeId, Bytes<Normal>, Normal>> for ArcResolver {
     fn resolve<'a>(
         &self,
         id: &'a ArcNodeId,
-    ) -> Result<&'a Node<ArcTreeId, Normal>, OperationalError> {
+    ) -> Result<&'a Node<ArcTreeId, Bytes<Normal>, Normal>, OperationalError> {
         Ok(id.0.as_ref())
     }
 
     fn resolve_mut<'a>(
         &mut self,
         id: &'a mut ArcNodeId,
-    ) -> Result<&'a mut Node<ArcTreeId, Normal>, OperationalError> {
+    ) -> Result<&'a mut Node<ArcTreeId, Bytes<Normal>, Normal>, OperationalError> {
         Ok(Arc::make_mut(&mut id.0))
     }
 }
@@ -174,6 +191,24 @@ impl Resolver<ArcTreeId, Tree<ArcNodeId>> for ArcResolver {
         id: &'a mut ArcTreeId,
     ) -> Result<&'a mut Tree<ArcNodeId>, OperationalError> {
         Ok(&mut id.0)
+    }
+}
+
+impl DataResolver<Bytes<Normal>, Normal> for ArcResolver {
+    fn resolve_bytes<'a>(
+        &self,
+        id: &'a Bytes<Normal>,
+        _key: &Key,
+    ) -> Result<&'a Bytes<Normal>, OperationalError> {
+        Ok(id)
+    }
+
+    fn resolve_mut_bytes<'a>(
+        &self,
+        id: &'a mut Bytes<Normal>,
+        _key: &Key,
+    ) -> Result<&'a mut Bytes<Normal>, OperationalError> {
+        Ok(id)
     }
 }
 
@@ -235,7 +270,7 @@ impl<Value> From<Hash> for LazyId<Value> {
 
 /// Identifier for an AVL node.
 #[derive(Debug, Clone)]
-pub struct LazyNodeId(LazyId<Arc<Node<LazyTreeId, Normal>>>);
+pub struct LazyNodeId(LazyId<Arc<Node<LazyTreeId, Bytes<Normal>, Normal>>>);
 
 impl LazyNodeId {
     /// Wrap this lazy node identifier in a prove-mode identifier.
@@ -252,8 +287,8 @@ impl LazyNodeId {
     }
 }
 
-impl From<Node<LazyTreeId, Normal>> for LazyNodeId {
-    fn from(value: Node<LazyTreeId, Normal>) -> Self {
+impl From<Node<LazyTreeId, Bytes<Normal>, Normal>> for LazyNodeId {
+    fn from(value: Node<LazyTreeId, Bytes<Normal>, Normal>) -> Self {
         let value = Arc::new(value);
         Self(LazyId::new(value))
     }
@@ -394,11 +429,13 @@ impl<KV> LazyResolver<KV> {
     }
 }
 
-impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyResolver<KV> {
+impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>, Normal>>
+    for LazyResolver<KV>
+{
     fn resolve<'a>(
         &self,
         id: &'a LazyNodeId,
-    ) -> Result<&'a Node<LazyTreeId, Normal>, OperationalError> {
+    ) -> Result<&'a Node<LazyTreeId, Bytes<Normal>, Normal>, OperationalError> {
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
         }
@@ -411,7 +448,7 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Normal>> for LazyR
     fn resolve_mut<'a>(
         &mut self,
         id: &'a mut LazyNodeId,
-    ) -> Result<&'a mut Node<LazyTreeId, Normal>, OperationalError> {
+    ) -> Result<&'a mut Node<LazyTreeId, Bytes<Normal>, Normal>, OperationalError> {
         if let Some(value) = id.0.inner.get_mut() {
             let temp = value as *mut Arc<_>;
             // This unsafe workaround is required because the rust borrow-checker
@@ -459,6 +496,24 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
     }
 }
 
+impl<KV> DataResolver<Bytes<Normal>, Normal> for LazyResolver<KV> {
+    fn resolve_bytes<'a>(
+        &self,
+        id: &'a Bytes<Normal>,
+        _key: &Key,
+    ) -> Result<&'a Bytes<Normal>, OperationalError> {
+        Ok(id)
+    }
+
+    fn resolve_mut_bytes<'a>(
+        &self,
+        id: &'a mut Bytes<Normal>,
+        _key: &Key,
+    ) -> Result<&'a mut Bytes<Normal>, OperationalError> {
+        Ok(id)
+    }
+}
+
 /// Resolver that only accesses already-cached prove-mode values.
 ///
 /// Returns [`OperationalError::ResolverInvariantViolated`] if a node or tree has not been
@@ -490,6 +545,24 @@ impl Resolver<ProveTreeId, Tree<ProveNodeId>> for CachedOnlyResolver {
         _id: &'a mut ProveTreeId,
     ) -> Result<&'a mut Tree<ProveNodeId>, OperationalError> {
         unreachable!("CachedOnlyResolver does not support mutable resolution")
+    }
+}
+
+impl<'inner> DataResolver<Bytes<Prove<'inner>>, Prove<'inner>> for CachedOnlyResolver {
+    fn resolve_bytes<'a>(
+        &self,
+        id: &'a Bytes<Prove<'inner>>,
+        _key: &Key,
+    ) -> Result<&'a Bytes<Prove<'inner>>, OperationalError> {
+        Ok(id)
+    }
+
+    fn resolve_mut_bytes<'a>(
+        &self,
+        id: &'a mut Bytes<Prove<'inner>>,
+        _key: &Key,
+    ) -> Result<&'a mut Bytes<Prove<'inner>>, OperationalError> {
+        Ok(id)
     }
 }
 
@@ -675,9 +748,9 @@ impl<R> ProveResolver<R> {
     fn resolve_and_track_node<'a>(
         &self,
         id: &'a LazyNodeId,
-    ) -> Result<&'a Node<LazyTreeId, Normal>, OperationalError>
+    ) -> Result<&'a Node<LazyTreeId, Bytes<Normal>, Normal>, OperationalError>
     where
-        R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>>,
+        R: Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>, Normal>>,
     {
         self.accessed_items
             .borrow_mut()
@@ -702,8 +775,10 @@ impl<R> ProveResolver<R> {
     }
 }
 
-impl<R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>> + Resolver<LazyTreeId, Tree<LazyNodeId>>>
-    Resolver<ProveNodeId, ProveNode> for ProveResolver<R>
+impl<R> Resolver<ProveNodeId, ProveNode> for ProveResolver<R>
+where
+    R: Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>, Normal>>
+        + Resolver<LazyTreeId, Tree<LazyNodeId>>,
 {
     fn resolve<'b>(&self, id: &'b ProveNodeId) -> Result<&'b ProveNode, OperationalError> {
         if let Some(inner) = id.inner.get() {
@@ -743,8 +818,9 @@ impl<R: Resolver<LazyNodeId, Node<LazyTreeId, Normal>> + Resolver<LazyTreeId, Tr
     }
 }
 
-impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<ProveNodeId>>
-    for ProveResolver<R>
+impl<R> Resolver<ProveTreeId, Tree<ProveNodeId>> for ProveResolver<R>
+where
+    R: Resolver<LazyTreeId, Tree<LazyNodeId>>,
 {
     fn resolve<'b>(&self, id: &'b ProveTreeId) -> Result<&'b Tree<ProveNodeId>, OperationalError> {
         if let Some(inner) = id.inner.get() {
@@ -782,6 +858,24 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
     }
 }
 
+impl<'inner, R> DataResolver<Bytes<Prove<'inner>>, Prove<'inner>> for ProveResolver<R> {
+    fn resolve_bytes<'a>(
+        &self,
+        id: &'a Bytes<Prove<'inner>>,
+        _key: &Key,
+    ) -> Result<&'a Bytes<Prove<'inner>>, OperationalError> {
+        Ok(id)
+    }
+
+    fn resolve_mut_bytes<'a>(
+        &self,
+        id: &'a mut Bytes<Prove<'inner>>,
+        _key: &Key,
+    ) -> Result<&'a mut Bytes<Prove<'inner>>, OperationalError> {
+        Ok(id)
+    }
+}
+
 /// Identifier for a node resolved in [`Verify`] mode.
 ///
 /// Absent nodes are not a valid variant as they indicate a bad proof: any node accessed during
@@ -795,14 +889,14 @@ impl<R: Resolver<LazyTreeId, Tree<LazyNodeId>>> Resolver<ProveTreeId, Tree<Prove
 #[derive(Clone, Debug)]
 pub enum VerifyNodeId {
     Present {
-        node: Arc<Node<VerifyTreeId, Verify>>,
+        node: Arc<Node<VerifyTreeId, Bytes<Verify>, Verify>>,
         original_proof: Option<Arc<MerkleProof>>,
     },
     Blinded(Hash),
 }
 
-impl From<Node<VerifyTreeId, Verify>> for VerifyNodeId {
-    fn from(node: Node<VerifyTreeId, Verify>) -> Self {
+impl From<Node<VerifyTreeId, Bytes<Verify>, Verify>> for VerifyNodeId {
+    fn from(node: Node<VerifyTreeId, Bytes<Verify>, Verify>) -> Self {
         VerifyNodeId::Present {
             node: Arc::new(node),
             original_proof: None,
@@ -893,11 +987,11 @@ impl Default for VerifyTreeId {
 #[derive(Debug)]
 pub struct VerifyResolver;
 
-impl Resolver<VerifyNodeId, Node<VerifyTreeId, Verify>> for VerifyResolver {
+impl Resolver<VerifyNodeId, Node<VerifyTreeId, Bytes<Verify>, Verify>> for VerifyResolver {
     fn resolve<'a>(
         &self,
         id: &'a VerifyNodeId,
-    ) -> Result<&'a Node<VerifyTreeId, Verify>, OperationalError> {
+    ) -> Result<&'a Node<VerifyTreeId, Bytes<Verify>, Verify>, OperationalError> {
         match id {
             VerifyNodeId::Present { node, .. } => Ok(node),
             // SAFETY: called only in `Verify` mode
@@ -908,7 +1002,7 @@ impl Resolver<VerifyNodeId, Node<VerifyTreeId, Verify>> for VerifyResolver {
     fn resolve_mut<'a>(
         &mut self,
         id: &'a mut VerifyNodeId,
-    ) -> Result<&'a mut Node<VerifyTreeId, Verify>, OperationalError> {
+    ) -> Result<&'a mut Node<VerifyTreeId, Bytes<Verify>, Verify>, OperationalError> {
         match id {
             VerifyNodeId::Present { node, .. } => Ok(Arc::make_mut(node)),
             // SAFETY: called only in `Verify` mode
@@ -938,6 +1032,24 @@ impl Resolver<VerifyTreeId, Tree<VerifyNodeId>> for VerifyResolver {
             // SAFETY: called only in `Verify` mode
             VerifyTreeId::Blinded(_) | VerifyTreeId::Absent => unsafe { not_found() },
         }
+    }
+}
+
+impl DataResolver<Bytes<Verify>, Verify> for VerifyResolver {
+    fn resolve_bytes<'a>(
+        &self,
+        id: &'a Bytes<Verify>,
+        _key: &Key,
+    ) -> Result<&'a Bytes<Verify>, OperationalError> {
+        Ok(id)
+    }
+
+    fn resolve_mut_bytes<'a>(
+        &self,
+        id: &'a mut Bytes<Verify>,
+        _key: &Key,
+    ) -> Result<&'a mut Bytes<Verify>, OperationalError> {
+        Ok(id)
     }
 }
 
@@ -1057,7 +1169,7 @@ mod tests {
         NodeId: Storable,
         TreeId: Storable,
         KV: KeyValueStore,
-        Res: AvlResolver<NodeId, TreeId, Normal>,
+        Res: AvlResolver<NodeId, Bytes<Normal>, TreeId, Normal>,
     {
         let store_options = StoreOptions::default().with_shallow().with_node_data();
 
@@ -1606,7 +1718,8 @@ mod tests {
     #[test]
     fn test_verify_resolver_resolve_mut_node() {
         let key = Key::new(&[2]).expect("key should be valid");
-        let node: Node<VerifyTreeId, Verify> = Node::new(key.clone(), Bytes::<Verify>::new(0));
+        let node: Node<VerifyTreeId, Bytes<Verify>, Verify> =
+            Node::new(key.clone(), Bytes::<Verify>::new(0));
         let mut id = VerifyNodeId::Present {
             node: Arc::new(node),
             original_proof: None,
@@ -1642,7 +1755,8 @@ mod tests {
     #[test]
     fn test_verify_resolver_resolves_tree() {
         let key = Key::new(&[1]).expect("key should be valid");
-        let node: Node<VerifyTreeId, Verify> = Node::new(key, Bytes::<Verify>::new(0));
+        let node: Node<VerifyTreeId, Bytes<Verify>, Verify> =
+            Node::new(key, Bytes::<Verify>::new(0));
         let node_id = VerifyNodeId::Present {
             node: Arc::new(node),
             original_proof: None,
