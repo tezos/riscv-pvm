@@ -97,10 +97,10 @@ impl<NodeId> Tree<NodeId> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
     /// Returns true if the [`Tree`] has shrunk in size.
-    pub fn delete<TreeId, M: BytesMode + AtomMode>(
+    pub fn delete<TreeId, DataId, M: AtomMode>(
         &mut self,
         key: &Key,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, OperationalError>
     where
         NodeId: Clone,
@@ -155,10 +155,10 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// Find the id of the [`Node`] in the [`Tree`] with a given [`Key`].
-    pub(crate) fn get<'a, TreeId: 'a, M: BytesMode + AtomMode + 'a>(
+    pub(crate) fn get<'a, TreeId: 'a, DataId: 'a, M: AtomMode + 'a>(
         &'a self,
         key: &Key,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<Option<&'a NodeId>, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(None);
@@ -170,14 +170,15 @@ impl<NodeId> Tree<NodeId> {
     /// Set the value of the [`Node`] with a given key.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub fn set<TreeId, M: BytesMode + AtomMode>(
+    pub fn set<TreeId, DataId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         data: &[u8],
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, OperationalError>
     where
-        NodeId: Clone + From<Node<TreeId, M>>,
+        NodeId: Clone + From<Node<TreeId, DataId, M>>,
+        DataId: From<Bytes<M>>,
         TreeId: Default,
     {
         let result = self.upsert(
@@ -213,9 +214,9 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// The difference in heights between any child branches in the [`Tree`].
-    pub(super) fn balance_factor<TreeId, M: BytesMode + AtomMode>(
+    pub(super) fn balance_factor<TreeId, DataId, M: AtomMode>(
         &self,
-        resolver: &impl NodeResolver<NodeId, TreeId, M>,
+        resolver: &impl NodeResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<i64, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(0);
@@ -245,9 +246,9 @@ impl<NodeId> Tree<NodeId> {
     ///  - The occupied [`Tree`] with the minimum [`Key`].
     ///  - The minimum [`Tree`]'s right child, if it hasn't been moved to its new position.
     ///  - True if the [`Tree`] has shrunk in size.
-    pub(super) fn take_min<TreeId, M: BytesMode + AtomMode>(
+    pub(super) fn take_min<TreeId, DataId, M: AtomMode>(
         &mut self,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(Tree<NodeId>, Tree<NodeId>, bool), OperationalError>
     where
         NodeId: Clone,
@@ -273,15 +274,16 @@ impl<NodeId> Tree<NodeId> {
     /// `data` defines what data is upserted.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn upsert<TreeId, M: BytesMode + AtomMode>(
+    pub(crate) fn upsert<TreeId, DataId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         offset: usize,
         data: impl FnOnce(&mut Bytes<M>) -> Result<(), Error>,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, Error>
     where
-        NodeId: Clone + From<Node<TreeId, M>>,
+        NodeId: Clone + From<Node<TreeId, DataId, M>>,
+        DataId: From<Bytes<M>>,
         TreeId: Default,
     {
         let node = self.root_mut();
@@ -293,7 +295,7 @@ impl<NodeId> Tree<NodeId> {
             let mut new_data = Bytes::<M>::default();
             data(&mut new_data)?;
 
-            let new_node: Node<TreeId, M> = Node::new(key.clone(), new_data);
+            let new_node: Node<TreeId, DataId, M> = Node::new(key.clone(), new_data);
             let new_id = NodeId::from(new_node);
             self.0 = Some(new_id);
 
@@ -314,15 +316,16 @@ impl<NodeId> Tree<NodeId> {
     /// given offset, overwriting existing data if the node already exists.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn write<TreeId, M: BytesMode + AtomMode>(
+    pub(crate) fn write<TreeId, DataId, M: BytesMode + AtomMode>(
         &mut self,
         key: &Key,
         offset: usize,
         data: &[u8],
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, Error>
     where
-        NodeId: Clone + From<Node<TreeId, M>>,
+        NodeId: Clone + From<Node<TreeId, DataId, M>>,
+        DataId: From<Bytes<M>>,
         TreeId: Default,
     {
         self.upsert(
@@ -351,9 +354,9 @@ impl<NodeId> Tree<NodeId> {
     ///
     /// The [`Tree`] must already have balance factor in the range of -2..=2, else it is an invalid
     /// AVL tree.
-    fn rebalance<TreeId, M: BytesMode + AtomMode>(
+    fn rebalance<TreeId, DataId, M: AtomMode>(
         &mut self,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(), OperationalError>
     where
         NodeId: Clone,
@@ -469,6 +472,7 @@ impl<NodeId: Loadable> Loadable for Tree<NodeId> {
 mod tests {
     use std::collections::BTreeMap;
     use std::io::prelude::*;
+    use std::marker::PhantomData;
 
     use goldenfile::Mint;
     use octez_riscv_data::components::atom::Atom;
@@ -481,20 +485,21 @@ mod tests {
     use crate::avl::resolver::ArcNodeId;
     use crate::avl::resolver::ArcResolver;
     use crate::avl::resolver::ArcTreeId;
+    use crate::avl::resolver::DataResolver;
     use crate::avl::resolver::Resolver;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
 
     impl<NodeId> Tree<NodeId> {
         /// Asserts that the [`Tree`] is a valid AVL tree
-        pub(crate) fn check<TreeId, M: BytesMode + AtomMode>(
+        pub(crate) fn check<TreeId, DataId, M: AtomMode>(
             &self,
-            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+            resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<(), OperationalError>
         where
             NodeId: std::fmt::Debug,
             TreeId: std::fmt::Debug,
-            Bytes<M>: std::fmt::Debug,
+            DataId: std::fmt::Debug,
             Atom<Meta, M>: std::fmt::Debug,
         {
             let inorder = self.is_inorder(resolver)?;
@@ -513,9 +518,9 @@ mod tests {
         }
 
         /// Returns true if the [`Tree`] is in-order.
-        pub(crate) fn is_inorder<TreeId, M: BytesMode + AtomMode>(
+        pub(crate) fn is_inorder<TreeId, DataId, M: AtomMode>(
             &self,
-            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+            resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<bool, OperationalError> {
             self.is_inorder_inner(
                 &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
@@ -525,14 +530,14 @@ mod tests {
         }
 
         /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
-        pub(crate) fn has_correct_balance_factors<TreeId, M: BytesMode + AtomMode>(
+        pub(crate) fn has_correct_balance_factors<TreeId, DataId, M: AtomMode>(
             &self,
-            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+            resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<bool, OperationalError>
         where
             NodeId: std::fmt::Debug,
             TreeId: std::fmt::Debug,
-            Bytes<M>: std::fmt::Debug,
+            DataId: std::fmt::Debug,
             Atom<Meta, M>: std::fmt::Debug,
         {
             match self.root() {
@@ -544,9 +549,9 @@ mod tests {
         }
 
         /// Returns the height of the [`Tree`].
-        pub(crate) fn height<TreeId, M: BytesMode + AtomMode>(
+        pub(crate) fn height<TreeId, DataId, M: AtomMode>(
             &self,
-            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+            resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<u32, OperationalError> {
             match self.root() {
                 None => Ok(0),
@@ -555,9 +560,9 @@ mod tests {
         }
 
         /// Returns true if the [`Tree`] is balanced.
-        pub(crate) fn is_balanced<TreeId, M: BytesMode + AtomMode>(
+        pub(crate) fn is_balanced<TreeId, DataId, M: AtomMode>(
             &self,
-            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+            resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<bool, OperationalError> {
             match self.root() {
                 None => Ok(true),
@@ -568,11 +573,11 @@ mod tests {
         }
 
         /// Returns true if the [`Tree`] is in-order and all values lie between the `min` and `max`.
-        pub(crate) fn is_inorder_inner<TreeId, M: BytesMode + AtomMode>(
+        pub(crate) fn is_inorder_inner<TreeId, DataId, M: AtomMode>(
             &self,
             min: &Key,
             max: &Key,
-            resolver: &impl AvlResolver<NodeId, TreeId, M>,
+            resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<bool, OperationalError> {
             match self.root() {
                 None => Ok(true),
@@ -594,12 +599,13 @@ mod tests {
             'tree,
             'res,
             TreeId,
+            DataId,
             M: octez_riscv_data::mode::Mode,
-            Res: AvlResolver<NodeId, TreeId, M>,
+            Res: AvlResolver<NodeId, DataId, TreeId, M>,
         >(
             &'tree self,
             resolver: &'res Res,
-        ) -> TreeIterator<'tree, 'res, NodeId, TreeId, M, Res> {
+        ) -> TreeIterator<'tree, 'res, NodeId, DataId, TreeId, M, Res> {
             TreeIterator {
                 stack: vec![],
                 current: self,
@@ -616,21 +622,26 @@ mod tests {
     /// in-order traversal without recursion.
     ///
     /// Resolution failures are surfaced as iterator items of type `Err`.
-    pub(crate) struct TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver> {
+    pub(crate) struct TreeIterator<'tree, 'res, NodeId, DataId, TreeId, M, Resolver> {
         stack: Vec<&'tree NodeId>,
         current: &'tree Tree<NodeId>,
         resolver: &'res Resolver,
-        _marker: std::marker::PhantomData<fn() -> (TreeId, M)>,
+        #[expect(
+            clippy::type_complexity,
+            reason = "Moving into type would hide underlying use"
+        )]
+        _marker: PhantomData<fn() -> (TreeId, DataId, M)>,
     }
 
     impl<
         'tree,
         'res,
         NodeId,
+        DataId: 'tree,
         TreeId: 'tree,
         M: octez_riscv_data::mode::Mode + 'tree,
-        Resolver: AvlResolver<NodeId, TreeId, M>,
-    > TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
+        Resolver: AvlResolver<NodeId, DataId, TreeId, M>,
+    > TreeIterator<'tree, 'res, NodeId, DataId, TreeId, M, Resolver>
     {
         /// Helper to descend to the leftmost node in the current subtree, pushing nodes onto the stack.
         fn advance_to_leftmost_in_subtree(
@@ -655,7 +666,7 @@ mod tests {
         /// Helper to pop the next node from the stack and prepare to traverse its right subtree.
         fn pop_and_prepare_right_subtree(
             &mut self,
-        ) -> Result<Option<&'tree Node<TreeId, M>>, OperationalError> {
+        ) -> Result<Option<&'tree Node<TreeId, DataId, M>>, OperationalError> {
             let node_id = match self.stack.pop() {
                 Some(id) => id,
                 None => return Ok(None),
@@ -671,12 +682,13 @@ mod tests {
         'tree,
         'res,
         NodeId,
+        DataId: 'tree,
         TreeId: 'tree,
         M: octez_riscv_data::mode::Mode + 'tree,
-        Resolver: AvlResolver<NodeId, TreeId, M>,
-    > Iterator for TreeIterator<'tree, 'res, NodeId, TreeId, M, Resolver>
+        Resolver: AvlResolver<NodeId, DataId, TreeId, M>,
+    > Iterator for TreeIterator<'tree, 'res, NodeId, DataId, TreeId, M, Resolver>
     {
-        type Item = Result<&'tree Node<TreeId, M>, OperationalError>;
+        type Item = Result<&'tree Node<TreeId, DataId, M>, OperationalError>;
 
         fn next(&mut self) -> Option<Self::Item> {
             if let Some(root_id) = self.current.root() {
@@ -782,11 +794,11 @@ mod tests {
         }
     }
 
-    impl Resolver<ArcNodeId, Node<ArcTreeId, Normal>> for FailOnKeyResolver {
+    impl Resolver<ArcNodeId, Node<ArcTreeId, Bytes<Normal>, Normal>> for FailOnKeyResolver {
         fn resolve<'a>(
             &self,
             id: &'a ArcNodeId,
-        ) -> Result<&'a Node<ArcTreeId, Normal>, OperationalError> {
+        ) -> Result<&'a Node<ArcTreeId, Bytes<Normal>, Normal>, OperationalError> {
             let node = ArcResolver.resolve(id)?;
 
             if node.key() == &self.target_failure_key {
@@ -799,7 +811,7 @@ mod tests {
         fn resolve_mut<'a>(
             &mut self,
             id: &'a mut ArcNodeId,
-        ) -> Result<&'a mut Node<ArcTreeId, Normal>, OperationalError> {
+        ) -> Result<&'a mut Node<ArcTreeId, Bytes<Normal>, Normal>, OperationalError> {
             let node = ArcResolver.resolve_mut(id)?;
 
             if node.key() == &self.target_failure_key {
@@ -820,6 +832,26 @@ mod tests {
             id: &'a mut ArcTreeId,
         ) -> Result<&'a mut Tree<ArcNodeId>, OperationalError> {
             ArcResolver.resolve_mut(id)
+        }
+    }
+
+    impl DataResolver<Bytes<Normal>, Normal> for FailOnKeyResolver {
+        fn resolve_bytes<'a>(
+            &self,
+            id: &'a Bytes<Normal>,
+            _key: &Key,
+        ) -> Result<&'a Bytes<Normal>, OperationalError> {
+            // resolution would fail on the node by the key first
+            Ok(id)
+        }
+
+        fn resolve_mut_bytes<'a>(
+            &self,
+            id: &'a mut Bytes<Normal>,
+            _key: &Key,
+        ) -> Result<&'a mut Bytes<Normal>, OperationalError> {
+            // resolution would fail on the node by the key first
+            Ok(id)
         }
     }
 

@@ -61,9 +61,9 @@ struct StoredNode {
 
 /// A node that supports rebalancing and Merklisation.
 #[perfect_derive(Clone, Default, Debug)]
-pub struct Node<TreeId, M: Mode> {
+pub struct Node<TreeId, DataId, M: Mode> {
     meta: Atom<Meta, M>,
-    data: Bytes<M>,
+    data: DataId,
     left: TreeId,
     right: TreeId,
 
@@ -74,7 +74,7 @@ pub struct Node<TreeId, M: Mode> {
     hash: OnceLock<Hash>,
 }
 
-impl Node<LazyTreeId, Normal> {
+impl Node<LazyTreeId, Bytes<Normal>, Normal> {
     /// Converts the [`Node`] to prove mode.
     pub fn into_proof(self) -> ProveNode {
         Node {
@@ -87,7 +87,7 @@ impl Node<LazyTreeId, Normal> {
     }
 }
 
-impl<TreeId, M: Mode> Node<TreeId, M> {
+impl<TreeId, DataId, M: Mode> Node<TreeId, DataId, M> {
     /// Mark the hash of this node as dirty.
     fn invalidate_hash(&mut self) {
         self.hash = OnceLock::new();
@@ -142,15 +142,16 @@ impl<TreeId, M: Mode> Node<TreeId, M> {
     }
 }
 
-impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
+impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     /// Find the id of the [`Node`] within the subtree of this [`Node`] with a given [`Key`].
     pub(super) fn get<'a, NodeId>(
         mut node: &'a NodeId,
         key: &Key,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<Option<&'a NodeId>, OperationalError>
     where
         NodeId: 'a,
+        DataId: 'a,
         TreeId: 'a,
         M: 'a,
     {
@@ -175,7 +176,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     }
 
     /// Create a new leaf [`Node`] from the given key and data.
-    pub(crate) fn new(key: Key, data: impl Into<Bytes<M>>) -> Self
+    pub(crate) fn new(key: Key, data: impl Into<DataId>) -> Self
     where
         TreeId: Default,
     {
@@ -197,11 +198,11 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     ) -> Result<(D, Self), <D::Parent as Deserialiser>::Error>
     where
         Atom<Meta, M>: FromProof,
-        Bytes<M>: FromProof,
+        DataId: FromProof,
         TreeId: FromProof,
     {
         let (ctx, meta) = ctx.next_branch::<Atom<Meta, M>>()?;
-        let (ctx, data) = ctx.next_branch::<Bytes<M>>()?;
+        let (ctx, data) = ctx.next_branch::<DataId>()?;
         let (ctx, left) = ctx.next_branch::<TreeId>()?;
         let (ctx, right) = ctx.next_branch::<TreeId>()?;
 
@@ -223,7 +224,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     pub(crate) fn hash(&self) -> &Hash
     where
         Atom<Meta, M>: Foldable<HashFold>,
-        Bytes<M>: Foldable<HashFold>,
+        DataId: Foldable<HashFold>,
         TreeId: Foldable<HashFold>,
     {
         self.hash.get_or_init(|| Hash::from_foldable(self))
@@ -255,7 +256,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 
     /// Retrieve the value associated with this node.
     #[inline]
-    pub(crate) fn data(&self) -> &Bytes<M> {
+    pub(crate) fn data(&self) -> &DataId {
         &self.data
     }
 
@@ -266,7 +267,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// it is an invalid AVL tree.
     pub(super) fn rebalance<NodeId: Clone>(
         node: &mut NodeId,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(), OperationalError> {
         let resolved_node = resolver.resolve(node)?;
         let balance_factor = resolved_node.balance_factor();
@@ -312,7 +313,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     ///  - `true` if the [`Tree`] has shrunk in size.
     pub(super) fn replace_with_successor<NodeId>(
         node: &mut NodeId,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(NodeId, bool), OperationalError>
     where
         NodeId: Clone,
@@ -377,7 +378,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     ///  - True if this [`Node`]'s subtree has shrunk in size.
     pub(super) fn take_min<NodeId>(
         node: &mut NodeId,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(Tree<NodeId>, Tree<NodeId>, bool), OperationalError>
     where
         NodeId: Clone,
@@ -415,11 +416,13 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
         key: &Key,
         offset: usize,
         data: impl FnOnce(&mut Bytes<M>) -> Result<(), Error>,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, Error>
     where
         TreeId: Default,
-        NodeId: Clone + From<Node<TreeId, M>>,
+        DataId: From<Bytes<M>>,
+        NodeId: Clone + From<Node<TreeId, DataId, M>>,
+        M: BytesMode,
     {
         // SAFETY: The default recursion limit in Rust is 128
         // see: <https://doc.rust-lang.org/reference/attributes/limits.html#r-attributes.limits.recursion_limit.syntax>
@@ -441,7 +444,8 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
         match self.meta.key.cmp(key) {
             // The key already exists and should be updated.
             Ordering::Equal => {
-                data(&mut self.data)?;
+                let bytes = resolver.resolve_mut_bytes(&mut self.data, &self.meta.key)?;
+                data(bytes)?;
                 self.invalidate_hash();
                 Ok(false)
             }
@@ -483,7 +487,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// or 0.
     fn rotate_left<NodeId>(
         node: &mut NodeId,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(), OperationalError>
     where
         NodeId: Clone,
@@ -556,7 +560,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// Assumes this [`Node`]'s balance factor is -2 and the left [Node]'s balance factor is +1.
     fn rotate_left_right<NodeId>(
         node: &mut NodeId,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(), OperationalError>
     where
         NodeId: Clone,
@@ -625,7 +629,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// or 0.
     fn rotate_right<NodeId>(
         node: &mut NodeId,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(), OperationalError>
     where
         NodeId: Clone,
@@ -698,7 +702,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// Assumes this [`Node`]'s balance factor is +2 and the left [Node]'s balance factor is -1.
     fn rotate_right_left<NodeId>(
         node: &mut NodeId,
-        resolver: &mut impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(), OperationalError>
     where
         NodeId: Clone,
@@ -751,16 +755,16 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
 }
 
 #[cfg(test)]
-impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
+impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     /// Returns true if the balance factors stored in the [`Node`]'s subtree are correct.
     pub(super) fn has_correct_balance_factors<NodeId>(
         &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, OperationalError>
     where
         NodeId: std::fmt::Debug,
         TreeId: std::fmt::Debug,
-        Bytes<M>: std::fmt::Debug,
+        DataId: std::fmt::Debug,
         Atom<Meta, M>: std::fmt::Debug,
     {
         let left_height = self.left_ref(resolver)?.height(resolver)?;
@@ -788,7 +792,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// Returns the height of this [`Node`]'s subtree.
     pub(super) fn height<NodeId>(
         &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<u32, OperationalError> {
         let left_height = self.left_ref(resolver)?.height(resolver)?;
         let right_height = self.right_ref(resolver)?.height(resolver)?;
@@ -798,7 +802,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     /// Returns true if this [`Node`]'s subtree is balanced.
     pub(super) fn is_balanced<NodeId>(
         &self,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, OperationalError> {
         let balance_factor = self.balance_factor();
         if balance_factor.abs() > 1 {
@@ -817,7 +821,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
         &self,
         min: &Key,
         max: &Key,
-        resolver: &impl AvlResolver<NodeId, TreeId, M>,
+        resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<bool, OperationalError> {
         if self.key() < min || self.key() > max {
             return Ok(false);
@@ -835,7 +839,7 @@ impl<TreeId, M: BytesMode + AtomMode> Node<TreeId, M> {
     }
 }
 
-impl<TreeId: Storable> Storable for Node<TreeId, Normal> {
+impl<TreeId: Storable> Storable for Node<TreeId, Bytes<Normal>, Normal> {
     fn store(
         &self,
         store: &impl KeyValueStore,
@@ -869,7 +873,7 @@ impl<TreeId: Storable> Storable for Node<TreeId, Normal> {
     }
 }
 
-impl<TreeId: Loadable> Loadable for Node<TreeId, Normal> {
+impl<TreeId: Loadable> Loadable for Node<TreeId, Bytes<Normal>, Normal> {
     fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
         let StoredNode { meta, left, right } = {
             let bytes =
@@ -909,12 +913,12 @@ impl<TreeId: Loadable> Loadable for Node<TreeId, Normal> {
     }
 }
 
-impl<F, TreeId, M> Foldable<F> for Node<TreeId, M>
+impl<F, TreeId, DataId, M> Foldable<F> for Node<TreeId, DataId, M>
 where
     F: Fold,
     M: Mode,
     Atom<Meta, M>: Foldable<F>,
-    Bytes<M>: Foldable<F>,
+    DataId: Foldable<F>,
     TreeId: Foldable<F>,
 {
     fn fold(&self, builder: F) -> <F as Fold>::Folded {

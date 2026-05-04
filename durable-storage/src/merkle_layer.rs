@@ -875,13 +875,14 @@ mod tests {
         assert_ne!(original_hash, ml2.hash());
         assert_eq!(original_hash, ml.hash());
 
-        let old_node1: Node<LazyTreeId, Normal> =
+        let old_node1: Node<LazyTreeId, Bytes<Normal>, Normal> =
             Node::new(keys[0].clone(), bytes::Bytes::copy_from_slice(&data[0]));
-        let new_node1: Node<LazyTreeId, Normal> = Node::new(keys[0].clone(), cow_data.as_bytes());
+        let new_node1: Node<LazyTreeId, Bytes<Normal>, Normal> =
+            Node::new(keys[0].clone(), cow_data.as_bytes());
 
-        let node2: Node<LazyTreeId, Normal> =
+        let node2: Node<LazyTreeId, Bytes<Normal>, Normal> =
             Node::new(keys[1].clone(), bytes::Bytes::copy_from_slice(&data[1]));
-        let node3: Node<LazyTreeId, Normal> =
+        let node3: Node<LazyTreeId, Bytes<Normal>, Normal> =
             Node::new(keys[2].clone(), bytes::Bytes::copy_from_slice(&data[2]));
 
         assert_eq!(
@@ -994,7 +995,7 @@ mod tests {
         ml.set(&key, &data).expect("setting node should succeed");
         assert_ne!(empty_hash, ml.hash());
 
-        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Bytes<Normal>, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1015,7 +1016,7 @@ mod tests {
         ml.set(&key, &data).expect("setting node should succeed");
         let old_hash = ml.hash();
 
-        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Bytes<Normal>, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1031,7 +1032,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data2);
+        let node: Node<LazyTreeId, Bytes<Normal>, Normal> = Node::new(key.clone(), data2);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1501,7 +1502,7 @@ mod tests {
         let old_hash = ml.hash();
         ml.write(&key, 0, &data).expect("write should succeed.");
 
-        let node: Node<ArcTreeId, Normal> = Node::new(key.clone(), data);
+        let node: Node<ArcTreeId, Bytes<Normal>, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1524,7 +1525,7 @@ mod tests {
         let old_hash = ml.hash();
 
         let data_len = data.len();
-        let node: Node<LazyTreeId, Normal> = Node::new(key.clone(), data);
+        let node: Node<LazyTreeId, Bytes<Normal>, Normal> = Node::new(key.clone(), data);
         let get_node = ml
             .get(&key)
             .expect("The node should be retrieved successfully")
@@ -1541,7 +1542,7 @@ mod tests {
                 .expect("The tree should be retrieved successfully."),
             "AVL isn't in order: {ml:?}"
         );
-        let node: Node<LazyTreeId, Normal> =
+        let node: Node<LazyTreeId, Bytes<Normal>, Normal> =
             Node::new(key.clone(), bytes::Bytes::from("a good value"));
         let get_node = ml
             .get(&key)
@@ -1769,7 +1770,7 @@ mod tests {
             .expect("The commit operation should not fail");
 
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
-            let node: &Node<LazyTreeId, Normal> =
+            let node: &Node<LazyTreeId, Bytes<Normal>, Normal> =
                 node.expect("The node should be retrieved successfully");
 
             node.store(
@@ -1778,7 +1779,7 @@ mod tests {
             )
             .expect("Storing node should succeed");
 
-            let loaded_node: Node<LazyTreeId, Normal> =
+            let loaded_node: Node<LazyTreeId, Bytes<Normal>, Normal> =
                 Node::load(*node.hash(), merkle_layer.inner.persistence.as_ref())
                     .expect("Loading node should succeed");
 
