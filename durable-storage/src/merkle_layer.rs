@@ -584,6 +584,23 @@ impl<KV> MerkleLayer<KV, Verify> {
     }
 }
 
+impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'static>> {
+    /// Returns an immutable reference to the data stored for a given ['Key'].
+    pub(crate) fn get(
+        &self,
+        key: &Key,
+    ) -> Result<Option<&Bytes<Prove<'static>>>, OperationalError> {
+        let node = self.inner.working_tree.get(key, &self.inner.resolver)?;
+        match node {
+            Some(node_id) => {
+                let resolved_node = self.inner.resolver.resolve(node_id)?;
+                Ok(Some(resolved_node.data()))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
 /// Construct a verify-mode [`MerkleLayer`] for an empty initial state. Used in tests that exercise
 /// verify-mode mutation primitives in isolation.
 #[cfg(test)]
@@ -628,6 +645,7 @@ mod tests {
     use crate::avl::resolver::LazyNodeId;
     use crate::avl::resolver::LazyResolver;
     use crate::avl::resolver::LazyTreeId;
+    use crate::avl::resolver::ProveNodeId;
     use crate::avl::resolver::ProveResolver;
     use crate::avl::resolver::Resolver;
     use crate::avl::resolver::VerifyResolver;
@@ -692,15 +710,22 @@ mod tests {
     }
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'static>> {
-        fn get(&self, key: &Key) -> Result<Option<&Bytes<Prove<'static>>>, OperationalError> {
-            let node = self.inner.working_tree.get(key, &self.inner.resolver)?;
-            match node {
-                Some(node_id) => {
-                    let resolved_node = self.inner.resolver.resolve(node_id)?;
-                    Ok(Some(resolved_node.data()))
-                }
-                None => Ok(None),
+        /// Construct a Prove-mode MerkleLayer from a tree, lazily resolving from `persistence`.
+        pub(crate) fn from_prove_tree(persistence: Arc<KV>, tree: Tree<ProveNodeId>) -> Self {
+            MerkleLayer {
+                inner: ProveImpl {
+                    initial_tree: LazyTreeId::default(),
+                    working_tree: tree,
+                    resolver: ProveResolver::start(LazyResolver::new(persistence), None),
+                },
             }
+        }
+
+        /// Generate a Merkle proof from the current Prove-mode layer and produce a Verify-mode
+        /// layer that replays the same data via that proof.
+        pub(crate) fn into_verify(self) -> MerkleLayer<KV, Verify> {
+            let proof = MerkleProof::from_foldable(&self);
+            MerkleLayer::from_proof(proof).expect("proof deserialization should succeed")
         }
     }
 

@@ -22,6 +22,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
@@ -276,7 +277,7 @@ struct DatabaseTemplate<KV>(PhantomData<KV>, Infallible);
 impl<KV> Modal for DatabaseTemplate<KV> {
     type Normal = NormalImpl<KV>;
 
-    type Prove<'normal> = Infallible;
+    type Prove<'normal> = ProveImpl<KV>;
 
     type Verify = VerifyImpl<KV>;
 }
@@ -444,6 +445,75 @@ impl DatabaseMode for Verify {
     }
 }
 
+/// Prove-mode implementation for the [`Database`].
+struct ProveImpl<KV> {
+    merkle: MerkleLayer<KV, Prove<'static>>,
+}
+
+impl DatabaseMode for Prove<'static> {
+    fn get<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+        key: &Key,
+    ) -> Result<impl ValueRef, Error> {
+        // Defers reading the bytes (and thereby recording an access against the proof) until the
+        // caller actually reads from the value, and only records the requested range.
+        // `value_length` and `exists` only invoke `len`, which queries the length without
+        // recording a byte-range read.
+        struct Wrapper<'a>(&'a octez_riscv_data::components::bytes::Bytes<Prove<'static>>);
+
+        impl ValueRef for Wrapper<'_> {
+            fn len(&self) -> usize {
+                self.0.len()
+            }
+
+            fn read(&self, offset: usize, buf: &mut [u8]) -> usize {
+                self.0.read(offset, buf)
+            }
+        }
+
+        let bytes = this
+            .inner
+            .merkle
+            .get(key)?
+            .ok_or(InvalidArgumentError::KeyNotFound)?;
+
+        Ok(Wrapper(bytes))
+    }
+
+    fn set<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+        data: Bytes,
+    ) -> Result<(), Error> {
+        this.inner.merkle.set(&key, &data)?;
+        Ok(())
+    }
+
+    fn write<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+        offset: usize,
+        data: Bytes,
+    ) -> Result<usize, Error> {
+        let written = data.len();
+        this.inner.merkle.write(&key, offset, &data)?;
+        Ok(written)
+    }
+
+    fn delete<KV: BackgroundKeyValueStore>(
+        this: &mut Database<KV, Self>,
+        key: Key,
+    ) -> Result<(), OperationalError> {
+        this.inner.merkle.delete(&key)
+    }
+
+    fn hash<KV: BackgroundKeyValueStore>(
+        this: &Database<KV, Self>,
+    ) -> Result<Hash, OperationalError> {
+        Ok(this.inner.merkle.hash())
+    }
+}
+
 #[cfg(test)]
 impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Assert that a database contains the expected value for a given key.
@@ -460,10 +530,13 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
+    use octez_riscv_data::mode::utils::catch_not_found;
     use proptest::prelude::*;
     use proptest::prop_assert_eq;
     use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
@@ -471,11 +544,13 @@ mod tests {
 
     use super::Database;
     use super::DatabaseMode;
+    use crate::avl::tree::Tree;
     use crate::database::MAX_VALUE_SIZE;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
+    use crate::merkle_layer::MerkleLayer;
     use crate::merkle_layer::new_verify_layer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
@@ -494,6 +569,14 @@ mod tests {
         Database {
             inner: super::VerifyImpl {
                 merkle: new_verify_layer::<KV>(repo),
+            },
+        }
+    }
+
+    fn new_prove_database<KV: KeyValueStore>(persistence: Arc<KV>) -> Database<KV, Prove<'static>> {
+        Database {
+            inner: super::ProveImpl {
+                merkle: MerkleLayer::from_prove_tree(persistence, Tree::default()),
             },
         }
     }
@@ -1452,5 +1535,375 @@ mod tests {
         let mut expected = initial.clone();
         expected[offset..offset + patch_len].copy_from_slice(patch);
         prop_assert_eq!(result.as_ref(), expected.as_slice());
+    });
+
+    fn new_persistence<KV>() -> (KV::Keepalive, Arc<KV>)
+    where
+        KV: BackgroundKeyValueStore + TestKeyValueStoreSetup,
+    {
+        let (keepalive, repo) = KV::setup_repo();
+        let persistence: Arc<KV> = KV::new(&repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        (keepalive, persistence)
+    }
+
+    kv_test!(test_prove_database_delete, KV: BackgroundKeyValueStore, {
+        let (_keepalive, persistence) = new_persistence::<KV>();
+        let mut database = new_prove_database::<KV>(persistence);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&[]))
+            .expect("Setting a key in Prove mode should succeed");
+        assert!(
+            database
+                .exists(&key)
+                .expect("Existence check in Prove mode should succeed")
+        );
+
+        database
+            .delete(key.clone())
+            .expect("Deleting a key in Prove mode should succeed");
+        assert!(
+            !database
+                .exists(&key)
+                .expect("Existence check in Prove mode should succeed")
+        );
+
+        // Deleting a non-existent key should also succeed.
+        let nonexistent_key = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        assert!(
+            !database
+                .exists(&nonexistent_key)
+                .expect("Existence check in Prove mode should succeed")
+        );
+        database
+            .delete(nonexistent_key)
+            .expect("Deleting a non-existent key in Prove mode should succeed");
+    });
+
+    kv_test!(test_prove_database_set_and_read, KV: BackgroundKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        data in prop::collection::vec(any::<u8>(), 0..200),
+    ], {
+        let persistence: Arc<KV> = KV::new(repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut database = new_prove_database::<KV>(persistence);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&data))
+            .expect("Setting a key in Prove mode should succeed");
+
+        let result = database
+            .read_bytes(&key, 0, data.len())
+            .expect("Reading a key in Prove mode should succeed");
+        prop_assert_eq!(result.as_ref(), data.as_slice());
+    });
+
+    kv_test!(test_prove_database_value_length, KV: BackgroundKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        data in prop::collection::vec(any::<u8>(), 0..200),
+    ], {
+        let persistence: Arc<KV> = KV::new(repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut database = new_prove_database::<KV>(persistence);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&data))
+            .expect("Setting a key in Prove mode should succeed");
+
+        prop_assert_eq!(
+            database
+                .value_length(&key)
+                .expect("Reading the length in Prove mode should succeed"),
+            data.len()
+        );
+    });
+
+    kv_test!(test_prove_database_write_partial, KV: BackgroundKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        initial in prop::collection::vec(any::<u8>(), 1..200),
+        patch in prop::collection::vec(any::<u8>(), 0..200),
+        offset_frac in 0_usize..=100,
+    ], {
+        let offset = offset_frac * initial.len() / 100;
+        let patch_len = patch.len().min(initial.len() - offset);
+        let patch = &patch[..patch_len];
+
+        let persistence: Arc<KV> = KV::new(repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut database = new_prove_database::<KV>(persistence);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&initial))
+            .expect("Setting a key in Prove mode should succeed");
+
+        let written = database
+            .write(key.clone(), offset, Bytes::copy_from_slice(patch))
+            .expect("Writing a key in Prove mode should succeed");
+        prop_assert_eq!(written, patch_len);
+
+        let result = database
+            .read_bytes(&key, 0, initial.len())
+            .expect("Reading a key in Prove mode should succeed");
+
+        let mut expected = initial.clone();
+        expected[offset..offset + patch_len].copy_from_slice(patch);
+        prop_assert_eq!(result.as_ref(), expected.as_slice());
+    });
+
+    kv_test!(test_prove_database_missing_key, KV: BackgroundKeyValueStore, {
+        let (_keepalive, persistence) = new_persistence::<KV>();
+        let mut database = new_prove_database::<KV>(persistence);
+
+        let missing_key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        assert!(
+            !database
+                .exists(&missing_key)
+                .expect("Existence check on an absent key should succeed")
+        );
+        assert!(matches!(
+            database.value_length(&missing_key),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+        assert!(matches!(
+            database.read_bytes(&missing_key, 0, 1),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+        let mut buf = [0u8; 4];
+        assert!(matches!(
+            database.read(&missing_key, 0, buf.as_mut_slice()),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+        database
+            .delete(missing_key)
+            .expect("Deleting a non-existent key in Prove mode should succeed");
+
+        // After insert + delete, the key should once again behave as absent.
+        let key = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key.clone(), Bytes::copy_from_slice(b"data"))
+            .expect("Setting a key in Prove mode should succeed");
+        database
+            .delete(key.clone())
+            .expect("Deleting a key in Prove mode should succeed");
+
+        assert!(
+            !database
+                .exists(&key)
+                .expect("Existence check after delete should succeed")
+        );
+        assert!(matches!(
+            database.value_length(&key),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+        assert!(matches!(
+            database.read_bytes(&key, 0, 1),
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
+        ));
+    });
+
+    kv_test!(test_prove_database_read_bytes_partial, KV: BackgroundKeyValueStore,
+        setup |repo| = { KV::setup_repo() },
+    [
+        data in prop::collection::vec(any::<u8>(), 3..200),
+        offset_frac in 0_usize..=100,
+        len_frac in 0_usize..=100,
+    ], {
+        let offset = offset_frac * data.len() / 100;
+        let length = len_frac * (data.len() - offset) / 100;
+
+        let persistence: Arc<KV> = KV::new(repo)
+            .expect("Creating a persistence layer should succeed")
+            .into();
+        let mut database = new_prove_database::<KV>(persistence);
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&data))
+            .expect("Setting a key in Prove mode should succeed");
+
+        let result = database
+            .read_bytes(&key, offset, length)
+            .expect("Reading a sub-range in Prove mode should succeed");
+        prop_assert_eq!(result.as_ref(), &data[offset..offset + length]);
+
+        // Zero-sized read at the end of the value.
+        let result = database
+            .read_bytes(&key, data.len(), 0)
+            .expect("A zero-sized read at end of value should succeed");
+        prop_assert_eq!(result.as_ref(), &[] as &[u8]);
+
+        // Single-byte read of the last byte.
+        let result = database
+            .read_bytes(&key, data.len() - 1, 1)
+            .expect("A partial read of the last byte should succeed");
+        prop_assert_eq!(result.as_ref(), &data[data.len() - 1..]);
+
+        // Offset beyond value length is rejected.
+        prop_assert!(matches!(
+            database.read_bytes(&key, data.len() + 1, 1),
+            Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge))
+        ));
+
+        // IoRequestTooLarge takes priority over offset and key checks.
+        prop_assert!(matches!(
+            database.read_bytes(&key, 0, MAX_FILE_CHUNK_SIZE + 1),
+            Err(Error::InvalidArgument(InvalidArgumentError::IoRequestTooLarge))
+        ));
+    });
+
+    kv_test!(test_prove_database_read_bytes_records_only_accessed_range, KV: BackgroundKeyValueStore, {
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        // Build an 8192-byte value (two PAGE_SIZE pages) directly through MerkleLayer<Normal>,
+        // bypassing Database's per-call MAX_FILE_CHUNK_SIZE limit.
+        let value: Vec<u8> = (0..8192u32).map(|i| (i & 0xff) as u8).collect();
+        let (_keepalive, persistence) = new_persistence::<KV>();
+        let mut normal_ml = MerkleLayer::<KV, Normal>::new(persistence);
+        normal_ml
+            .set(&key, &value)
+            .expect("populating the normal layer should succeed");
+
+        // Convert to Prove and read a small range entirely contained in page 1.
+        let prove_db: Database<KV, Prove<'static>> = Database {
+            inner: super::ProveImpl {
+                merkle: normal_ml.start_proof(),
+            },
+        };
+        let read_offset = 5000usize;
+        let read_len = 4usize;
+        let read_back = prove_db
+            .read_bytes(&key, read_offset, read_len)
+            .expect("Prove-mode read should succeed")
+            .as_ref()
+            .to_vec();
+        assert_eq!(
+            read_back,
+            &value[read_offset..read_offset + read_len],
+            "Prove-mode read should return the requested bytes"
+        );
+
+        // Generate the proof and produce a Verify-mode database from it.
+        let prove_ml = prove_db.inner.merkle;
+        let verify_ml: MerkleLayer<KV, Verify> = prove_ml.into_verify();
+        let verify_db: Database<KV, Verify> = Database {
+            inner: super::VerifyImpl { merkle: verify_ml },
+        };
+
+        // The recorded range round-trips: the proof contains page 1, so reading [5000..5004]
+        // succeeds in Verify mode.
+        let verified = catch_not_found(|| {
+            verify_db
+                .read_bytes(&key, read_offset, read_len)
+                .expect("Verify-mode read of recorded range should not error")
+                .as_ref()
+                .to_vec()
+        })
+        .expect("Verify-mode read of recorded range must not trigger not_found");
+        assert_eq!(verified, &value[read_offset..read_offset + read_len]);
+
+        // Page 0 was never accessed, so it is omitted from the proof. Reading bytes from it in
+        // Verify mode panics via `not_found` — proving that the Prove-mode read recorded only the
+        // requested range, not the whole value.
+        let unrecorded = catch_not_found(|| {
+            let _ = verify_db.read_bytes(&key, 0, 4);
+        });
+        assert!(
+            unrecorded.is_err(),
+            "Verify-mode read of an un-recorded range must trigger not_found, \
+             but the read succeeded — Prove-mode `get` is over-recording"
+        );
+    });
+
+    kv_test!(test_prove_database_write_append, KV: BackgroundKeyValueStore, {
+        let (_keepalive, persistence) = new_persistence::<KV>();
+        let mut database = new_prove_database::<KV>(persistence);
+
+        // Append non-empty data at offset == value_length.
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key.clone(), Bytes::copy_from_slice(b"hello"))
+            .expect("Setting a key in Prove mode should succeed");
+
+        let written = database
+            .write(key.clone(), 5, Bytes::copy_from_slice(b" world"))
+            .expect("Appending to an existing value in Prove mode should succeed");
+        assert_eq!(written, 6);
+        assert_eq!(
+            database
+                .value_length(&key)
+                .expect("Reading the length in Prove mode should succeed"),
+            11
+        );
+        database.assert_database_value(&key, b"hello world");
+
+        // Writing to a non-existent key at offset 0 creates it.
+        let new_key = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        let written = database
+            .write(new_key.clone(), 0, Bytes::copy_from_slice(b"fresh"))
+            .expect("Writing a non-existent key at offset 0 in Prove mode should succeed");
+        assert_eq!(written, 5);
+        database.assert_database_value(&new_key, b"fresh");
+
+        // Writing to a non-existent key at a non-zero offset is rejected.
+        let other_key = Key::new(&[3]).expect("Size less than KEY_MAX_SIZE");
+        assert!(matches!(
+            database.write(other_key, 1, Bytes::copy_from_slice(&[])),
+            Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge))
+        ));
+
+        // ValueSizeTooLarge is enforced before reaching the merkle layer.
+        assert!(matches!(
+            database.write(key, MAX_VALUE_SIZE, Bytes::copy_from_slice(&[1])),
+            Err(Error::InvalidArgument(InvalidArgumentError::ValueSizeTooLarge))
+        ));
+    });
+
+    kv_test!(test_prove_database_hash, KV: BackgroundKeyValueStore, {
+        let (_keepalive, persistence) = new_persistence::<KV>();
+        let mut database = new_prove_database::<KV>(persistence);
+
+        let key = Key::new(&[0]).expect("Size less than KEY_MAX_SIZE");
+        let original_data = [1, 2, 3];
+        let mutated_data = [3, 2, 1];
+
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&original_data))
+            .expect("Setting a key in Prove mode should succeed");
+
+        let before = database
+            .hash()
+            .expect("Hashing in Prove mode should succeed");
+
+        // Mutate the same key.
+        database
+            .set(key.clone(), Bytes::copy_from_slice(&mutated_data))
+            .expect("Setting a key in Prove mode should succeed");
+
+        let after = database
+            .hash()
+            .expect("Hashing in Prove mode should succeed");
+        assert_ne!(before, after);
+
+        // Revert the value of the same key and check that the hash reverts to its prior value.
+        database
+            .set(key, Bytes::copy_from_slice(&original_data))
+            .expect("Setting a key in Prove mode should succeed");
+        let reverted = database
+            .hash()
+            .expect("Hashing in Prove mode should succeed");
+        assert_eq!(before, reverted);
     });
 }
