@@ -12,8 +12,6 @@ pub(crate) mod value_ref;
 
 use std::convert::Infallible;
 use std::marker::PhantomData;
-use std::ops::Index;
-use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::BufMut;
@@ -195,24 +193,11 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         }
 
         let end = offset.saturating_add(max_bytes).min(value_length);
+        let mut buf = vec![0u8; end - offset];
+        let written = value.read(offset, &mut buf);
+        debug_assert_eq!(written, buf.len());
 
-        struct Wrapper<T> {
-            offset: usize,
-            end: usize,
-            inner: T,
-        }
-
-        impl<T: ValueRef> AsRef<[u8]> for Wrapper<T> {
-            fn as_ref(&self) -> &[u8] {
-                &self.inner[self.offset..self.end]
-            }
-        }
-
-        Ok(Wrapper {
-            offset,
-            end,
-            inner: value,
-        })
+        Ok(buf)
     }
 
     /// Inserts the value associated with the provided key, replacing any data already associated
@@ -398,29 +383,31 @@ impl DatabaseMode for Verify {
         // [`impl ValueRef`] without allocating.
         struct Wrapper<'a>(&'a octez_riscv_data::components::bytes::Bytes<Verify>);
 
-        impl Index<Range<usize>> for Wrapper<'_> {
-            type Output = [u8];
-
-            fn index(&self, range: Range<usize>) -> &[u8] {
-                // TODO RV-993: Reading data which is contained in multiple adjacent entries will
-                // yield `not_found`.
-                self.0.partial_slice(range)
-            }
-        }
-
         impl ValueRef for Wrapper<'_> {
             fn len(&self) -> usize {
                 self.0.len()
             }
+
+            fn read(&self, offset: usize, buf: &mut [u8]) -> usize {
+                let len = self.0.len();
+                if offset >= len {
+                    return 0;
+                }
+                let end = offset.saturating_add(buf.len()).min(len);
+                let read_len = end - offset;
+                let src = self.0.partial_slice(offset..end);
+                buf[..read_len].copy_from_slice(src);
+                read_len
+            }
         }
 
-        let value = this
+        let bytes = this
             .inner
             .merkle
             .get(key)?
             .ok_or(InvalidArgumentError::KeyNotFound)?;
 
-        Ok(Wrapper(value))
+        Ok(Wrapper(bytes))
     }
 
     fn set<KV: BackgroundKeyValueStore>(
