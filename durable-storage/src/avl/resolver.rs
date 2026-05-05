@@ -27,6 +27,7 @@
 //! [`Tree`]: crate::avl::tree::Tree
 //! [`Node`]: crate::avl::node::Node
 
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -54,6 +55,7 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::not_found;
+use perfect_derive::perfect_derive;
 use trait_set::trait_set;
 
 use super::node::Node;
@@ -270,7 +272,7 @@ impl<Value> From<Hash> for LazyId<Value> {
 
 /// Identifier for an AVL node.
 #[derive(Debug, Clone)]
-pub struct LazyNodeId(LazyId<Arc<Node<LazyTreeId, Bytes<Normal>, Normal>>>);
+pub struct LazyNodeId(LazyId<Arc<Node<LazyTreeId, LazyDataId, Normal>>>);
 
 impl LazyNodeId {
     /// Wrap this lazy node identifier in a prove-mode identifier.
@@ -287,8 +289,8 @@ impl LazyNodeId {
     }
 }
 
-impl From<Node<LazyTreeId, Bytes<Normal>, Normal>> for LazyNodeId {
-    fn from(value: Node<LazyTreeId, Bytes<Normal>, Normal>) -> Self {
+impl From<Node<LazyTreeId, LazyDataId, Normal>> for LazyNodeId {
+    fn from(value: Node<LazyTreeId, LazyDataId, Normal>) -> Self {
         let value = Arc::new(value);
         Self(LazyId::new(value))
     }
@@ -332,6 +334,132 @@ impl Storable for LazyNodeId {
 impl Loadable for LazyNodeId {
     fn load(id: Hash, _store: &impl KeyValueStore) -> Result<Self, OperationalError> {
         Ok(Self::from(id))
+    }
+}
+
+/// Identifier for the bytes of an AVL node.
+#[perfect_derive(Debug, Clone)]
+pub struct LazyDataId(LazyId<Bytes<Normal>>);
+
+impl LazyDataId {
+    /// Converts the [`LazyDataId`] to prove mode.
+    pub(crate) fn into_proof(mut self) -> Bytes<Prove<'static>> {
+        self.0
+            .inner
+            .take()
+            .expect("All nodes with unresolved data are deleted immediately.")
+            .into_proof()
+    }
+
+    /// Attempt to load the bytes value from the database, returning
+    /// a reference to the bytes.
+    pub(crate) fn try_get(
+        &self,
+        key: &Key,
+        store: &impl KeyValueStore,
+    ) -> Result<&Bytes<Normal>, OperationalError> {
+        if let Some(bytes) = self.0.inner.get() {
+            return Ok(bytes);
+        }
+
+        self.try_load_inner(key, store)?;
+        let bytes = self.0.inner.get().expect("Try load succeeded");
+
+        Ok(bytes)
+    }
+
+    /// Attempt to load the bytes value from the database, returning
+    /// a mutable reference to the bytes.
+    fn try_get_mut(
+        &mut self,
+        key: &Key,
+        store: &impl KeyValueStore,
+    ) -> Result<&mut Bytes<Normal>, OperationalError> {
+        // evict the cached-hash, if any - the value will be mutated
+        self.0.hash = None;
+
+        if let Some(bytes) = self.0.inner.get_mut() {
+            let temp = bytes as *mut Bytes<Normal>;
+            // This unsafe workaround is required because the rust borrow-checker
+            // is unable to identify the `bytes` mutable reference being dropped straight
+            // away if the condition is false.
+            //
+            // SAFETY: This is a value `&mut Bytes<Normal>` reference with no other
+            // references to the same Bytes being used after this return.
+            return Ok(unsafe { &mut *temp });
+        }
+
+        self.try_load_inner(key, store)?;
+        let bytes = self.0.inner.get_mut().expect("Try load succeeded");
+
+        Ok(bytes)
+    }
+
+    /// Attempt to load the value from a key-value store.
+    ///
+    /// The stored representation of nodes does not include the `data` field,
+    /// so we need to load it separately from the KV store.
+    ///
+    /// If this succeeds, the inner lazy-id is guaranteed to be
+    /// initialised.
+    fn try_load_inner(
+        &self,
+        key: &Key,
+        store: &impl KeyValueStore,
+    ) -> Result<(), OperationalError> {
+        let bytes = store
+            .get(key)
+            .map_err(|error| OperationalError::CommitValueMissing {
+                key: key.clone(),
+                source: Box::new(error),
+            })?;
+        let bytes = Bytes::from(bytes.as_ref());
+
+        // TODO (RV-987): ensure eventual consistency
+        // It's possible it's been initialised by another thread,
+        // but this should not affect overall semantics (see RV-987)
+        let _ = self.0.inner.set(bytes);
+
+        Ok(())
+    }
+}
+
+impl From<Bytes<Normal>> for LazyDataId {
+    fn from(value: Bytes<Normal>) -> Self {
+        Self(LazyId::new(value))
+    }
+}
+
+impl From<Hash> for LazyDataId {
+    fn from(value: Hash) -> Self {
+        Self(LazyId::from(value))
+    }
+}
+
+impl Borrow<[u8]> for LazyDataId {
+    fn borrow(&self) -> &[u8] {
+        let Some(bytes) = self.0.inner.get() else {
+            unreachable!(
+                "All LazyDataId instances are currently populated, except for nodes under deletion"
+            );
+        };
+
+        bytes.borrow()
+    }
+}
+
+impl Foldable<HashFold> for LazyDataId {
+    fn fold(&self, _builder: HashFold) -> <HashFold as Fold>::Folded {
+        if let Some(hash) = self.0.hash() {
+            return *hash;
+        }
+
+        let bytes = self
+            .0
+            .inner
+            .get()
+            .expect("ID should be present when the hash is absent");
+        Hash::from_foldable(bytes)
     }
 }
 
@@ -429,13 +557,13 @@ impl<KV> LazyResolver<KV> {
     }
 }
 
-impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>, Normal>>
+impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>
     for LazyResolver<KV>
 {
     fn resolve<'a>(
         &self,
         id: &'a LazyNodeId,
-    ) -> Result<&'a Node<LazyTreeId, Bytes<Normal>, Normal>, OperationalError> {
+    ) -> Result<&'a Node<LazyTreeId, LazyDataId, Normal>, OperationalError> {
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
         }
@@ -448,7 +576,7 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>, Nor
     fn resolve_mut<'a>(
         &mut self,
         id: &'a mut LazyNodeId,
-    ) -> Result<&'a mut Node<LazyTreeId, Bytes<Normal>, Normal>, OperationalError> {
+    ) -> Result<&'a mut Node<LazyTreeId, LazyDataId, Normal>, OperationalError> {
         if let Some(value) = id.0.inner.get_mut() {
             let temp = value as *mut Arc<_>;
             // This unsafe workaround is required because the rust borrow-checker
@@ -496,21 +624,21 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
     }
 }
 
-impl<KV> DataResolver<Bytes<Normal>, Normal> for LazyResolver<KV> {
+impl<KV: KeyValueStore> DataResolver<LazyDataId, Normal> for LazyResolver<KV> {
     fn resolve_bytes<'a>(
         &self,
-        id: &'a Bytes<Normal>,
-        _key: &Key,
+        id: &'a LazyDataId,
+        key: &Key,
     ) -> Result<&'a Bytes<Normal>, OperationalError> {
-        Ok(id)
+        id.try_get(key, &*self.persistence_layer)
     }
 
     fn resolve_mut_bytes<'a>(
         &self,
-        id: &'a mut Bytes<Normal>,
-        _key: &Key,
+        id: &'a mut LazyDataId,
+        key: &Key,
     ) -> Result<&'a mut Bytes<Normal>, OperationalError> {
-        Ok(id)
+        id.try_get_mut(key, &*self.persistence_layer)
     }
 }
 
@@ -741,16 +869,16 @@ impl<R> ProveResolver<R> {
     /// Prove-mode projections of nodes unlinked from the working tree during the step, keyed by
     /// their initial-tree hash.
     pub(crate) fn deleted_nodes(&self) -> impl Deref<Target = BTreeMap<Hash, DeletedNodeFields>> {
-        self.deleted_nodes.borrow()
+        self.deleted_nodes.deref().borrow()
     }
 
     /// Track node access and resolve the underlying lazy node in one step.
     fn resolve_and_track_node<'a>(
         &self,
         id: &'a LazyNodeId,
-    ) -> Result<&'a Node<LazyTreeId, Bytes<Normal>, Normal>, OperationalError>
+    ) -> Result<&'a Node<LazyTreeId, LazyDataId, Normal>, OperationalError>
     where
-        R: Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>, Normal>>,
+        R: Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>,
     {
         self.accessed_items
             .borrow_mut()
@@ -777,7 +905,7 @@ impl<R> ProveResolver<R> {
 
 impl<R> Resolver<ProveNodeId, ProveNode> for ProveResolver<R>
 where
-    R: Resolver<LazyNodeId, Node<LazyTreeId, Bytes<Normal>, Normal>>
+    R: Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>
         + Resolver<LazyTreeId, Tree<LazyNodeId>>,
 {
     fn resolve<'b>(&self, id: &'b ProveNodeId) -> Result<&'b ProveNode, OperationalError> {
@@ -1055,13 +1183,16 @@ impl DataResolver<Bytes<Verify>, Verify> for VerifyResolver {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Borrow;
     use std::sync::Arc;
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
     use octez_riscv_data::components::bytes::Bytes;
+    use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::HashFold;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::NotFound;
@@ -1161,15 +1292,16 @@ mod tests {
         }
     }
 
-    fn persist_tree<NodeId, TreeId, Res, KV>(
+    fn persist_tree<NodeId, DataId, TreeId, Res, KV>(
         tree: &Tree<NodeId>,
         resolver: &Res,
         persistence_layer: &KV,
     ) where
         NodeId: Storable,
         TreeId: Storable,
+        DataId: Foldable<HashFold> + Borrow<[u8]>,
         KV: KeyValueStore,
-        Res: AvlResolver<NodeId, Bytes<Normal>, TreeId, Normal>,
+        Res: AvlResolver<NodeId, DataId, TreeId, Normal>,
     {
         let store_options = StoreOptions::default().with_shallow().with_node_data();
 
@@ -1392,9 +1524,12 @@ mod tests {
         let node = lazy_resolver
             .resolve(root_id)
             .expect("resolving mutated node should succeed");
+        let node_data = node
+            .resolve_data(&lazy_resolver)
+            .expect("resolving node's data should succeed");
 
-        let mut data = vec![0; node.data().len()];
-        node.data().read(0, &mut data);
+        let mut data = vec![0; node_data.len()];
+        node_data.read(0, &mut data);
         assert_eq!(data.as_slice(), b"root-mutated");
 
         let persisted_tree_hash = lazy_tree.hash();
@@ -1421,8 +1556,12 @@ mod tests {
             .expect("resolving persisted mutated root node should succeed");
         assert_eq!(persistence_layer.blob_get_calls(), 3);
 
-        let mut reloaded_data = vec![0; reloaded_node.data().len()];
-        reloaded_node.data().read(0, &mut reloaded_data);
+        let reloaded_node_data = reloaded_node
+            .resolve_data(&lazy_resolver)
+            .expect("resolving peristed mutated root node data should succeed");
+
+        let mut reloaded_data = vec![0; reloaded_node_data.len()];
+        reloaded_node_data.read(0, &mut reloaded_data);
         assert_eq!(reloaded_data.as_slice(), b"root-mutated");
     }
 

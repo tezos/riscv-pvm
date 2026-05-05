@@ -642,6 +642,7 @@ mod tests {
     use super::new_verify_layer;
     use crate::avl::node::Node;
     use crate::avl::resolver::ArcTreeId;
+    use crate::avl::resolver::LazyDataId;
     use crate::avl::resolver::LazyNodeId;
     use crate::avl::resolver::LazyResolver;
     use crate::avl::resolver::LazyTreeId;
@@ -675,7 +676,8 @@ mod tests {
             match node {
                 Some(node_id) => {
                     let resolved_node = self.inner.resolver.resolve(node_id)?;
-                    Ok(Some(resolved_node.data()))
+                    let data = resolved_node.resolve_data(&self.inner.resolver)?;
+                    Ok(Some(data))
                 }
                 None => Ok(None),
             }
@@ -1796,7 +1798,7 @@ mod tests {
             .expect("The commit operation should not fail");
 
         for node in merkle_layer.inner.tree.iter(&merkle_layer.inner.resolver) {
-            let node: &Node<LazyTreeId, Bytes<Normal>, Normal> =
+            let node: &Node<LazyTreeId, LazyDataId, Normal> =
                 node.expect("The node should be retrieved successfully");
 
             node.store(
@@ -1812,7 +1814,9 @@ mod tests {
             assert_eq!(node.hash(), loaded_node.hash());
             assert_eq!(node.balance_factor(), loaded_node.balance_factor());
             assert_eq!(node.key(), loaded_node.key());
-            assert_eq!(node.data(), loaded_node.data());
+
+            let node_data = node.resolve_data(&merkle_layer.inner.resolver).expect("Loading data should succeed");
+            assert_eq!(node_data, loaded_node.data());
         }
 
         let root_hash = merkle_layer.hash();

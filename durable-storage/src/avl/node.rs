@@ -29,12 +29,14 @@ use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
+use super::resolver::LazyDataId;
 use super::resolver::LazyTreeId;
 use super::resolver::ProveNode;
 use super::resolver::TreeResolver;
 use super::tree::Tree;
 use crate::avl::resolver::AvlResolver;
 use crate::errors::Error;
+use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
@@ -75,7 +77,7 @@ pub struct Node<TreeId, DataId, M: Mode> {
     hash: OnceLock<Hash>,
 }
 
-impl Node<LazyTreeId, Bytes<Normal>, Normal> {
+impl Node<LazyTreeId, LazyDataId, Normal> {
     /// Converts the [`Node`] to prove mode.
     pub fn into_proof(self) -> ProveNode {
         Node {
@@ -85,6 +87,15 @@ impl Node<LazyTreeId, Bytes<Normal>, Normal> {
             right: self.right.into_proof(),
             hash: self.hash.clone(),
         }
+    }
+
+    /// Resolve the data field on a lazy node.
+    #[cfg(test)]
+    pub(crate) fn resolve_data(
+        &self,
+        resolver: &impl AvlResolver<super::resolver::LazyNodeId, LazyDataId, LazyTreeId, Normal>,
+    ) -> Result<&Bytes<Normal>, OperationalError> {
+        resolver.resolve_bytes(&self.data, &self.meta.key)
     }
 }
 
@@ -840,7 +851,10 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     }
 }
 
-impl<TreeId: Storable> Storable for Node<TreeId, Bytes<Normal>, Normal> {
+impl<TreeId: Storable, DataId> Storable for Node<TreeId, DataId, Normal>
+where
+    DataId: Foldable<HashFold> + Borrow<[u8]>,
+{
     fn store(
         &self,
         store: &impl KeyValueStore,
@@ -875,13 +889,13 @@ impl<TreeId: Storable> Storable for Node<TreeId, Bytes<Normal>, Normal> {
     }
 }
 
-impl<TreeId: Loadable> Loadable for Node<TreeId, Bytes<Normal>, Normal> {
+impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, Normal> {
     fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
         let StoredNode {
             meta,
             left,
             right,
-            data: _,
+            data,
         } = {
             let bytes =
                 store
@@ -897,15 +911,7 @@ impl<TreeId: Loadable> Loadable for Node<TreeId, Bytes<Normal>, Normal> {
 
         // The stored representation does not include the `data` field, so we need to load it
         // separately from the KV store.
-        let data = {
-            let bytes = store.get(meta.key.as_ref()).map_err(|error| {
-                OperationalError::CommitValueMissing {
-                    key: meta.key.clone(),
-                    source: Box::new(error),
-                }
-            })?;
-            Bytes::from(bytes.as_ref())
-        };
+        let data = DataId::load(data, &meta.key, store)?;
 
         let left = TreeId::load(left, store)?;
         let right = TreeId::load(right, store)?;
@@ -935,5 +941,56 @@ where
         node.add(&self.left);
         node.add(&self.right);
         node.done()
+    }
+}
+
+/// Helper trait for node data that can be reconstructed
+/// from a [`KeyValueStore`] by content hash and key.
+trait DataLoadable: Sized {
+    /// Load data identified by `id` and `key` from `store`.
+    fn load(id: Hash, key: &Key, store: &impl KeyValueStore) -> Result<Self, OperationalError>;
+}
+
+impl DataLoadable for Bytes<Normal> {
+    fn load(_id: Hash, key: &Key, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        let data = {
+            let bytes =
+                store
+                    .get(key.as_ref())
+                    .map_err(|error| OperationalError::CommitValueMissing {
+                        key: key.clone(),
+                        source: Box::new(error),
+                    })?;
+            Bytes::from(bytes.as_ref())
+        };
+
+        Ok(data)
+    }
+}
+
+impl DataLoadable for LazyDataId {
+    fn load(id: Hash, key: &Key, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        // TODO (RV-998): go all in on laziness
+        let data = match store.get(key.as_ref()) {
+            Ok(bytes) => {
+                let bytes = Bytes::from(bytes.as_ref());
+                LazyDataId::from(bytes)
+            }
+            // On deletion, the persistence layer has already deleted the value from the
+            // KV-store. Therefore, loading fails with `KeyNotFound`. To ensure deletion
+            // still succeeds, we wrap the value. This is okay as the node will be deleted
+            // immediately.
+            //
+            // Attempting to do anything with the data (except hashing) will fail.
+            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => LazyDataId::from(id),
+            Err(error) => {
+                return Err(OperationalError::CommitValueMissing {
+                    key: key.clone(),
+                    source: Box::new(error),
+                });
+            }
+        };
+
+        Ok(data)
     }
 }

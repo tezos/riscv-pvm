@@ -727,7 +727,8 @@ mod tests {
         assert_eq!(before, after);
     });
 
-    kv_test!(#[ignore] test_database_delete_after_checkout, KV: BackgroundPersistentKeyValueStore, {
+    // Test to verify the fix for RV-955 (deletion after checkout failed).
+    kv_test!(test_database_delete_after_checkout, KV: BackgroundPersistentKeyValueStore, {
         // Arrange
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
