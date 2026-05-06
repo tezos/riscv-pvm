@@ -15,7 +15,6 @@ use proptest::prop_oneof;
 
 use crate::components::bytes::Bytes;
 use crate::components::bytes::BytesMode;
-use crate::components::bytes::PAGE_SIZE;
 
 /// Operations to be issued against an immutable Bytes state component
 #[derive(Debug, Clone)]
@@ -26,9 +25,9 @@ pub enum BytesOp {
 
 impl BytesOp {
     /// Strategy for generating operations to be issued against the Bytes state component
-    pub fn any() -> impl Strategy<Value = Self> + Clone {
+    pub fn any(length: usize) -> impl Strategy<Value = Self> + Clone {
         prop_oneof![
-            (0usize..8192, 0usize..50).prop_map(|(offset, size)| Self::Read { offset, size }),
+            (0..length, 0usize..50).prop_map(|(offset, size)| Self::Read { offset, size }),
             Just(Self::Len),
         ]
     }
@@ -57,13 +56,12 @@ pub enum BytesMutOp {
 
 impl BytesMutOp {
     /// Strategy for generating operations to be issued against the Bytes state component
-    pub fn any() -> impl Strategy<Value = Self> + Clone {
-        let upper_bound = 64 * PAGE_SIZE;
+    pub fn any(length: usize) -> impl Strategy<Value = Self> + Clone {
         prop_oneof![
-            (0usize..upper_bound, vec(any::<u8>(), 0..50))
+            (0..length, vec(any::<u8>(), 0..50))
                 .prop_map(|(offset, data)| Self::Write { offset, data }),
-            (0usize..upper_bound).prop_map(|new_size| Self::Resize { new_size }),
-            BytesOp::any().prop_map(|op| Self::Immutable { op }),
+            (0..length).prop_map(|new_size| Self::Resize { new_size }),
+            BytesOp::any(length).prop_map(|op| Self::Immutable { op }),
         ]
     }
 

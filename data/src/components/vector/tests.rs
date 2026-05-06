@@ -20,6 +20,7 @@ use crate::components::atom::tests::AtomMutOp;
 use crate::components::atom::tests::AtomOp;
 use crate::components::bytes::Bytes;
 use crate::components::bytes::BytesMode;
+use crate::components::bytes::PAGE_SIZE;
 use crate::components::bytes::test_utils::BytesMutOp;
 use crate::components::bytes::test_utils::BytesOp;
 use crate::components::vector::VectorMode;
@@ -189,7 +190,12 @@ where
 
 /// Strategy for generating test cases for the vector implementation using [`Bytes`] operations
 fn vector_bytes_case() -> impl Strategy<Value = VectorCase<Vec<u8>, BytesOp, BytesMutOp>> {
-    vector_case(vec(any::<u8>(), 0..32), BytesOp::any(), BytesMutOp::any())
+    let length = 64 * PAGE_SIZE;
+    vector_case(
+        vec(any::<u8>(), 0..32),
+        BytesOp::any(length),
+        BytesMutOp::any(length),
+    )
 }
 
 /// Strategy for generating test cases for the vector implementation using [`Atom`] operations
