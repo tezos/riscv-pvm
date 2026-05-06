@@ -10,6 +10,7 @@ use proptest::prop_assert_eq;
 use proptest::proptest;
 
 use crate::components::bytes::Bytes;
+use crate::components::bytes::PAGE_SIZE;
 use crate::components::bytes::test_utils::BytesMutOp;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
@@ -389,7 +390,7 @@ mode_test!(append_adds_to_end, F, {
 // Bytes behaves the same across different modes
 #[test]
 fn bytes_are_same_across_modes() {
-    proptest!(|(ops in vec(BytesMutOp::any(), 1..20))| {
+    proptest!(|(ops in vec(BytesMutOp::any(64 * PAGE_SIZE), 1..20))| {
         let mut bytes_normal = Bytes::<Normal>::default();
         let results_normal = ops.iter().map(|op| op.run(&mut bytes_normal)).collect::<Vec<_>>();
         let hash_normal = Hash::from_foldable(&bytes_normal);
@@ -417,7 +418,7 @@ fn bytes_are_same_across_modes() {
 
 #[test]
 fn proof_round_trip() {
-    proptest!(|(ops in vec(BytesMutOp::any(), 1..20))| {
+    proptest!(|(ops in vec(BytesMutOp::any(64 * PAGE_SIZE), 1..20))| {
         let mut bytes_normal = Bytes::<Normal>::default();
 
         for op in ops {

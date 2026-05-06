@@ -30,3 +30,9 @@ optional = true
 [dev-dependencies]
 proptest.workspace = true
 rand.workspace = true
+humansize.workspace = true
+
+[[bench]]
+name = "proof"
+harness = false
+required-features = ["unstable-test-utils"]

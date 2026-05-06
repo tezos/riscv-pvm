@@ -2497,6 +2497,7 @@ dependencies = [
  "bytes",
  "derive_more",
  "hex",
+ "humansize",
  "memmap2",
  "perfect-derive",
  "proptest",
