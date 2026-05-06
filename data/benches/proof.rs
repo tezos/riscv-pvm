@@ -2,7 +2,12 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::alloc::GlobalAlloc;
+use std::alloc::Layout;
+use std::alloc::System;
 use std::hint::black_box;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -22,6 +27,138 @@ use proptest::test_runner::TestRunner;
 
 /// 64 MiB: the maximum size of a `Bytes` component in the durable storage
 const LENGTH: usize = 1024 * 1024 * 64;
+
+/// A struct to count the allocations or deallocations, compiles summary statistics from a sequence
+/// of `Layout`s.
+#[derive(Debug)]
+struct Counter {
+    layouts: AtomicUsize,
+    bytes: AtomicUsize,
+    max: AtomicUsize,
+}
+
+impl Counter {
+    const fn new() -> Self {
+        Counter {
+            layouts: AtomicUsize::new(0),
+            bytes: AtomicUsize::new(0),
+            max: AtomicUsize::new(0),
+        }
+    }
+
+    /// Reset the counter to all zero.
+    fn reset(&self) {
+        self.layouts.store(0, Ordering::SeqCst);
+        self.bytes.store(0, Ordering::SeqCst);
+        self.max.store(0, Ordering::SeqCst);
+    }
+
+    /// Add another `Layout` to the summary counts.
+    fn add(&self, layout: Layout) {
+        self.layouts.fetch_add(1, Ordering::SeqCst);
+        self.bytes.fetch_add(layout.size(), Ordering::SeqCst);
+        self.max.fetch_max(layout.size(), Ordering::SeqCst);
+    }
+
+    /// Subtract a `Layout` from a counter. Does not behave correctly if the counter would go
+    /// negative.
+    fn subtract(&self, layout: Layout) {
+        self.layouts.fetch_sub(1, Ordering::SeqCst);
+        self.bytes.fetch_sub(layout.size(), Ordering::SeqCst);
+    }
+
+    /// Increases the counts in `self` to match `other`, if necessary.
+    fn max(&self, other: &Counter) {
+        let layouts = other.layouts.load(Ordering::SeqCst);
+        let bytes = other.bytes.load(Ordering::SeqCst);
+        let max = other.max.load(Ordering::SeqCst);
+
+        self.layouts.fetch_max(layouts, Ordering::SeqCst);
+        self.bytes.fetch_max(bytes, Ordering::SeqCst);
+        self.max.fetch_max(max, Ordering::SeqCst);
+    }
+}
+
+/// A drop-in replacement for the global allocator, which wraps the system allocator while counting
+/// the allocations and deallocations made.
+#[derive(Debug)]
+struct CountingAllocator {
+    /// Counts total allocations requested so far.
+    allocs: Counter,
+
+    /// Counts total deallocations requested so far.
+    deallocs: Counter,
+
+    /// Counts the allocations currently needed (decreases on deallocation).
+    rolling: Counter,
+
+    /// Records the maximum values attained by `rolling` so far.
+    max: Counter,
+}
+
+impl CountingAllocator {
+    /// Set all the counts to zero.
+    fn reset(&self) {
+        self.allocs.reset();
+        self.deallocs.reset();
+        self.rolling.reset();
+        self.max.reset();
+    }
+
+    /// Assert that the counted allocations and deallocations are equal and return the agreed on
+    /// values.
+    ///
+    /// While in a few cases you might want to interrogate the allocations and deallocations
+    /// separately, most of the time calling this method is what you want: the idea is to `reset`
+    /// the allocator before a scope begins and `check` it afterwards. This means we know that we
+    /// are only counting the allocations made (and subsequently dropped) within that scope.
+    fn check(&self) -> (usize, usize, usize) {
+        let a_layouts = self.allocs.layouts.load(Ordering::SeqCst);
+        let a_bytes = self.allocs.bytes.load(Ordering::SeqCst);
+        let a_max = self.allocs.max.load(Ordering::SeqCst);
+        let d_layouts = self.deallocs.layouts.load(Ordering::SeqCst);
+        let d_bytes = self.deallocs.bytes.load(Ordering::SeqCst);
+        let d_max = self.deallocs.max.load(Ordering::SeqCst);
+        let r_layouts = self.rolling.layouts.load(Ordering::SeqCst);
+        let r_bytes = self.rolling.bytes.load(Ordering::SeqCst);
+
+        assert_eq!(r_layouts, 0);
+        assert_eq!(r_bytes, 0);
+
+        assert_eq!(a_layouts, d_layouts);
+        assert_eq!(a_bytes, d_bytes);
+        assert_eq!(a_max, d_max);
+
+        (a_layouts, a_bytes, a_max)
+    }
+}
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let ret = unsafe { System.alloc(layout) };
+        self.allocs.add(layout);
+        self.rolling.add(layout);
+        self.max.max(&self.rolling);
+        ret
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe {
+            System.dealloc(ptr, layout);
+        }
+        self.deallocs.add(layout);
+        self.rolling.subtract(layout);
+    }
+}
+
+/// In order to replace the global allocator we need a static instance of our struct.
+#[global_allocator]
+static GLOB_ALLOC: CountingAllocator = CountingAllocator {
+    allocs: Counter::new(),
+    deallocs: Counter::new(),
+    rolling: Counter::new(),
+    max: Counter::new(),
+};
 
 /// Given a `strategy` to generate instances of type `A` and an `eval` function to evaluate those
 /// according to some metric. We always make at least one attempt, followed by some number of
@@ -98,7 +235,7 @@ fn verify_proof(proof: &[u8], op: &BytesMutOp) {
         black_box(PartialHash::from_foldable(parsed_proof_tree.clone(), &bytes_verify).to_hash());
     let _verify_result = black_box(op.run(&mut bytes_verify));
     let _after_verify_hash =
-        black_box(PartialHash::from_foldable(parsed_proof_tree.clone(), &bytes_verify).to_hash());
+        black_box(PartialHash::from_foldable(parsed_proof_tree, &bytes_verify).to_hash());
 }
 
 /// An evaluation function that measures the time taken by the proof verification.
@@ -122,10 +259,95 @@ fn proof_time(state: &Bytes<Normal>, op: &BytesMutOp) -> Duration {
     durations.into_iter().skip(1).take(8).sum::<Duration>() / 8
 }
 
+/// An evaluation function that counts the total number of allocations made by the proof
+/// verification.
+fn proof_allocs(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
+    let proof = produce_proof(state, op);
+
+    GLOB_ALLOC.reset();
+    verify_proof(&proof, op);
+    let (allocs, _, _) = GLOB_ALLOC.check();
+    allocs
+}
+
+/// An evaluation function that measures the number of bytes allocated by the proof verification.
+fn proof_alloc_bytes(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
+    let proof = produce_proof(state, op);
+
+    GLOB_ALLOC.reset();
+    verify_proof(&proof, op);
+    let (_, alloc_bytes, _) = GLOB_ALLOC.check();
+    alloc_bytes
+}
+
+/// An evaluation function that returns the single largest allocation made by the proof
+/// verification.
+fn proof_biggest_alloc(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
+    let proof = produce_proof(state, op);
+
+    GLOB_ALLOC.reset();
+    verify_proof(&proof, op);
+    let (_, _, biggest_alloc) = GLOB_ALLOC.check();
+    biggest_alloc
+}
+
+/// An evaluation function that returns the maximum number of allocations at any one time during
+/// verification.
+fn proof_max_rolling_allocs(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
+    let proof = produce_proof(state, op);
+
+    GLOB_ALLOC.reset();
+    verify_proof(&proof, op);
+    GLOB_ALLOC.max.layouts.load(Ordering::SeqCst)
+}
+
+/// An evaluation function that returns the maximum number of bytes allocated at any one time
+/// during verification.
+fn proof_max_rolling_bytes(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
+    let proof = produce_proof(state, op);
+
+    GLOB_ALLOC.reset();
+    verify_proof(&proof, op);
+    GLOB_ALLOC.max.bytes.load(Ordering::SeqCst)
+}
+
 fn main() {
     let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_size, 1000);
     println!("Biggest: {worst_op:?}, {}", format_size(eval, BINARY));
 
     let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_time, 1000);
     println!("Slowest: {worst_op:?}, {eval:?}");
+
+    let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_allocs, 1000);
+    println!("Most allocs: {worst_op:?}, {eval:?}");
+
+    let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_alloc_bytes, 1000);
+    println!("Most bytes: {worst_op:?}, {}", format_size(eval, BINARY));
+
+    let (worst_op, eval) = find_worst(
+        BytesMutOp::any(LENGTH),
+        init_state,
+        proof_biggest_alloc,
+        1000,
+    );
+    println!("Biggest alloc: {worst_op:?}, {}", format_size(eval, BINARY));
+
+    let (worst_op, eval) = find_worst(
+        BytesMutOp::any(LENGTH),
+        init_state,
+        proof_max_rolling_allocs,
+        1000,
+    );
+    println!("Most allocs at once: {worst_op:?}, {eval:?}");
+
+    let (worst_op, eval) = find_worst(
+        BytesMutOp::any(LENGTH),
+        init_state,
+        proof_max_rolling_bytes,
+        1000,
+    );
+    println!(
+        "Most bytes allocated at once: {worst_op:?}, {}",
+        format_size(eval, BINARY)
+    );
 }
