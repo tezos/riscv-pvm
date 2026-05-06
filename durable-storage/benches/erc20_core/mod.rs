@@ -263,16 +263,21 @@ pub fn bench_run(mut state: BenchmarkState<'_>) {
                 black_box(state.database.hash().expect("Hash should be calculated"));
             }
             Operation::Read { key, size } => {
-                state.read_buffer.truncate(0);
-                match database_read(&mut state.database, key, size, &mut state.read_buffer) {
-                    Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
+                match database_read(
+                    &mut state.database,
+                    key,
+                    size,
+                    &mut state.read_buffer[..size],
+                ) {
+                    Ok(read) => {
+                        assert_eq!(
+                            read, size,
+                            "Failed to read exactly {size} bytes from storage"
+                        );
+                    }
+                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                     Err(e) => panic!("The read should succeed: {e:?}"),
                 }
-                assert_eq!(
-                    state.read_buffer.len(),
-                    size,
-                    "Failed to read exactly {size} bytes from storage"
-                );
             }
             Operation::ValueLength { key } => match state.database.value_length(&key) {
                 Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
@@ -298,9 +303,11 @@ fn database_read(
     key: Key,
     size: usize,
     buffer: &mut [u8],
-) -> Result<(), Error> {
+) -> Result<usize, Error> {
     let mut offset = 0;
     let mut remaining = size;
+
+    assert!(remaining <= buffer.len(), "{remaining} <= {}", buffer.len());
 
     while remaining > 0 {
         let chunk = remaining.min(MAX_FILE_CHUNK_SIZE);
@@ -310,7 +317,7 @@ fn database_read(
         remaining -= chunk;
     }
 
-    Ok(())
+    Ok(offset)
 }
 
 /// Write an entire value (possibly larger than [`MAX_FILE_CHUNK_SIZE`]) to the given database.
