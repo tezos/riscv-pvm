@@ -2,10 +2,16 @@
 //
 // SPDX-License-Identifier: MIT
 
+use std::hint::black_box;
+use std::time::Duration;
+use std::time::Instant;
+
 use humansize::BINARY;
 use humansize::format_size;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::test_utils::BytesMutOp;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
@@ -79,7 +85,47 @@ fn proof_size(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
     produce_proof(state, op).len()
 }
 
+/// A function that runs all the code necessary to verify a proof (for benchmarking purposes),
+/// which includes generating both hashes, without actually checking the proof is valid.
+fn verify_proof(proof: &[u8], op: &BytesMutOp) {
+    let (mut bytes_verify, parsed_proof_tree) =
+        proof_binary::deserialise(proof).expect("can deserialise proof");
+    let parsed_proof_tree = parsed_proof_tree.into_present();
+
+    // To verify the proof the initial hash and final hash must both be computed. We won't actually
+    // check the values here, this benchmark assumes the proof is correct.
+    let _init_verify_hash =
+        black_box(PartialHash::from_foldable(parsed_proof_tree.clone(), &bytes_verify).to_hash());
+    let _verify_result = black_box(op.run(&mut bytes_verify));
+    let _after_verify_hash =
+        black_box(PartialHash::from_foldable(parsed_proof_tree.clone(), &bytes_verify).to_hash());
+}
+
+/// An evaluation function that measures the time taken by the proof verification.
+fn proof_time(state: &Bytes<Normal>, op: &BytesMutOp) -> Duration {
+    let proof = produce_proof(state, op);
+
+    // one warm-up iteration
+    verify_proof(black_box(&proof), black_box(op));
+
+    let mut durations = vec![];
+
+    // run ten iterations
+    for _ in 0..10 {
+        let start = Instant::now();
+        verify_proof(black_box(&proof), black_box(op));
+        durations.push(Instant::now().duration_since(start));
+    }
+
+    // we remove the quickest and slowest out of the samples and then take the average
+    durations.sort();
+    durations.into_iter().skip(1).take(8).sum::<Duration>() / 8
+}
+
 fn main() {
     let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_size, 1000);
-    println!("Biggest: {worst_op:?}, {}", format_size(eval, BINARY),);
+    println!("Biggest: {worst_op:?}, {}", format_size(eval, BINARY));
+
+    let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_time, 1000);
+    println!("Slowest: {worst_op:?}, {eval:?}");
 }
