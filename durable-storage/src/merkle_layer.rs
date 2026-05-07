@@ -13,7 +13,7 @@
 //!
 //! `M` is an implementation of the PVM's operational [`Mode`].
 //!
-//! [`MerkleLayer::try_clone_with`] enables forking snapshots. Clones share the underlying tree
+//! [`MerkleLayer::clone_with`] enables forking snapshots. Clones share the underlying tree
 //! cheaply via an `Arc` and diverge upon mutation, using copy-on-write (CoW) semantics.
 
 use std::convert::Infallible;
@@ -131,11 +131,11 @@ impl<KV> MerkleLayer<KV, Verify> {
 
 impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
-    pub fn try_clone_with(&self, persistence: Arc<KV>) -> Self
+    pub fn clone_with(&self, persistence: Arc<KV>) -> Self
     where
         KV: KeyValueStore,
     {
-        M::try_clone_with(self, persistence)
+        M::clone_with(self, persistence)
     }
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
@@ -170,8 +170,8 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
 
 /// Modes that implements this trait support Merkle layer operations
 pub trait MerkleLayerMode: Mode {
-    /// See [`MerkleLayer::try_clone_with`]
-    fn try_clone_with<KV: KeyValueStore>(
+    /// See [`MerkleLayer::clone_with`]
+    fn clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self>;
@@ -202,12 +202,12 @@ pub trait MerkleLayerMode: Mode {
 }
 
 impl MerkleLayerMode for Normal {
-    fn try_clone_with<KV: KeyValueStore>(
+    fn clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
         MerkleLayer {
-            inner: this.inner.try_clone_with(persistence),
+            inner: this.inner.clone_with(persistence),
         }
     }
 
@@ -241,7 +241,7 @@ impl MerkleLayerMode for Normal {
 }
 
 impl MerkleLayerMode for Prove<'static> {
-    fn try_clone_with<KV: KeyValueStore>(
+    fn clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
@@ -295,7 +295,7 @@ impl MerkleLayerMode for Prove<'static> {
 }
 
 impl MerkleLayerMode for Verify {
-    fn try_clone_with<KV: KeyValueStore>(
+    fn clone_with<KV: KeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         _persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
@@ -375,7 +375,7 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
-    fn try_clone_with(&self, persistence: Arc<KV>) -> Self {
+    fn clone_with(&self, persistence: Arc<KV>) -> Self {
         Self {
             tree: self.tree.clone(),
             persistence: persistence.clone(),
@@ -920,7 +920,7 @@ mod tests {
                 .expect("the tree should be retrieved successfully.");
         }
 
-        let mut ml2 = ml.try_clone_with(ml.inner.persistence.clone());
+        let mut ml2 = ml.clone_with(ml.inner.persistence.clone());
         let original_hash = ml.hash();
         assert_eq!(original_hash, ml2.hash());
 
@@ -1006,7 +1006,7 @@ mod tests {
 
         // Create a cheap copy
         let original_hash = ml.hash();
-        let mut ml2 = ml.try_clone_with(ml.inner.persistence.clone());
+        let mut ml2 = ml.clone_with(ml.inner.persistence.clone());
         prop_assert_eq!(original_hash, ml2.hash());
 
         // Delete all the keys in the copy
@@ -1914,7 +1914,7 @@ mod tests {
         }
     });
 
-    kv_test!(test_prove_try_clone_with_cow, KV, {
+    kv_test!(test_prove_clone_with_cow, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
         let (_keepalive, repo) = KV::setup_repo();
@@ -1938,7 +1938,7 @@ mod tests {
             .expect("Creating a persistence layer should succeed")
             .into();
 
-        let mut ml2 = ml.try_clone_with(kv);
+        let mut ml2 = ml.clone_with(kv);
         let cow_data2 = "🐮<(mooify a moo!)";
         ml2.set(&key, cow_data2.as_bytes())
             .expect("setting node should succeed");
@@ -2064,7 +2064,7 @@ mod tests {
         }
     });
 
-    kv_test!(test_verify_try_clone_with_cow, KV, {
+    kv_test!(test_verify_clone_with_cow, KV, {
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
         let (_keepalive, repo) = KV::setup_repo();
@@ -2077,7 +2077,7 @@ mod tests {
             .expect("Creating a persistence layer should succeed")
             .into();
 
-        let mut ml2 = ml.try_clone_with(kv);
+        let mut ml2 = ml.clone_with(kv);
         let cow_data2 = "🐮<(mooify a moo!)";
         ml2.set(&key, cow_data2.as_bytes())
             .expect("setting node should succeed");

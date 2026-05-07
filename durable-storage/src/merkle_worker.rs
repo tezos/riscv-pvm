@@ -165,7 +165,7 @@ impl<KV> Command<KV> {
         ))
     }
 
-    /// Construct a command that performs a [`MerkleLayer::try_clone_with`].
+    /// Construct a command that performs a [`MerkleLayer::clone_with`].
     fn new_clone_with(
         store: Arc<KV>,
     ) -> (
@@ -184,7 +184,7 @@ impl<KV> Command<KV> {
                     "Inconsistent layer on clone: {consistency:?}"
                 );
 
-                let result = layer.try_clone_with(store);
+                let result = layer.clone_with(store);
                 let _ = sender.send(result);
             },
         ));
@@ -300,7 +300,7 @@ impl<KV> MerkleWorker<KV> {
         MerkleWorker { sender }
     }
 
-    /// See [`MerkleLayer::try_clone_with`].
+    /// See [`MerkleLayer::clone_with`].
     pub(crate) fn clone_with(
         &self,
         handle: &Handle,
@@ -497,7 +497,7 @@ mod tests {
                     let persistence_layer =
                         KV::new(repo).expect("Creating a persistence layer should succeed");
                     let persistence_layer = Arc::new(persistence_layer);
-                    *layer = layer.try_clone_with(persistence_layer);
+                    *layer = layer.clone_with(persistence_layer);
 
                     let persistence_worker =
                         KV::new(repo).expect("Creating a persistence layer should succeed");
