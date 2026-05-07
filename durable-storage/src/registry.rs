@@ -1440,6 +1440,19 @@ pub(super) mod tests {
 
         assert!(registry.resize_tick(5).is_err());
     });
+
+    kv_test!(test_durable_storage_end_to_end, KV: BackgroundPersistentKeyValueStore,
+    [
+        generated in crate::test_helpers::operations_strategy(1usize..100)
+    ],
+    {
+        // Every test iteration expects an empty repo, so not setting it in a `setup` block
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let (keys, values, ops) = generated;
+        let operations = crate::test_helpers::make_operations(keys, values, ops);
+        crate::test_helpers::run_operations::<KV>(repo, operations)
+    });
 }
 
 #[cfg(feature = "rocksdb")]
