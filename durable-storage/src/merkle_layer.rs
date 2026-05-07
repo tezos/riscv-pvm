@@ -61,7 +61,7 @@ use crate::storage::StoreOptions;
 
 /// A layer for transforming data into a Merkle-ised representation before commitment to a
 /// [`PersistentKeyValueStore`].
-#[perfect_derive(Debug)]
+#[perfect_derive(Clone, Debug)]
 pub struct MerkleLayer<KV, M: Mode> {
     inner: M::Select<MerkleLayerTemplate<KV>>,
 }
@@ -93,6 +93,23 @@ impl<KV> MerkleLayer<KV, Normal> {
         KV: PersistentKeyValueStore,
     {
         self.inner.commit(options)
+    }
+}
+
+impl<KV> MerkleLayer<KV, Verify> {
+    /// An empty verify-mode Merkle layer.
+    ///
+    /// `original_proof` is a stub blind leaf — an empty tree folds to a single `Present` hash
+    /// with no `previous` substitutions, so [`MerkleLayer::hash`] never reads it while the tree
+    /// stays empty or is fully populated by mutations performed within this layer.
+    pub(crate) fn empty() -> Self {
+        MerkleLayer {
+            inner: VerifyImpl {
+                tree: Tree::default(),
+                resolver: VerifyResolver,
+                original_proof: Arc::new(MerkleProof::leaf_blind(Hash::hash_bytes(&[]))),
+            },
+        }
     }
 }
 
@@ -407,7 +424,7 @@ impl<KV> NormalImpl<KV> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct VerifyImpl {
     tree: Tree<VerifyNodeId>,
     resolver: VerifyResolver,
