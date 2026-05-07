@@ -86,9 +86,13 @@ pub struct TestableTmpdir {
 }
 
 impl TestableTmpdir {
+    /// Prefix for all instances of [`TestableTmpdir`].
+    const PREFIX: &str = "rvtest-";
+
     /// Create a new temporary directory for testing
     pub fn new() -> Self {
-        let tempdir = TempDir::new().expect("Should be able to create temp dir");
+        let tempdir =
+            TempDir::with_prefix(Self::PREFIX).expect("Should be able to create temp dir");
 
         Self { tempdir }
     }
