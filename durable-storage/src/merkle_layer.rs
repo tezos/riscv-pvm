@@ -96,6 +96,22 @@ impl<KV> MerkleLayer<KV, Normal> {
     }
 }
 
+impl<KV> MerkleLayer<KV, Prove<'static>> {
+    /// An empty prove-mode Merkle layer backed by the given persistence layer.
+    pub(crate) fn empty(persistence: Arc<KV>) -> Self
+    where
+        KV: KeyValueStore,
+    {
+        MerkleLayer {
+            inner: ProveImpl {
+                initial_tree: LazyTreeId::default(),
+                working_tree: Tree::default(),
+                resolver: ProveResolver::start(LazyResolver::new(persistence), None),
+            },
+        }
+    }
+}
+
 impl<KV> MerkleLayer<KV, Verify> {
     /// An empty verify-mode Merkle layer.
     ///
