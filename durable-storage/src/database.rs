@@ -372,6 +372,32 @@ struct NormalImpl<KV> {
     merkle: MerkleWorker<KV>,
 }
 
+impl<KV> Database<KV, Prove<'static>> {
+    /// An empty prove-mode database backed by the given persistence layer.
+    pub(crate) fn empty(persistence: Arc<KV>) -> Self
+    where
+        KV: KeyValueStore,
+    {
+        Database {
+            inner: ProveImpl {
+                merkle: <MerkleLayer<KV, Prove<'static>>>::empty(persistence),
+            },
+        }
+    }
+
+    /// Clone the database, attaching the new clone to a fresh persistence layer.
+    pub(crate) fn clone_with(&self, persistence: Arc<KV>) -> Self
+    where
+        KV: KeyValueStore,
+    {
+        Database {
+            inner: ProveImpl {
+                merkle: self.inner.merkle.clone_with(persistence),
+            },
+        }
+    }
+}
+
 impl<KV> Database<KV, Verify> {
     /// An empty verify-mode database.
     pub(crate) fn empty() -> Self {
