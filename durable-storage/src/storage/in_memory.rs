@@ -21,10 +21,10 @@ use crate::errors::OperationalError;
 /// Will never write to disk.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryRepo {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "unstable-test-utils"))]
     commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, InMemorySnapshot>>>,
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "unstable-test-utils"))]
     registry_commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, Vec<u8>>>>,
 }
 
@@ -196,14 +196,14 @@ impl KeyValueStore for InMemoryKeyValueStore {
 }
 
 /// Test-only snapshot repository for [`InMemoryRepo`]
-#[cfg(test)]
+#[cfg(any(test, feature = "unstable-test-utils"))]
 #[derive(Debug)]
 struct InMemorySnapshot {
     blobs: HashMap<Bytes, Bytes>,
     values: HashMap<Bytes, BytesMut>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "unstable-test-utils"))]
 impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
     fn commit_to_path(&self, _path: &std::path::Path) -> Result<(), OperationalError> {
         unimplemented!("In-memory store cannot commit to disk")
@@ -254,7 +254,7 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "unstable-test-utils"))]
 impl crate::repo::RegistryRepo for InMemoryRepo {
     fn read_registry_commit(
         &self,
