@@ -1112,7 +1112,7 @@ impl Default for VerifyTreeId {
 }
 
 /// Adapter that projects in-memory AVL identifiers into verify-mode values.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct VerifyResolver;
 
 impl Resolver<VerifyNodeId, Node<VerifyTreeId, Bytes<Verify>, Verify>> for VerifyResolver {
