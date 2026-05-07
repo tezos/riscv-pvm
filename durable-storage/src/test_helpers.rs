@@ -3,6 +3,8 @@
 //
 // SPDX-License-Identifier: MIT
 
+#![cfg(any(test, feature = "unstable-test-utils"))]
+
 //! Shared utilities for end to end durable storage property-based tests
 //!
 //! Used by the integration test in `tests/integration_test.rs` and

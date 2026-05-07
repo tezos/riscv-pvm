@@ -2522,6 +2522,7 @@ dependencies = [
  "hex",
  "log",
  "octez-riscv-data",
+ "octez-riscv-durable-storage",
  "octez-riscv-test-utils",
  "perfect-derive",
  "proptest",
