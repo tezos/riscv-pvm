@@ -24,6 +24,7 @@ use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
@@ -52,6 +53,7 @@ pub const MAX_VALUE_SIZE: usize =
 ///
 /// This structure unifies the key-value store and Merkle layer to allow for persistent storage
 /// alongside a representation which can provide a root hash.
+#[perfect_derive(Clone)]
 #[repr(transparent)]
 pub struct Database<KV, M: Mode> {
     inner: M::Select<DatabaseTemplate<KV>>,
@@ -370,7 +372,19 @@ struct NormalImpl<KV> {
     merkle: MerkleWorker<KV>,
 }
 
+impl<KV> Database<KV, Verify> {
+    /// An empty verify-mode database.
+    pub(crate) fn empty() -> Self {
+        Database {
+            inner: VerifyImpl {
+                merkle: <MerkleLayer<KV, Verify>>::empty(),
+            },
+        }
+    }
+}
+
 /// Verify-mode implementation for the [`Database`].
+#[perfect_derive(Clone)]
 struct VerifyImpl<KV> {
     merkle: MerkleLayer<KV, Verify>,
 }
