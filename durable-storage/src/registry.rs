@@ -23,6 +23,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
@@ -308,7 +309,7 @@ struct RegistryTemplate<KV: KeyValueStore>(PhantomData<KV>, Infallible);
 impl<KV: KeyValueStore> Modal for RegistryTemplate<KV> {
     type Normal = NormalImpl<KV>;
 
-    type Prove<'normal> = Infallible;
+    type Prove<'normal> = ProveImpl<KV>;
 
     type Verify = VerifyImpl<KV>;
 }
@@ -347,6 +348,27 @@ impl RegistryMode for Normal {
         database: &Database<KV, Self>,
     ) -> Result<Database<KV, Self>, OperationalError> {
         database.try_clone_with(inner.runtime.handle(), &inner.repo)
+    }
+}
+
+#[expect(
+    private_interfaces,
+    reason = "This method should not be used outside of this module"
+)]
+impl RegistryMode for Prove<'static> {
+    fn try_new_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+    ) -> Result<Database<KV, Self>, OperationalError> {
+        let persistence = Arc::new(KV::new(&inner.repo)?);
+        Ok(<Database<KV, Prove<'static>>>::empty(persistence))
+    }
+
+    fn try_clone_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+        database: &Database<KV, Self>,
+    ) -> Result<Database<KV, Self>, OperationalError> {
+        let persistence = Arc::new(KV::new(&inner.repo)?);
+        Ok(database.clone_with(persistence))
     }
 }
 
@@ -410,6 +432,11 @@ struct NormalImpl<KV: KeyValueStore> {
     runtime: Arc<Runtime>,
 }
 
+/// Registry implementation for the [`Prove`] mode.
+struct ProveImpl<KV: KeyValueStore> {
+    repo: KV::Repo,
+}
+
 /// Registry implementation for the [`Verify`] mode.
 struct VerifyImpl<KV: KeyValueStore>(PhantomData<KV>);
 
@@ -421,10 +448,12 @@ pub(super) mod tests {
     use octez_riscv_data::components::vector::VectorMode;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_data::serialisation::serialise;
 
+    use super::ProveImpl;
     use super::Registry;
     use super::RegistryManifest;
     use super::VerifyImpl;
@@ -457,6 +486,28 @@ pub(super) mod tests {
             .resize_tick(2)
             .expect("Growing the registry should succeed.");
 
+        registry
+    }
+
+    fn setup_prove_registry<KV: BackgroundKeyValueStore>(
+        repo: KV::Repo,
+    ) -> Registry<KV, Prove<'static>> {
+        Registry {
+            inner: ProveImpl { repo },
+            databases: <Prove<'static> as VectorMode>::new(Vec::new()),
+        }
+    }
+
+    fn setup_prove_size_2_registry<KV: BackgroundKeyValueStore>(
+        repo: KV::Repo,
+    ) -> Registry<KV, Prove<'static>> {
+        let mut registry = setup_prove_registry::<KV>(repo);
+        registry
+            .resize_tick(1)
+            .expect("Growing the registry should succeed.");
+        registry
+            .resize_tick(2)
+            .expect("Growing the registry should succeed.");
         registry
     }
 
@@ -881,6 +932,191 @@ pub(super) mod tests {
             Registry::<KV, Normal>::checkout(repo, fake_commit),
             Err(Error::Operational(OperationalError::RegistryCommitMismatch))
         ));
+    });
+
+    kv_test!(test_prove_clear_database, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_prove_size_2_registry::<KV>(repo);
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        registry
+            .database_mut(0)
+            .expect("Database should exist.")
+            .set(key.clone(), Bytes::from_static(b"value"))
+            .expect("Setting a value should succeed");
+
+        registry
+            .clear_database(0)
+            .expect("Clearing should succeed");
+
+        assert!(
+            !registry
+                .database(0)
+                .expect("Database should exist.")
+                .exists(&key)
+                .expect("Existence check should succeed"),
+            "Database should be empty after clear."
+        );
+    });
+
+    kv_test!(test_prove_copy_database, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_prove_size_2_registry::<KV>(repo);
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        registry
+            .database_mut(0)
+            .expect("Database should exist.")
+            .set(key.clone(), Bytes::from_static(b"src"))
+            .expect("Setting a value should succeed");
+        registry
+            .database_mut(1)
+            .expect("Database should exist.")
+            .set(key.clone(), Bytes::from_static(b"dst"))
+            .expect("Setting a value should succeed");
+
+        registry
+            .copy_database(0, 1)
+            .expect("Copying should succeed");
+
+        registry
+            .database(1)
+            .expect("Database should exist.")
+            .assert_database_value(&key, b"src");
+    });
+
+    kv_test!(test_prove_database_clone_independence, KV: BackgroundKeyValueStore, {
+        // Cloning via copy should produce an independent database — mutations to the source
+        // after the copy must not propagate to the destination.
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_prove_size_2_registry::<KV>(repo);
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        registry
+            .database_mut(0)
+            .expect("Database should exist.")
+            .set(key.clone(), Bytes::from_static(b"original"))
+            .expect("Setting a value should succeed");
+
+        registry
+            .copy_database(0, 1)
+            .expect("Copying should succeed");
+
+        registry
+            .database_mut(0)
+            .expect("Database should exist.")
+            .set(key.clone(), Bytes::from_static(b"mutated"))
+            .expect("Setting a value should succeed");
+
+        registry
+            .database(0)
+            .expect("Database should exist.")
+            .assert_database_value(&key, b"mutated");
+        registry
+            .database(1)
+            .expect("Database should exist.")
+            .assert_database_value(&key, b"original");
+    });
+
+    kv_test!(test_prove_database_ops, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_prove_size_2_registry::<KV>(repo);
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let database = registry.database_mut(0).expect("Database should exist.");
+        database
+            .set(key.clone(), Bytes::from_static(b"alpha"))
+            .expect("Setting a value should succeed");
+        database.assert_database_value(&key, b"alpha");
+
+        database
+            .delete(key.clone())
+            .expect("Deleting a value should succeed");
+        assert!(
+            !database
+                .exists(&key)
+                .expect("Existence check should succeed")
+        );
+    });
+
+    kv_test!(test_prove_invalid_index, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_prove_size_2_registry::<KV>(repo);
+
+        assert!(matches!(
+            registry.copy_database(0, 2),
+            Err(Error::InvalidArgument(
+                InvalidArgumentError::DatabaseIndexOutOfBounds
+            ))
+        ));
+        assert!(matches!(
+            registry.move_database(2, 0),
+            Err(Error::InvalidArgument(
+                InvalidArgumentError::DatabaseIndexOutOfBounds
+            ))
+        ));
+        assert!(matches!(
+            registry.clear_database(2),
+            Err(Error::InvalidArgument(
+                InvalidArgumentError::DatabaseIndexOutOfBounds
+            ))
+        ));
+    });
+
+    kv_test!(test_prove_move_database, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_prove_size_2_registry::<KV>(repo);
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        registry
+            .database_mut(0)
+            .expect("Database should exist.")
+            .set(key.clone(), Bytes::from_static(b"value"))
+            .expect("Setting a value should succeed");
+
+        registry
+            .move_database(0, 1)
+            .expect("Moving should succeed");
+
+        assert!(
+            !registry
+                .database(0)
+                .expect("Database should exist.")
+                .exists(&key)
+                .expect("Existence check should succeed"),
+            "Source should be empty after move."
+        );
+        registry
+            .database(1)
+            .expect("Database should exist.")
+            .assert_database_value(&key, b"value");
+    });
+
+    kv_test!(test_prove_new, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let registry = setup_prove_registry::<KV>(repo);
+        assert!(registry.is_empty());
+    });
+
+    kv_test!(test_prove_resize, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_prove_registry::<KV>(repo);
+
+        while registry.len() < 4 {
+            registry
+                .resize_tick(registry.len() + 1)
+                .expect("Growing the registry should succeed.");
+        }
+        assert_eq!(registry.len(), 4);
+
+        while registry.len() > 1 {
+            registry
+                .resize_tick(registry.len() - 1)
+                .expect("Shrinking the registry should succeed.");
+        }
+        assert_eq!(registry.len(), 1);
+
+        assert!(registry.resize_tick(5).is_err());
     });
 
     kv_test!(test_verify_clear_database, KV: BackgroundKeyValueStore, {
