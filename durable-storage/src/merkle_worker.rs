@@ -9,6 +9,7 @@
 //! background thread. It allows non-blocking `set`, `write` and `delete` operations while still
 //! providing synchronous access to `hash` and `commit` operations.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -38,7 +39,7 @@ trait_set! {
 }
 
 /// Alias for the inner workings of the [`Command`] struct to make Clippy happy
-type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>) + Send;
+type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>, &mut BTreeSet<Key>) + Send;
 
 /// Commands that will be sent to the background worker thread to manipulate the Merkle layer
 ///
@@ -82,13 +83,17 @@ type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>) + Send;
 /// if we encountered the above race conditions, the operation that caused (and resolves) them
 /// _must_ occur before the synchronisation points. If it occurs after, then the race condition
 /// cannot have happened to begin with: as all the prior operations will be fully handled first,
-/// before any problemetatic operations can occur.
+/// before any problematic operations can occur.
+///
+/// To ensure this condition is upheld, the Merkle worker tracks potentially inconsistent keys,
+/// removing them once operations restoring consistency are handled. We ensure that no inconsistent
+/// keys exist, when at synchronisation points.
 struct Command<KV>(Box<DynCommand<KV>>);
 
 impl<KV> Command<KV> {
     /// Apply this command to the Merkle layer.
-    fn apply(self, layer: &mut MerkleLayer<KV, Normal>) {
-        self.0(layer);
+    fn apply(self, layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>) {
+        self.0(layer, consistency);
     }
 
     /// Construct a command that performs a [`MerkleLayer::write`].
@@ -97,13 +102,24 @@ impl<KV> Command<KV> {
         KV: KeyValueStore,
     {
         Self(Box::new(
-            move |layer: &mut MerkleLayer<KV, Normal>| match layer.write(&key, offset, &value) {
+            move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| match layer
+                .write(&key, offset, &value)
+            {
                 Err(Error::Operational(OperationalError::CommitValueMissing {
                     key: missing_key,
                     source: _,
-                })) if key == missing_key => (),
-                Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge)) => (),
-                result => result.expect("Writing to the Merkle layer should succeed."),
+                })) if key == missing_key => {
+                    // mark key as inconsistent
+                    consistency.insert(key);
+                }
+                Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge)) => {
+                    // mark key as inconsistent
+                    consistency.insert(key);
+                }
+                Ok(()) => {
+                    consistency.remove(&key);
+                }
+                Err(error) => panic!("Writing to the Merkle layer should succeed, got {error}"),
             },
         ))
     }
@@ -114,12 +130,20 @@ impl<KV> Command<KV> {
         KV: KeyValueStore,
     {
         Self(Box::new(
-            move |layer: &mut MerkleLayer<KV, Normal>| match layer.set(&key, &value) {
+            move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| match layer
+                .set(&key, &value)
+            {
                 Err(OperationalError::CommitValueMissing {
                     key: missing_key,
                     source: _,
-                }) if key == missing_key => (),
-                result => result.expect("Setting on the Merkle layer should succeed."),
+                }) if key == missing_key => {
+                    // mark key as inconsistent
+                    consistency.insert(key);
+                }
+                Ok(()) => {
+                    consistency.remove(&key);
+                }
+                Err(error) => panic!("Setting in the Merkle layer should succeed, got {error}"),
             },
         ))
     }
@@ -129,11 +153,16 @@ impl<KV> Command<KV> {
     where
         KV: KeyValueStore,
     {
-        Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
-            layer
-                .delete(&key)
-                .expect("Deleting from the Merkle layer should succeed.");
-        }))
+        Self(Box::new(
+            move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| {
+                layer
+                    .delete(&key)
+                    .expect("Deleting from the Merkle layer should succeed.");
+
+                // delete always restores consistency
+                consistency.remove(&key);
+            },
+        ))
     }
 
     /// Construct a command that performs a [`MerkleLayer::try_clone_with`].
@@ -148,10 +177,17 @@ impl<KV> Command<KV> {
     {
         let (sender, receiver) = oneshot::channel();
 
-        let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
-            let result = layer.try_clone_with(store);
-            let _ = sender.send(result);
-        }));
+        let this = Self(Box::new(
+            move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| {
+                assert!(
+                    consistency.is_empty(),
+                    "Inconsistent layer on clone: {consistency:?}"
+                );
+
+                let result = layer.try_clone_with(store);
+                let _ = sender.send(result);
+            },
+        ));
 
         let receive = || {
             receiver
@@ -169,10 +205,17 @@ impl<KV> Command<KV> {
     {
         let (sender, receiver) = oneshot::channel();
 
-        let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
-            let result = layer.hash();
-            let _ = sender.send(result);
-        }));
+        let this = Self(Box::new(
+            move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| {
+                assert!(
+                    consistency.is_empty(),
+                    "Inconsistent layer on hash: {consistency:?}"
+                );
+
+                let result = layer.hash();
+                let _ = sender.send(result);
+            },
+        ));
 
         let receive = || {
             receiver
@@ -192,10 +235,17 @@ impl<KV> Command<KV> {
     {
         let (sender, receiver) = oneshot::channel();
 
-        let this = Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
-            let result = layer.commit(&options);
-            let _ = sender.send(result);
-        }));
+        let this = Self(Box::new(
+            move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| {
+                assert!(
+                    consistency.is_empty(),
+                    "Inconsistent layer on commit: {consistency:?}"
+                );
+
+                let result = layer.commit(&options);
+                let _ = sender.send(result);
+            },
+        ));
 
         let receive = || {
             receiver
@@ -238,10 +288,12 @@ impl<KV> MerkleWorker<KV> {
 
         async_handle.spawn(async move {
             let mut layer = layer;
+            let mut consistency = BTreeSet::new();
+
             let mut receiver: mpsc::UnboundedReceiver<Command<KV>> = receiver;
 
             while let Some(cmd) = receiver.recv().await {
-                cmd.apply(&mut layer);
+                cmd.apply(&mut layer, &mut consistency);
             }
         });
 
