@@ -443,6 +443,7 @@ struct VerifyImpl<KV: KeyValueStore>(PhantomData<KV>);
 #[cfg(test)]
 pub(super) mod tests {
     use std::marker::PhantomData;
+    use std::sync::Arc;
 
     use bytes::Bytes;
     use octez_riscv_data::components::vector::VectorMode;
@@ -458,13 +459,17 @@ pub(super) mod tests {
     use super::RegistryManifest;
     use super::VerifyImpl;
     use crate::commit::CommitId;
+    use crate::database::tests::from_prove_layer;
+    use crate::database::tests::to_verify;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::errors::OperationalError;
     use crate::key::Key;
+    use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::repo::RegistryRepo;
+    use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
@@ -1117,6 +1122,123 @@ pub(super) mod tests {
         assert_eq!(registry.len(), 1);
 
         assert!(registry.resize_tick(5).is_err());
+    });
+
+    // Reading through a `Registry<Prove>` populated from snapshots of Normal-mode source
+    // data records a proof; replaying the same reads through the resulting
+    // `Registry<Verify>` must yield the same values.
+    kv_test!(test_verify_replays_prove_reads, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut normal_a = MerkleLayer::<KV, Normal>::new(Arc::new(
+            KV::new(&repo).expect("Persistence creation should succeed"),
+        ));
+
+        normal_a
+            .set(&key_a, b"foo")
+            .expect("Setting in Normal mode should succeed");
+
+        let mut normal_b = MerkleLayer::<KV, Normal>::new(Arc::new(
+            KV::new(&repo).expect("Persistence creation should succeed"),
+        ));
+
+        normal_b
+            .set(&key_b, b"bar")
+            .expect("Setting in Normal mode should succeed");
+
+        let expected_hashes = [normal_a.hash(), normal_b.hash()];
+
+        let prove_databases = vec![
+            from_prove_layer::<KV>(normal_a.start_proof()),
+            from_prove_layer::<KV>(normal_b.start_proof()),
+        ];
+
+        let prove_registry = Registry::<KV, Prove<'static>> {
+            inner: ProveImpl { repo },
+            databases: <Prove<'static> as VectorMode>::new(prove_databases),
+        };
+
+        let prove_hashes_before = (0..prove_registry.len())
+            .map(|i| {
+                prove_registry
+                    .database(i)
+                    .expect("Database should exist.")
+                    .hash()
+                    .expect("Hashing should succeed.")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(prove_hashes_before.as_slice(), expected_hashes);
+
+        prove_registry
+            .database(0)
+            .expect("Database should exist.")
+            .assert_database_value(&key_a, b"foo");
+        prove_registry
+            .database(1)
+            .expect("Database should exist.")
+            .assert_database_value(&key_b, b"bar");
+
+        let prove_hashes_after = (0..prove_registry.len())
+            .map(|i| {
+                prove_registry
+                    .database(i)
+                    .expect("Database should exist.")
+                    .hash()
+                    .expect("Hashing should succeed.")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            prove_hashes_after, prove_hashes_before,
+            "Reads must not affect Prove-mode hashes."
+        );
+
+        let verify_databases = (0..prove_registry.len())
+            .map(|i| to_verify::<KV>(prove_registry.database(i).expect("Database should exist.")))
+            .collect();
+
+        let verify_registry = Registry::<KV, Verify> {
+            inner: VerifyImpl(PhantomData),
+            databases: <Verify as VectorMode>::new(verify_databases),
+        };
+
+        let verify_hashes_before = (0..verify_registry.len())
+            .map(|i| {
+                verify_registry
+                    .database(i)
+                    .expect("Database should exist.")
+                    .hash()
+                    .expect("Hashing should succeed.")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(verify_hashes_before.as_slice(), expected_hashes);
+
+        // The same reads through the Verify-mode registry should yield the same values.
+        verify_registry
+            .database(0)
+            .expect("Database should exist.")
+            .assert_database_value(&key_a, b"foo");
+
+        verify_registry
+            .database(1)
+            .expect("Database should exist.")
+            .assert_database_value(&key_b, b"bar");
+
+        let verify_hashes_after = (0..verify_registry.len())
+            .map(|i| {
+                verify_registry
+                    .database(i)
+                    .expect("Database should exist.")
+                    .hash()
+                    .expect("Hashing should succeed.")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            verify_hashes_after, verify_hashes_before,
+            "Reads must not affect Verify-mode hashes."
+        );
     });
 
     kv_test!(test_verify_clear_database, KV: BackgroundKeyValueStore, {
