@@ -706,6 +706,140 @@ mod tests {
         database.into_trace()
     });
 
+    /// Operation to perform immediately before the delete
+    enum RaceConditionOp {
+        Set,
+        Write,
+    }
+
+    fn test_op_then_delete_race_condition<KV>(op: RaceConditionOp)
+    where
+        KV: TestKeyValueStoreSetup + BackgroundPersistentKeyValueStore,
+    {
+        // Arrange
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut db = new_database::<KV>(handle, &repo);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let initial_hash = db.hash().expect("Hashing should succeed");
+
+        db.set(key.clone(), Bytes::new())
+            .expect("Writing should succeed");
+        let commit = db.commit(&repo).expect("Commit should succeed");
+
+        // Act
+        let db =
+            Database::<KV, _>::checkout(handle, &repo, commit).expect("Checkout should succeed");
+        let super::NormalImpl { merkle, persistent } = db.inner;
+
+        let new_value = vec![1, 2, 3];
+
+        // simulate race condition: emit persistence layer operations first
+        match op {
+            RaceConditionOp::Set => {
+                persistent
+                    .set(key.as_ref(), &new_value)
+                    .expect("set should succeed");
+            }
+            RaceConditionOp::Write => {
+                persistent
+                    .write(key.as_ref(), 0, &new_value)
+                    .expect("write should succeed");
+            }
+        }
+
+        persistent
+            .delete(key.as_ref())
+            .expect("Delete should succeed");
+
+        // replay on merkle worker - the full operation order should succeed
+        match op {
+            RaceConditionOp::Set => {
+                merkle
+                    .set(key.clone(), Bytes::from(new_value))
+                    .expect("worker should not have crashed");
+            }
+            RaceConditionOp::Write => {
+                merkle
+                    .write(key.clone(), 0, Bytes::from(new_value))
+                    .expect("worker should not have crashed");
+            }
+        }
+        merkle.delete(key).expect("worker should not have crashed");
+
+        // Assert
+        // - hash to ensure consistency
+        let final_hash = merkle.hash().expect("worker should not have crashed");
+        assert_eq!(
+            initial_hash, final_hash,
+            "Empty DB should always hash to the same value"
+        );
+    }
+
+    // Test to exercise fix for RV-987: race condition for set-then-delete failure
+    kv_test!(#[ignore] test_set_delete_race_condition, KV: BackgroundPersistentKeyValueStore, {
+        test_op_then_delete_race_condition::<KV>(RaceConditionOp::Set);
+    });
+
+    // Test to exercise fix for RV-987: race condition for write-then-delete failure
+    kv_test!(#[ignore] test_write_delete_race_condition, KV: BackgroundPersistentKeyValueStore, {
+        test_op_then_delete_race_condition::<KV>(RaceConditionOp::Write);
+    });
+
+    // Test to exercise fix for RV-987: race condition for write-then-set failure
+    //
+    // This can occur when a subsequent `set` results in a value that is shorter than the
+    // offset the write is trying to write to
+    kv_test!(#[ignore] test_write_set_race_condition, KV: BackgroundPersistentKeyValueStore, {
+        // Arrange
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut db = new_database::<KV>(handle, &repo);
+
+        let key = Key::new(&[]).expect("Size less than KEY_MAX_SIZE");
+        let original_value = Bytes::new();
+
+        db.set(key.clone(), original_value.clone()).expect("Writing should succeed");
+
+        let initial_hash = db.hash().expect("Hashing should succeed");
+
+        // set to a non-zero length value, needing so we can shorten the value later
+        db.set(key.clone(), Bytes::from(vec![1, 2, 3])).expect("Setting should succeed");
+        let commit = db.commit(&repo).expect("Commit should succeed");
+
+        // Act
+        let db = Database::<KV, _>::checkout(handle, &repo, commit).expect("Checkout should succeed");
+        let super::NormalImpl { merkle, persistent } = db.inner;
+
+        let new_value = vec![5, 6, 7];
+        let offset = 2;
+
+        // simulate race condition: emit persistence layer operations first
+        persistent.write(key.as_ref(), offset, &new_value).expect("write should succeed");
+        // shorten the value - the write on the merkle layer will later fail due to OffsetTooLarge
+        persistent.set(key.as_ref(), []).expect("Set should succeed");
+
+        // replay on merkle worker - the full operation order should succeed
+        merkle.write(key.clone(), offset, Bytes::from(new_value)).expect("worker should not have crashed");
+        merkle.set(key, Bytes::new()).expect("worker should not have crashed");
+
+        // Assert
+        // - hash to ensure consistency
+        let final_hash = merkle.hash().expect("worker should not have crashed");
+        assert_eq!(initial_hash, final_hash, "DB with single identical Key-Value should always hash to the same value");
+    });
+
     // Test to verify the fix for RV-955 (deletion after checkout failed).
     kv_test!(test_database_delete_after_checkout, KV: BackgroundPersistentKeyValueStore, {
         // Arrange
