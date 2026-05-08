@@ -783,12 +783,12 @@ mod tests {
     }
 
     // Test to exercise fix for RV-987: race condition for set-then-delete failure
-    kv_test!(#[ignore] test_set_delete_race_condition, KV: BackgroundPersistentKeyValueStore, {
+    kv_test!(test_set_delete_race_condition, KV: BackgroundPersistentKeyValueStore, {
         test_op_then_delete_race_condition::<KV>(RaceConditionOp::Set);
     });
 
     // Test to exercise fix for RV-987: race condition for write-then-delete failure
-    kv_test!(#[ignore] test_write_delete_race_condition, KV: BackgroundPersistentKeyValueStore, {
+    kv_test!(test_write_delete_race_condition, KV: BackgroundPersistentKeyValueStore, {
         test_op_then_delete_race_condition::<KV>(RaceConditionOp::Write);
     });
 

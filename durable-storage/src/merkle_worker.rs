@@ -40,6 +40,39 @@ trait_set! {
 type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>) + Send;
 
 /// Commands that will be sent to the background worker thread to manipulate the Merkle layer
+///
+/// # Race Conditions
+///
+/// As these are handled in a background thread, there are potential race conditions between the
+/// background worker, and the persistence layer. The `MerkleLayer` resolves values lazily from the
+/// `KeyValueStore` - and as a result can attempt to perform operations over unexpected, or
+/// incorrectly shaped, values.
+///
+/// ## Out-of-order delete
+///
+/// One such race condition is that a delete operation may already have been performed in the
+/// `KeyValueStore`, prior to a _previous_ write/set on that value being handled in the Merkle
+/// layer. This can happen when, on the first `set/write`, the value needs to be resolved (loaded).
+/// This takes time to happen - and is fully possible (if many intermediate nodes need to be resolved
+/// first), that a subsequent delete operation has already been handled by the persistence layer.
+///
+/// This results in the write/set failing with [`OperationalError::CommitValueMissing`]. This is
+/// less concerning than it first appears, however, as we know the Merkle layer will subsequently
+/// handle the delete that caused the issue! Therefore, the delete does in fact restore the
+/// consistency of the Merkle layer - and there is no need to crash the worker when such errors
+/// occur.
+///
+/// ## Eventual consistency
+///
+/// We do not wish to enforce 'full-synchronisation' on every operation - as this would lose the
+/// performance gained by allowing the Merkle layer to 'catch-up' in the background thread.
+///
+/// The Merkle layer _will_, however, be fully-consistent at every point that matters: ie on
+/// `Hash` and `Commit`. This is because synchronisation is forced on these operations - and so
+/// if we encountered the above race conditions, the operation that caused (and resolves) them
+/// _must_ occur before the synchronisation points. If it occurs after, then the race condition
+/// cannot have happened to begin with: as all the prior operations will be fully handled first,
+/// before any problemetatic operations can occur.
 struct Command<KV>(Box<DynCommand<KV>>);
 
 impl<KV> Command<KV> {
@@ -53,11 +86,15 @@ impl<KV> Command<KV> {
     where
         KV: KeyValueStore,
     {
-        Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
-            layer
-                .write(&key, offset, &value)
-                .expect("Writing to the Merkle layer should succeed.");
-        }))
+        Self(Box::new(
+            move |layer: &mut MerkleLayer<KV, Normal>| match layer.write(&key, offset, &value) {
+                Err(Error::Operational(OperationalError::CommitValueMissing {
+                    key: missing_key,
+                    source: _,
+                })) if key == missing_key => (),
+                result => result.expect("Writing to the Merkle layer should succeed."),
+            },
+        ))
     }
 
     /// Construct a command that performs a [`MerkleLayer::set`].
@@ -65,11 +102,15 @@ impl<KV> Command<KV> {
     where
         KV: KeyValueStore,
     {
-        Self(Box::new(move |layer: &mut MerkleLayer<KV, Normal>| {
-            layer
-                .set(&key, &value)
-                .expect("Setting on the Merkle layer should succeed.");
-        }))
+        Self(Box::new(
+            move |layer: &mut MerkleLayer<KV, Normal>| match layer.set(&key, &value) {
+                Err(OperationalError::CommitValueMissing {
+                    key: missing_key,
+                    source: _,
+                }) if key == missing_key => (),
+                result => result.expect("Setting on the Merkle layer should succeed."),
+            },
+        ))
     }
 
     /// Construct a command that performs a [`MerkleLayer::delete`].
