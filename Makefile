@@ -9,7 +9,7 @@ NIGHTLY_VERSION = nightly-2026-02-24
 
 all: riscv/all sandbox/all jstz/all dummy/all page-cache-tester/all etherlink/all docs/all
 
-check: riscv/check durable/check jstz/check dummy/check dummy-no-std/check page-cache-tester/check etherlink/check assets/check docs/check check-format
+check: check-format riscv/check durable/check jstz/check dummy/check dummy-no-std/check page-cache-tester/check etherlink/check assets/check docs/check
 
 build: sandbox/build jstz/build dummy/build dummy-no-std/build page-cache-tester/build etherlink/build
 
