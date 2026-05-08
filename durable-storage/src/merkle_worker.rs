@@ -21,6 +21,7 @@ use trait_set::trait_set;
 
 use crate::commit::CommitId;
 use crate::errors::Error;
+use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
@@ -62,6 +63,15 @@ type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>) + Send;
 /// consistency of the Merkle layer - and there is no need to crash the worker when such errors
 /// occur.
 ///
+/// ## Out-of-order set
+///
+/// Writes can also fail in a similar way when a subsequent `set` operation reduces the length
+/// of the value stored - and the offset of the write is larger than the new value's length.
+///
+/// Once again, this is not as concerning as it might appear. The write may indeed fail, but the
+/// subsequent set will be handled by the Merkle layer, fully overwriting any value that would have
+/// been written anyway.
+///
 /// ## Eventual consistency
 ///
 /// We do not wish to enforce 'full-synchronisation' on every operation - as this would lose the
@@ -92,6 +102,7 @@ impl<KV> Command<KV> {
                     key: missing_key,
                     source: _,
                 })) if key == missing_key => (),
+                Err(Error::InvalidArgument(InvalidArgumentError::OffsetTooLarge)) => (),
                 result => result.expect("Writing to the Merkle layer should succeed."),
             },
         ))
