@@ -817,7 +817,7 @@ mod tests {
     //
     // This can occur when a subsequent `set` results in a value that is shorter than the
     // offset the write is trying to write to
-    kv_test!(#[ignore] test_write_set_race_condition, KV: BackgroundPersistentKeyValueStore, {
+    kv_test!(test_write_set_race_condition, KV: BackgroundPersistentKeyValueStore, {
         // Arrange
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
