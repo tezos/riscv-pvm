@@ -570,7 +570,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 mod traced_database;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -641,6 +641,27 @@ mod tests {
         let database = new_database::<KV>(handle, &repo);
 
         (runtime, keepalive, repo, database)
+    }
+
+    /// Wrap an existing Prove-mode [`MerkleLayer`] into a [`Database`].
+    pub(crate) fn from_prove_layer<KV: KeyValueStore>(
+        merkle: MerkleLayer<KV, Prove<'static>>,
+    ) -> Database<KV, Prove<'static>> {
+        Database {
+            inner: super::ProveImpl { merkle },
+        }
+    }
+
+    /// Generate a Merkle proof from `database` and produce a Verify-mode database that replays
+    /// the same data via that proof.
+    pub(crate) fn to_verify<KV: KeyValueStore>(
+        database: &Database<KV, Prove<'static>>,
+    ) -> Database<KV, Verify> {
+        Database {
+            inner: super::VerifyImpl {
+                merkle: database.inner.merkle.to_verify(),
+            },
+        }
     }
 
     kv_test!(test_database_commit_and_checkout, KV: BackgroundPersistentKeyValueStore,
@@ -2038,7 +2059,7 @@ mod tests {
 
         // Generate the proof and produce a Verify-mode database from it.
         let (prove_inner, prove_trace) = prove_db.into_parts();
-        let verify_ml: MerkleLayer<KV, Verify> = prove_inner.inner.merkle.into_verify();
+        let verify_ml: MerkleLayer<KV, Verify> = prove_inner.inner.merkle.to_verify();
         let verify_db: Database<KV, Verify> = Database {
             inner: super::VerifyImpl { merkle: verify_ml },
         };

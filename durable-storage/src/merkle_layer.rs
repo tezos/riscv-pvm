@@ -758,8 +758,8 @@ mod tests {
 
         /// Generate a Merkle proof from the current Prove-mode layer and produce a Verify-mode
         /// layer that replays the same data via that proof.
-        pub(crate) fn into_verify(self) -> MerkleLayer<KV, Verify> {
-            let proof = MerkleProof::from_foldable(&self);
+        pub(crate) fn to_verify(&self) -> MerkleLayer<KV, Verify> {
+            let proof = MerkleProof::from_foldable(self);
             MerkleLayer::from_proof(proof).expect("proof deserialization should succeed")
         }
     }
