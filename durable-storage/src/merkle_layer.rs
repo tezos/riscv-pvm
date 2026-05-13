@@ -110,7 +110,7 @@ impl<KV> MerkleLayer<KV, Normal> {
             LazyResolver::new(self.inner.persistence.clone()),
             Some(root_tree_hash),
         );
-        let working_tree = initial_tree.clone().into_proof(&resolver);
+        let working_tree = initial_tree.clone().into_proof();
         let initial_tree_id = LazyTreeId::from(initial_tree);
 
         MerkleLayer {
