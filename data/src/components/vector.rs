@@ -50,7 +50,6 @@ use crate::merkle_proof::sequence_as_tree_from_proof;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
-use crate::mode::Provable;
 use crate::mode::ProvableExt;
 use crate::mode::Prove;
 use crate::mode::Verify;
@@ -253,17 +252,17 @@ impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Vector<T, Verif
     }
 }
 
-impl<'normal, T: Provable<'normal>> ProvableExt<'normal, 'normal, Infallible>
+impl<'normal, 'inner, E, T: ProvableExt<'normal, 'inner, E>> ProvableExt<'normal, 'inner, E>
     for Vector<T, Normal>
 {
-    type Prover = Vector<T::Prover, Prove<'normal>>;
+    type Prover = Vector<T::Prover, Prove<'inner>>;
 
-    fn try_start_proof(&'normal self) -> Result<Self::Prover, Infallible> {
+    fn try_start_proof(&'normal self) -> Result<Self::Prover, E> {
         let previous = self
             .vector
             .iter()
-            .map(Provable::start_proof)
-            .collect::<Vec<_>>()
+            .map(ProvableExt::try_start_proof)
+            .collect::<Result<Vec<_>, E>>()?
             .into_boxed_slice();
         let vector = Vector {
             vector: ProveImpl {
