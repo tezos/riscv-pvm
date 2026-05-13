@@ -35,7 +35,6 @@ use super::resolver::VerifyNodeId;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::NodeResolver;
-use crate::avl::resolver::ProveResolver;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -59,8 +58,8 @@ impl Tree<LazyNodeId> {
     /// Converts the [`Tree`] to [`Prove`] mode.
     ///
     /// [`Prove`]: octez_riscv_data::mode::Prove
-    pub(crate) fn into_proof<R>(self, resolver: &ProveResolver<R>) -> Tree<ProveNodeId> {
-        Tree(self.0.map(|id| id.into_proof(resolver)))
+    pub(crate) fn into_proof(self) -> Tree<ProveNodeId> {
+        Tree(self.0.map(|id| id.into_proof()))
     }
 }
 
@@ -114,28 +113,31 @@ impl<NodeId> Tree<NodeId> {
 
         let resolved_node = resolver.resolve(node)?;
         match resolved_node.key().cmp(key) {
-            Ordering::Equal => match (
-                resolved_node.left_ref(resolver)?.root(),
-                resolved_node.right_ref(resolver)?.root(),
-            ) {
-                (None, None) => {
-                    self.take();
-                    Ok(true)
+            Ordering::Equal => {
+                resolver.track_deleted_node(node);
+                match (
+                    resolved_node.left_ref(resolver)?.root(),
+                    resolved_node.right_ref(resolver)?.root(),
+                ) {
+                    (None, None) => {
+                        self.take();
+                        Ok(true)
+                    }
+                    (Some(left), None) => {
+                        *node = left.clone();
+                        Ok(true)
+                    }
+                    (None, Some(right)) => {
+                        *node = right.clone();
+                        Ok(true)
+                    }
+                    (Some(_), Some(_)) => {
+                        let (new_node, shrank) = Node::replace_with_successor(node, resolver)?;
+                        *node = new_node;
+                        Ok(shrank)
+                    }
                 }
-                (Some(left), None) => {
-                    *node = left.clone();
-                    Ok(true)
-                }
-                (None, Some(right)) => {
-                    *node = right.clone();
-                    Ok(true)
-                }
-                (Some(_), Some(_)) => {
-                    let (new_node, shrank) = Node::replace_with_successor(node, resolver)?;
-                    *node = new_node;
-                    Ok(shrank)
-                }
-            },
+            }
             Ordering::Greater => {
                 let node_mut = resolver.resolve_mut(node)?;
                 let left_shrank = node_mut.left_mut(resolver)?.delete(key, resolver)?;
