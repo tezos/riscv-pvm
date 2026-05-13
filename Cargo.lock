@@ -2496,6 +2496,7 @@ dependencies = [
  "blake3",
  "bytes",
  "derive_more",
+ "goldenfile",
  "hex",
  "humansize",
  "memmap2",

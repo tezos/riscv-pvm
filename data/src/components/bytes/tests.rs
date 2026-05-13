@@ -12,6 +12,9 @@ use proptest::proptest;
 use crate::components::bytes::Bytes;
 use crate::components::bytes::PAGE_SIZE;
 use crate::components::bytes::test_utils::BytesMutOp;
+use crate::components::bytes::test_utils::MAX_PROOF_LENGTH;
+use crate::components::bytes::test_utils::NDS_BYTES_LENGTH;
+use crate::components::bytes::test_utils::max_proof_ops;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
 use crate::foldable::tests::TestFolder;
@@ -576,5 +579,29 @@ fn fold_unfold() {
         let unfolded = Bytes::unfold(tree).unwrap();
 
         assert!(bytes == unfolded);
+    });
+}
+
+#[test]
+fn largest_valid_proof() {
+    let v = vec![0; 1024 * 1024 * 64];
+    let bytes: Bytes<Normal> = Bytes::from(&v[..]);
+
+    for op in max_proof_ops() {
+        let mut bytes_prove = bytes.start_proof();
+        let _result = op.run(&mut bytes_prove);
+        let proof_tree = MerkleProof::from_foldable(&bytes_prove);
+        let proof = serialise(proof_tree).unwrap();
+
+        assert_eq!(proof.len(), MAX_PROOF_LENGTH);
+    }
+
+    proptest::proptest!(|(op in BytesMutOp::any(NDS_BYTES_LENGTH))| {
+        let mut bytes_prove = bytes.start_proof();
+        let _result = op.run(&mut bytes_prove);
+        let proof_tree = MerkleProof::from_foldable(&bytes_prove);
+        let proof = serialise(proof_tree).unwrap();
+
+        assert!(proof.len() <= MAX_PROOF_LENGTH);
     });
 }
