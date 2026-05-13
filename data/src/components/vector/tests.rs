@@ -37,6 +37,7 @@ use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::merkle_proof::proof_tree::MerkleProofFold;
 use crate::mode::Normal;
 use crate::mode::Provable;
+use crate::mode::ProvableExt;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode_test;
@@ -407,7 +408,7 @@ where
         // We use a block expression to clearly delimit the lifetimes. Otherwise, the compiler will
         // freak out over using the `vector_normal` while `vector_prove` is still alive.
         let (verify_result, after_verify_hash) = {
-            let mut vector_prove = vector_normal.start_proof();
+            let Ok(mut vector_prove) = vector_normal.try_start_proof();
 
             // The initial hash of the Prove mode should match the Normal mode hash.
             let init_normal_hash = Hash::from_foldable(&vector_normal);
