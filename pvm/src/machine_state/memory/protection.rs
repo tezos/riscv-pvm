@@ -31,6 +31,7 @@ use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
+use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -134,7 +135,7 @@ impl<'normal> Provable<'normal> for PagePermissions<Normal> {
     type Prover = PagePermissions<Prove<'normal>>;
 
     fn start_proof(&'normal self) -> Self::Prover {
-        let pages = self.pages.start_proof();
+        let Ok(pages) = self.pages.try_start_proof();
         PagePermissions { pages }
     }
 }

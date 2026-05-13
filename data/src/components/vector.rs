@@ -51,6 +51,7 @@ use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
 use crate::mode::Provable;
+use crate::mode::ProvableExt;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::not_found;
@@ -252,17 +253,19 @@ impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Vector<T, Verif
     }
 }
 
-impl<'normal, T: Provable<'normal>> Provable<'normal> for Vector<T, Normal> {
+impl<'normal, T: Provable<'normal>> ProvableExt<'normal, 'normal, Infallible>
+    for Vector<T, Normal>
+{
     type Prover = Vector<T::Prover, Prove<'normal>>;
 
-    fn start_proof(&'normal self) -> Self::Prover {
+    fn try_start_proof(&'normal self) -> Result<Self::Prover, Infallible> {
         let previous = self
             .vector
             .iter()
             .map(Provable::start_proof)
             .collect::<Vec<_>>()
             .into_boxed_slice();
-        Vector {
+        let vector = Vector {
             vector: ProveImpl {
                 active_previous: previous.len(),
                 previous,
@@ -270,7 +273,9 @@ impl<'normal, T: Provable<'normal>> Provable<'normal> for Vector<T, Normal> {
                 appended: Vec::new(),
                 read_length: Cell::new(false),
             },
-        }
+        };
+
+        Ok(vector)
     }
 }
 

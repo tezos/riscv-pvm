@@ -53,6 +53,7 @@ use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Provable;
+use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::deserialise_from;
@@ -204,9 +205,9 @@ impl<'normal> Provable<'normal> for Outbox<Normal> {
     type Prover = Outbox<Prove<'normal>>;
 
     fn start_proof(&'normal self) -> Self::Prover {
-        Outbox {
-            levels: self.levels.start_proof(),
-        }
+        let Ok(levels) = self.levels.try_start_proof();
+
+        Outbox { levels }
     }
 }
 
@@ -399,8 +400,10 @@ impl<'normal> Provable<'normal> for OutboxLevel<Normal> {
     type Prover = OutboxLevel<Prove<'normal>>;
 
     fn start_proof(&'normal self) -> Self::Prover {
+        let Ok(messages) = self.messages.try_start_proof();
+
         OutboxLevel {
-            messages: self.messages.start_proof(),
+            messages,
             level: self.level.start_proof(),
         }
     }

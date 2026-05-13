@@ -124,3 +124,24 @@ pub trait Provable<'normal> {
     /// Start proving.
     fn start_proof(&'normal self) -> Self::Prover;
 }
+
+/// Types that implement this can be switched to [`Prove`] mode,
+/// but this operation may fail.
+///
+/// Unlike `Provable`, `Prover` may have a lifetime potentially
+/// decoupled from `'normal` - such as `'static`.
+pub trait ProvableExt<'normal, 'prover, E> {
+    /// Variant of [`Self`] in [`Prove`] mode
+    type Prover: 'prover;
+
+    /// Attempt to start proving.
+    fn try_start_proof(&'normal self) -> Result<Self::Prover, E>;
+}
+
+impl<'normal, P: Provable<'normal>> ProvableExt<'normal, 'normal, Infallible> for P {
+    type Prover = <P as Provable<'normal>>::Prover;
+
+    fn try_start_proof(&'normal self) -> Result<Self::Prover, Infallible> {
+        Ok(<P as Provable<'normal>>::start_proof(self))
+    }
+}
