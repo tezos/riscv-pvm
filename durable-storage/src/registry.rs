@@ -23,6 +23,7 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::deserialise;
@@ -73,6 +74,29 @@ impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
             .build()
             .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
         Ok(Arc::new(runtime))
+    }
+}
+
+impl<'normal, KV> ProvableExt<'normal, 'static, OperationalError> for Registry<KV, Normal>
+where
+    KV: BackgroundKeyValueStore,
+    KV::Repo: Clone,
+{
+    type Prover = Registry<KV, Prove<'static>>;
+
+    fn try_start_proof(&'normal self) -> Result<Self::Prover, OperationalError> {
+        let Self {
+            databases,
+            inner: NormalImpl { repo, .. },
+        } = self;
+
+        let databases = databases.try_start_proof()?;
+        let repo = repo.clone();
+
+        Ok(Registry {
+            inner: ProveImpl { repo },
+            databases,
+        })
     }
 }
 
@@ -443,12 +467,12 @@ struct VerifyImpl<KV: KeyValueStore>(PhantomData<KV>);
 #[cfg(test)]
 pub(super) mod tests {
     use std::marker::PhantomData;
-    use std::sync::Arc;
 
     use bytes::Bytes;
     use octez_riscv_data::components::vector::VectorMode;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::serialisation::deserialise;
@@ -459,17 +483,14 @@ pub(super) mod tests {
     use super::RegistryManifest;
     use super::VerifyImpl;
     use crate::commit::CommitId;
-    use crate::database::tests::from_prove_layer;
     use crate::database::tests::to_verify;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::errors::OperationalError;
     use crate::key::Key;
-    use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::repo::RegistryRepo;
-    use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
@@ -1133,33 +1154,28 @@ pub(super) mod tests {
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut normal_a = MerkleLayer::<KV, Normal>::new(Arc::new(
-            KV::new(&repo).expect("Persistence creation should succeed"),
-        ));
+        let mut registry = setup_size_2_registry(repo);
 
-        normal_a
-            .set(&key_a, b"foo")
+        let db_0 = registry.database_mut(0)
+            .expect("database at index 0 exists");
+
+        db_0.set(key_a.clone(), Bytes::copy_from_slice(b"foo"))
             .expect("Setting in Normal mode should succeed");
+        let db_0_hash = db_0.hash().expect("Hashing should succeed");
 
-        let mut normal_b = MerkleLayer::<KV, Normal>::new(Arc::new(
-            KV::new(&repo).expect("Persistence creation should succeed"),
-        ));
+        let db_1 = registry.database_mut(1)
+            .expect("database at index 1 exists");
 
-        normal_b
-            .set(&key_b, b"bar")
+        db_1.set(key_b.clone(), Bytes::copy_from_slice(b"bar"))
             .expect("Setting in Normal mode should succeed");
+        let db_1_hash = db_1.hash().expect("Hashing should succeed");
 
-        let expected_hashes = [normal_a.hash(), normal_b.hash()];
+        let expected_hashes = [db_0_hash, db_1_hash];
 
-        let prove_databases = vec![
-            from_prove_layer::<KV>(normal_a.start_proof()),
-            from_prove_layer::<KV>(normal_b.start_proof()),
-        ];
+        let root_hash = Hash::from_foldable(&registry);
 
-        let prove_registry = Registry::<KV, Prove<'static>> {
-            inner: ProveImpl { repo },
-            databases: <Prove<'static> as VectorMode>::new(prove_databases),
-        };
+        let prove_registry = registry.try_start_proof()
+            .expect("Converting to prove mode should succeed");
 
         let prove_hashes_before = (0..prove_registry.len())
             .map(|i| {
@@ -1171,6 +1187,9 @@ pub(super) mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(prove_hashes_before.as_slice(), expected_hashes);
+
+        let root_hash_prove_before = Hash::from_foldable(&registry);
+        assert_eq!(root_hash_prove_before, root_hash, "Converting to proof mode concerves root hash");
 
         prove_registry
             .database(0)
@@ -1190,10 +1209,13 @@ pub(super) mod tests {
                     .expect("Hashing should succeed.")
             })
             .collect::<Vec<_>>();
+        let root_hash_prove_after = Hash::from_foldable(&registry);
+
         assert_eq!(
             prove_hashes_after, prove_hashes_before,
             "Reads must not affect Prove-mode hashes."
         );
+        assert_eq!(root_hash_prove_after, root_hash_prove_before, "Reads must not affect Prove-mode hashes");
 
         let verify_databases = (0..prove_registry.len())
             .map(|i| to_verify::<KV>(prove_registry.database(i).expect("Database should exist.")))

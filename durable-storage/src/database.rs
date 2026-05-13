@@ -661,15 +661,6 @@ pub(crate) mod tests {
         (runtime, keepalive, repo, database)
     }
 
-    /// Wrap an existing Prove-mode [`MerkleLayer`] into a [`Database`].
-    pub(crate) fn from_prove_layer<KV: KeyValueStore>(
-        merkle: MerkleLayer<KV, Prove<'static>>,
-    ) -> Database<KV, Prove<'static>> {
-        Database {
-            inner: super::ProveImpl { merkle },
-        }
-    }
-
     /// Generate a Merkle proof from `database` and produce a Verify-mode database that replays
     /// the same data via that proof.
     pub(crate) fn to_verify<KV: KeyValueStore>(
