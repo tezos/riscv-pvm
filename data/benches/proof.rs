@@ -15,6 +15,7 @@ use humansize::BINARY;
 use humansize::format_size;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::test_utils::BytesMutOp;
+use octez_riscv_data::components::bytes::test_utils::NDS_BYTES_LENGTH;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -24,9 +25,6 @@ use octez_riscv_data::serialisation::serialise;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
-
-/// 64 MiB: the maximum size of a `Bytes` component in the durable storage
-const LENGTH: usize = 1024 * 1024 * 64;
 
 /// A struct to count the allocations or deallocations, compiles summary statistics from a sequence
 /// of `Layout`s.
@@ -203,7 +201,7 @@ fn init_state() -> Bytes<Normal> {
         .iter()
         .copied()
         .cycle()
-        .take(LENGTH)
+        .take(NDS_BYTES_LENGTH)
         .collect::<Vec<_>>();
     Bytes::from(&v[..])
 }
@@ -312,20 +310,40 @@ fn proof_max_rolling_bytes(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
 }
 
 fn main() {
-    let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_size, 1000);
+    let (worst_op, eval) = find_worst(
+        BytesMutOp::any(NDS_BYTES_LENGTH),
+        init_state,
+        proof_size,
+        1000,
+    );
     println!("Biggest: {worst_op:?}, {}", format_size(eval, BINARY));
 
-    let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_time, 1000);
+    let (worst_op, eval) = find_worst(
+        BytesMutOp::any(NDS_BYTES_LENGTH),
+        init_state,
+        proof_time,
+        1000,
+    );
     println!("Slowest: {worst_op:?}, {eval:?}");
 
-    let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_allocs, 1000);
+    let (worst_op, eval) = find_worst(
+        BytesMutOp::any(NDS_BYTES_LENGTH),
+        init_state,
+        proof_allocs,
+        1000,
+    );
     println!("Most allocs: {worst_op:?}, {eval:?}");
 
-    let (worst_op, eval) = find_worst(BytesMutOp::any(LENGTH), init_state, proof_alloc_bytes, 1000);
+    let (worst_op, eval) = find_worst(
+        BytesMutOp::any(NDS_BYTES_LENGTH),
+        init_state,
+        proof_alloc_bytes,
+        1000,
+    );
     println!("Most bytes: {worst_op:?}, {}", format_size(eval, BINARY));
 
     let (worst_op, eval) = find_worst(
-        BytesMutOp::any(LENGTH),
+        BytesMutOp::any(NDS_BYTES_LENGTH),
         init_state,
         proof_biggest_alloc,
         1000,
@@ -333,7 +351,7 @@ fn main() {
     println!("Biggest alloc: {worst_op:?}, {}", format_size(eval, BINARY));
 
     let (worst_op, eval) = find_worst(
-        BytesMutOp::any(LENGTH),
+        BytesMutOp::any(NDS_BYTES_LENGTH),
         init_state,
         proof_max_rolling_allocs,
         1000,
@@ -341,7 +359,7 @@ fn main() {
     println!("Most allocs at once: {worst_op:?}, {eval:?}");
 
     let (worst_op, eval) = find_worst(
-        BytesMutOp::any(LENGTH),
+        BytesMutOp::any(NDS_BYTES_LENGTH),
         init_state,
         proof_max_rolling_bytes,
         1000,
