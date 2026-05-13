@@ -22,6 +22,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use perfect_derive::perfect_derive;
@@ -268,6 +269,22 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Normal> {
     fn fold(&self, _builder: HashFold) -> Hash {
         self.inner.merkle.hash().expect("Hashing should not fail")
+    }
+}
+
+impl<'normal, KV: BackgroundKeyValueStore> ProvableExt<'normal, 'static, OperationalError>
+    for Database<KV, Normal>
+{
+    type Prover = Database<KV, Prove<'static>>;
+
+    fn try_start_proof(&'normal self) -> Result<Self::Prover, OperationalError> {
+        let NormalImpl { persistent, merkle } = &self.inner;
+
+        let merkle = merkle.start_proof(persistent.clone())?;
+
+        Ok(Database {
+            inner: ProveImpl { merkle },
+        })
     }
 }
 
@@ -576,6 +593,7 @@ pub(crate) mod tests {
 
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
+    use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::catch_not_found;
@@ -2029,23 +2047,36 @@ pub(crate) mod tests {
     });
 
     kv_test!(test_prove_database_read_bytes_records_only_accessed_range, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
 
-        // Build an 8192-byte value (two PAGE_SIZE pages) directly through MerkleLayer<Normal>,
-        // bypassing Database's per-call MAX_FILE_CHUNK_SIZE limit.
-        let value: Vec<u8> = (0..8192u32).map(|i| (i & 0xff) as u8).collect();
-        let (_keepalive, persistence) = new_persistence::<KV>();
-        let mut normal_ml = MerkleLayer::<KV, Normal>::new(persistence);
-        normal_ml
-            .set(&key, &value)
-            .expect("populating the normal layer should succeed");
+        // Build an 8192-byte value (two PAGE_SIZE pages)
+        let value: Vec<u8> = (0..(4 * (MAX_FILE_CHUNK_SIZE as u32)))
+            .map(|i| (i & 0xff) as u8)
+            .collect();
+
+        let value_iter = &mut value.iter().cloned();
+
+        let mut normal_db = new_database::<KV>(handle, &repo);
+        for i in 0..4 {
+            let offset = i * MAX_FILE_CHUNK_SIZE;
+            let bytes: Vec<u8> = value_iter.take(MAX_FILE_CHUNK_SIZE).collect();
+            normal_db
+                .write(key.clone(), offset, Bytes::from(bytes))
+                .expect("Writing to the db should succeed");
+        }
 
         // Convert to Prove and read a small range entirely contained in page 1.
-        let prove_db: TracedDatabase<KV, Prove<'static>> = TracedDatabase::from(Database {
-            inner: super::ProveImpl {
-                merkle: normal_ml.start_proof(),
-            },
-        });
+        let prove_db: TracedDatabase<KV, Prove<'static>> = normal_db
+            .try_start_proof()
+            .expect("starting proof should succeed");
+
         let read_offset = 5000usize;
         let read_len = 4usize;
         let read_back = prove_db
