@@ -90,7 +90,6 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
     }
 
     /// Resolve the data field on a lazy node.
-    #[cfg(test)]
     pub(crate) fn resolve_data(
         &self,
         resolver: &impl AvlResolver<super::resolver::LazyNodeId, LazyDataId, LazyTreeId, Normal>,
