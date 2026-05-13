@@ -701,6 +701,7 @@ mod tests {
     use std::sync::Arc;
 
     use octez_riscv_data::components::bytes::Bytes;
+    use octez_riscv_data::components::bytes::BytesMode;
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_proof::ProofError;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -803,23 +804,47 @@ mod tests {
         /// Only applied to keys that are known to exist.
         /// The offset must be `<= existing_data_len` for the write to succeed.
         Write(Key, usize, Vec<u8>),
+        /// Read up to `count` bytes starting at `offset`. A missing key reads zero bytes; reads
+        /// past the end clamp to the data length. Recording the read range is what makes the
+        /// data resolvable in Verify mode.
+        Read(Key, usize, usize),
     }
 
-    fn apply_operation<KV: KeyValueStore, M: MerkleLayerMode>(
+    /// Apply `op` against `ml`. Returns `Some(bytes)` for [`Operation::Read`] so callers can
+    /// compare read results across modes, and `None` for state-mutating ops.
+    fn apply_operation<KV: KeyValueStore, M: MerkleLayerMode + BytesMode>(
         ml: &mut MerkleLayer<KV, M>,
         op: &Operation,
-    ) {
+    ) -> Option<Vec<u8>> {
         match op {
             Operation::Set(key, data) => {
                 ml.set(key, data).expect("set should succeed");
+                None
             }
             Operation::Delete(key) => {
                 ml.delete(key).expect("delete should succeed");
+                None
             }
             Operation::Write(key, offset, data) => {
                 ml.write(key, *offset, data).expect("write should succeed");
-            } // TODO RV-895: add `get` to step op
+                None
+            }
+            Operation::Read(key, offset, count) => {
+                let mut buf = vec![0u8; *count];
+                let n = ml
+                    .get(key)
+                    .expect("get should succeed")
+                    .map_or(0, |data| data.read(*offset, &mut buf));
+                buf.truncate(n);
+                Some(buf)
+            }
         }
+    }
+
+    /// Derive a data length in the range [1, 8] from the key bytes. Used to generate
+    /// variable-length data for testing.
+    fn setup_data_len(key_bytes: &[u8; 2]) -> usize {
+        (key_bytes[0] as usize % 8) + 1
     }
 
     /// Core assertion: prove-mode proof and hash are consistent with Normal mode and the proof
@@ -843,7 +868,7 @@ mod tests {
 
         for bytes in setup_keys {
             let key = Key::new(bytes).expect("key should be valid");
-            let data = [bytes[0]; 10];
+            let data = vec![bytes[0]; setup_data_len(bytes)];
             normal_ml.set(&key, &data).expect("set should succeed");
         }
 
@@ -851,9 +876,10 @@ mod tests {
 
         // ---- Prove: start proof and execute operations ----
         let mut prove_ml = normal_ml.start_proof();
-        for op in operations {
-            apply_operation(&mut prove_ml, op);
-        }
+        let prove_reads: Vec<Vec<u8>> = operations
+            .iter()
+            .filter_map(|op| apply_operation(&mut prove_ml, op))
+            .collect();
         let prove_final_hash = prove_ml.hash();
 
         // ---- Generate proof ----
@@ -866,16 +892,23 @@ mod tests {
             "proof root hash must match initial Normal-mode hash"
         );
 
-        // ---- Normal: replay same operations for reference hash ----
-        for op in operations {
-            apply_operation(&mut normal_ml, op);
-        }
+        // ---- Normal: replay same operations for reference hash and read values ----
+        let normal_reads: Vec<Vec<u8>> = operations
+            .iter()
+            .filter_map(|op| apply_operation(&mut normal_ml, op))
+            .collect();
         let normal_final_hash = normal_ml.hash();
 
-        // Property 2: prove-mode final hash == Normal-mode final hash.
+        // Property 2a: prove-mode final hash == Normal-mode final hash.
         assert_eq!(
             normal_final_hash, prove_final_hash,
             "prove-mode final hash must match Normal-mode final hash"
+        );
+
+        // Property 2b: prove-mode reads return the same bytes as Normal-mode reads.
+        assert_eq!(
+            normal_reads, prove_reads,
+            "prove-mode reads must return the same bytes as Normal-mode reads"
         );
 
         // ---- Verify: deserialise the proof and replay the same operations ----
@@ -890,11 +923,12 @@ mod tests {
         );
 
         let operations_for_verify = operations.to_vec();
-        let verify_final_hash = catch_not_found(move || {
-            for op in &operations_for_verify {
-                apply_operation(&mut verify_ml, op);
-            }
-            verify_ml.hash()
+        let (verify_final_hash, verify_reads) = catch_not_found(move || {
+            let reads: Vec<Vec<u8>> = operations_for_verify
+                .iter()
+                .filter_map(|op| apply_operation(&mut verify_ml, op))
+                .collect();
+            (verify_ml.hash(), reads)
         })
         .expect("verify replay should not trigger not_found — proof must cover all accesses");
 
@@ -902,6 +936,12 @@ mod tests {
         assert_eq!(
             prove_final_hash, verify_final_hash,
             "verify-mode replay must reach the same final hash as prove mode"
+        );
+
+        // Property 3c: verify-mode reads return the same bytes as prove-mode reads.
+        assert_eq!(
+            prove_reads, verify_reads,
+            "verify-mode reads must return the same bytes as prove-mode reads"
         );
     }
 
@@ -2259,23 +2299,52 @@ mod tests {
             .map(|b| Key::new(b).expect("key should be valid"))
             .collect();
 
+        // Track each key's current data length so generated ops stay valid as state evolves.
+        // Initial lengths mirror the per-key length used during setup.
+        let mut lengths: std::collections::HashMap<Key, usize> = setup_keys
+            .iter()
+            .zip(keys.iter())
+            .map(|(bytes, k)| (k.clone(), setup_data_len(bytes)))
+            .collect();
+
         let mut operations = Vec::new();
-        // TODO RV-985: Expand to more operations in each test.
-        // This is currently limited to one operation, as this is the minimum requirement,
-        // and proof semantics are not supported for more than one operation yet.
-        let ops_count = 1;
+        let ops_count = seed % 20;
         for i in 0..ops_count {
             let key = keys[i % keys.len()].clone();
             let data = vec![seed as u8; 5];
-            match (i + seed) % 3 {
-                0 => operations.push(Operation::Set(key, data)),
-                1 => operations.push(Operation::Delete(key)),
-                _ => {
-                    // All setup keys have data set to 10 bytes long.
-                    // Data length is 5 bytes, so valid offsets are 0..=5.
-                    let offset = (i + seed) % 5;
-                    operations.push(Operation::Write(key, offset, data));
+            match (i + seed) % 4 {
+                0 => {
+                    lengths.insert(key.clone(), data.len());
+                    operations.push(Operation::Set(key, data));
                 }
+                1 => {
+                    lengths.remove(&key);
+                    operations.push(Operation::Delete(key));
+                }
+                2 => match lengths.get(&key).copied() {
+                    Some(len) => {
+                        let offset = (i + seed) % (len + 1);
+                        lengths.insert(key.clone(), std::cmp::max(len, offset + data.len()));
+                        operations.push(Operation::Write(key, offset, data));
+                    }
+                    None => {
+                        lengths.insert(key.clone(), data.len());
+                        operations.push(Operation::Set(key, data));
+                    }
+                },
+                _ => match lengths.get(&key).copied() {
+                    Some(len) => {
+                        // Vary offset across in-bounds, end-of-data and one past the end so the
+                        // read clamps to the data length and zero-byte cases are exercised.
+                        let offset = (i + seed) % (len + 2);
+                        let count = 1 + ((i + seed) % 7);
+                        operations.push(Operation::Read(key, offset, count));
+                    }
+                     None => {
+                        lengths.insert(key.clone(), data.len());
+                        operations.push(Operation::Set(key, data));
+                    }
+                },
             }
         }
 
@@ -2286,21 +2355,16 @@ mod tests {
     kv_test!(prove_verify_round_trips_writes_only, KV,
     [
         setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
-        // Setup keys are written with their own 2-byte representation as data, so the only
-        // valid offsets for an in-place / appending write are 0..=2.
-        offsets in prop::collection::vec(0usize..=2, 1..30),
+        offsets in prop::collection::vec(any::<usize>(), 1..30),
     ], {
-        let keys: Vec<Key> = setup_keys
-            .iter()
-            .map(|b| Key::new(b).expect("key should be valid"))
-            .collect();
-
-        let step_ops: Vec<Operation> = keys
+        let step_ops: Vec<Operation> = setup_keys
             .iter()
             .enumerate()
-            .map(|(i, key)| {
-                let offset = offsets[i % offsets.len()];
-                Operation::Write(key.clone(), offset, vec![0xAA; 1 + (i % 8)])
+            .map(|(i, bytes)| {
+                let key = Key::new(bytes).expect("key should be valid");
+                // The offset must be valid for the existing data length.
+                let offset = offsets[i % offsets.len()] % (setup_data_len(bytes) + 1);
+                Operation::Write(key, offset, vec![0xAA; 1 + (i % 8)])
             })
             .collect();
 
@@ -2335,8 +2399,6 @@ mod tests {
             .iter()
             // ensure we don't accidentally mix insertions with overwritting old keys
             // - the proof system doesn't currently support this
-            // TODO (RV-985): remove this line
-            .filter(|bytes| !setup_keys.contains(bytes))
             .enumerate()
             .map(|(i, bytes)| {
                 let key = Key::new(bytes).expect("key should be valid");
@@ -2347,36 +2409,31 @@ mod tests {
         assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
     });
 
-    kv_test!(prove_verify_round_trip_reads_only, KV,
+    // Reads via [`Operation::Read`] do not change the hash, but they record byte ranges in the
+    // proof so Verify mode can satisfy the same reads without triggering `not_found`.
+    kv_test!(prove_verify_round_trips_reads, KV,
     [
         setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..30),
-        read_indices in prop::collection::vec(any::<usize>(), 1..15),
+        // Setup lengths vary per key (see `setup_data_len`); the upper bound exceeds the maximum
+        // setup length so we also cover the past-the-end clamp case.
+        offsets in prop::collection::vec(0usize..=12, 1..30),
+        counts in prop::collection::vec(1usize..=15, 1..30),
     ], {
-        let (_keepalive, repo) = KV::setup_repo();
-        let mut normal_ml = new_merkle_layer::<KV>(&repo);
+        let keys: Vec<Key> = setup_keys
+            .iter()
+            .map(|b| Key::new(b).expect("key should be valid"))
+            .collect();
 
-        for bytes in &setup_keys {
-            let key = Key::new(bytes).expect("key should be valid");
-            normal_ml.set(&key, bytes).expect("set should succeed");
-        }
+        let step_ops: Vec<Operation> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, key)| {
+                let offset = offsets[i % offsets.len()];
+                let count = counts[i % counts.len()];
+                Operation::Read(key.clone(), offset, count)
+            })
+            .collect();
 
-        let normal_hash = normal_ml.hash();
-        let prove_ml = normal_ml.start_proof();
-
-        for &i in &read_indices {
-            let key = Key::new(&setup_keys[i % setup_keys.len()]).expect("key should be valid");
-            let _ = prove_ml.get(&key).expect("get should succeed");
-        }
-
-        prop_assert_eq!(
-            normal_hash,
-            prove_ml.hash(),
-        );
-
-        let proof = MerkleProof::from_foldable(&prove_ml);
-        prop_assert_eq!(
-            normal_hash,
-            proof.root_hash(),
-        );
+        assert_prove_mode_correct::<KV>(&setup_keys, &step_ops);
     });
 }
