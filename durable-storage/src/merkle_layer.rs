@@ -94,6 +94,33 @@ impl<KV> MerkleLayer<KV, Normal> {
     {
         self.inner.commit(options)
     }
+
+    /// Snapshot the current tree and enter prove mode.
+    ///
+    /// The returned layer holds two trees: an immutable `initial_tree` (a cheap `Clone` of the
+    /// Normal-mode tree) and a `working_tree` derived from it via [`Tree::into_proof`]. Mutations
+    /// during the proof step run against the working tree; the initial tree drives the
+    /// [`MerkleProofFold`] that generates the proof.
+    ///
+    /// [`MerkleProofFold`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold
+    pub fn start_proof(&self) -> MerkleLayer<KV, Prove<'static>> {
+        let initial_tree = self.inner.tree.clone();
+        let root_tree_hash = initial_tree.hash();
+        let resolver = ProveResolver::start(
+            LazyResolver::new(self.inner.persistence.clone()),
+            Some(root_tree_hash),
+        );
+        let working_tree = initial_tree.clone().into_proof(&resolver);
+        let initial_tree_id = LazyTreeId::from(initial_tree);
+
+        MerkleLayer {
+            inner: ProveImpl {
+                initial_tree: initial_tree_id,
+                working_tree,
+                resolver,
+            },
+        }
+    }
 }
 
 impl<KV> MerkleLayer<KV, Prove<'static>> {
@@ -713,33 +740,6 @@ mod tests {
                     Ok(Some(data))
                 }
                 None => Ok(None),
-            }
-        }
-
-        /// Snapshot the current tree and enter prove mode.
-        ///
-        /// The returned layer holds two trees: an immutable `initial_tree` (a cheap `Clone` of the
-        /// Normal-mode tree) and a `working_tree` derived from it via [`Tree::into_proof`]. Mutations
-        /// during the proof step run against the working tree; the initial tree drives the
-        /// [`MerkleProofFold`] that generates the proof.
-        ///
-        /// [`MerkleProofFold`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold
-        pub fn start_proof(&self) -> MerkleLayer<KV, Prove<'static>> {
-            let initial_tree = self.inner.tree.clone();
-            let root_tree_hash = initial_tree.hash();
-            let resolver = ProveResolver::start(
-                LazyResolver::new(self.inner.persistence.clone()),
-                Some(root_tree_hash),
-            );
-            let working_tree = initial_tree.clone().into_proof(&resolver);
-            let initial_tree_id = LazyTreeId::from(initial_tree);
-
-            MerkleLayer {
-                inner: ProveImpl {
-                    initial_tree: initial_tree_id,
-                    working_tree,
-                    resolver,
-                },
             }
         }
     }

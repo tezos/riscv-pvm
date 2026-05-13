@@ -13,6 +13,8 @@ use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::ProvableExt;
+use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use tokio::runtime::Handle;
 
@@ -283,6 +285,19 @@ impl<KV, M: Mode> From<Database<KV, M>> for TracedDatabase<KV, M> {
             inner,
             trace: RefCell::new(Vec::new()),
         }
+    }
+}
+
+impl<'normal, KV: BackgroundKeyValueStore> ProvableExt<'normal, 'static, OperationalError>
+    for TracedDatabase<KV, Normal>
+{
+    type Prover = TracedDatabase<KV, Prove<'static>>;
+
+    fn try_start_proof(&'normal self) -> Result<Self::Prover, OperationalError> {
+        let prove_db = self.inner.try_start_proof()?;
+        let prover = TracedDatabase::from(prove_db);
+
+        Ok(prover)
     }
 }
 

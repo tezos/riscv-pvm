@@ -15,6 +15,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Prove;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -398,6 +399,24 @@ impl<KV> MerkleWorker<KV> {
             .map_err(|_| OperationalError::WorkerThreadDied)?;
 
         receive()
+    }
+
+    /// See [`MerkleLayer::clone_with`].
+    pub(crate) fn start_proof(
+        &self,
+        store: Arc<KV>,
+    ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError>
+    where
+        KV: BackgroundKeyValueStore,
+    {
+        let (receive, command) = Command::new_clone_with(store);
+        self.sender
+            .send(command)
+            .map_err(|_error| OperationalError::WorkerThreadDied)?;
+
+        let layer = receive()?;
+
+        Ok(layer.start_proof())
     }
 }
 
