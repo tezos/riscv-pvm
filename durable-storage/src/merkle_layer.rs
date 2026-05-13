@@ -193,6 +193,14 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     {
         M::write(self, key, offset, data)
     }
+
+    /// Returns an immutable reference to the data stored for a given [Key].
+    pub(crate) fn get(&self, key: &Key) -> Result<Option<&Bytes<M>>, OperationalError>
+    where
+        KV: KeyValueStore,
+    {
+        M::get(self, key)
+    }
 }
 
 /// Modes that implements this trait support Merkle layer operations
@@ -226,6 +234,12 @@ pub trait MerkleLayerMode: Mode {
         offset: usize,
         data: &[u8],
     ) -> Result<(), Error>;
+
+    /// See [`MerkleLayer::get`]
+    fn get<'a, KV: KeyValueStore>(
+        this: &'a MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<Option<&'a Bytes<Self>>, OperationalError>;
 }
 
 impl MerkleLayerMode for Normal {
@@ -264,6 +278,18 @@ impl MerkleLayerMode for Normal {
         data: &[u8],
     ) -> Result<(), Error> {
         this.inner.write(key, offset, data)
+    }
+
+    fn get<'a, KV: KeyValueStore>(
+        this: &'a MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<Option<&'a Bytes<Self>>, OperationalError> {
+        let Some(node_id) = this.inner.tree.get(key, &this.inner.resolver)? else {
+            return Ok(None);
+        };
+        let resolved_node = this.inner.resolver.resolve(node_id)?;
+        let data = resolved_node.resolve_data(&this.inner.resolver)?;
+        Ok(Some(data))
     }
 }
 
@@ -319,6 +345,17 @@ impl MerkleLayerMode for Prove<'static> {
             .write(key, offset, data, &mut this.inner.resolver)?;
         Ok(())
     }
+
+    fn get<'a, KV: KeyValueStore>(
+        this: &'a MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<Option<&'a Bytes<Self>>, OperationalError> {
+        let Some(node_id) = this.inner.working_tree.get(key, &this.inner.resolver)? else {
+            return Ok(None);
+        };
+        let resolved_node = this.inner.resolver.resolve(node_id)?;
+        Ok(Some(resolved_node.data()))
+    }
 }
 
 impl MerkleLayerMode for Verify {
@@ -371,6 +408,17 @@ impl MerkleLayerMode for Verify {
             .tree
             .write(key, offset, data, &mut this.inner.resolver)?;
         Ok(())
+    }
+
+    fn get<'a, KV: KeyValueStore>(
+        this: &'a MerkleLayer<KV, Self>,
+        key: &Key,
+    ) -> Result<Option<&'a Bytes<Self>>, OperationalError> {
+        let Some(node_id) = this.inner.tree.get(key, &this.inner.resolver)? else {
+            return Ok(None);
+        };
+        let resolved_node = this.inner.resolver.resolve(node_id)?;
+        Ok(Some(resolved_node.data()))
     }
 }
 
@@ -630,37 +678,6 @@ impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
     }
 }
 
-impl<KV> MerkleLayer<KV, Verify> {
-    /// Returns an immutable reference to the data stored for a given [Key].
-    pub(crate) fn get(&self, key: &Key) -> Result<Option<&Bytes<Verify>>, OperationalError> {
-        let node = self.inner.tree.get(key, &self.inner.resolver)?;
-        match node {
-            Some(node_id) => {
-                let resolved_node = self.inner.resolver.resolve(node_id)?;
-                Ok(Some(resolved_node.data()))
-            }
-            None => Ok(None),
-        }
-    }
-}
-
-impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'static>> {
-    /// Returns an immutable reference to the data stored for a given ['Key'].
-    pub(crate) fn get(
-        &self,
-        key: &Key,
-    ) -> Result<Option<&Bytes<Prove<'static>>>, OperationalError> {
-        let node = self.inner.working_tree.get(key, &self.inner.resolver)?;
-        match node {
-            Some(node_id) => {
-                let resolved_node = self.inner.resolver.resolve(node_id)?;
-                Ok(Some(resolved_node.data()))
-            }
-            None => Ok(None),
-        }
-    }
-}
-
 /// Construct a verify-mode [`MerkleLayer`] for an empty initial state. Used in tests that exercise
 /// verify-mode mutation primitives in isolation.
 #[cfg(test)]
@@ -708,11 +725,9 @@ mod tests {
     use crate::avl::resolver::LazyTreeId;
     use crate::avl::resolver::ProveNodeId;
     use crate::avl::resolver::ProveResolver;
-    use crate::avl::resolver::Resolver;
     use crate::avl::resolver::VerifyResolver;
     use crate::avl::resolver::VerifyTreeId;
     use crate::avl::tree::Tree;
-    use crate::errors::OperationalError;
     use crate::key::Key;
     use crate::merkle_layer::VerifyImpl;
     use crate::storage::KeyValueStore;
@@ -728,19 +743,6 @@ mod tests {
         /// Clear all data from the [MerkleLayer].
         fn clear(&mut self) {
             self.inner.tree.take();
-        }
-
-        /// Returns an immutable reference to the data stored for a given [Key].
-        pub fn get(&mut self, key: &Key) -> Result<Option<&Bytes<Normal>>, OperationalError> {
-            let node = self.inner.tree.get(key, &self.inner.resolver)?;
-            match node {
-                Some(node_id) => {
-                    let resolved_node = self.inner.resolver.resolve(node_id)?;
-                    let data = resolved_node.resolve_data(&self.inner.resolver)?;
-                    Ok(Some(data))
-                }
-                None => Ok(None),
-            }
         }
     }
 
@@ -1760,7 +1762,7 @@ mod tests {
         let commit_opts = crate::storage::StoreOptions::default().with_deep().with_node_data();
         let commit_id = merkle_layer.commit(&commit_opts).expect("Commit operation should succeed");
 
-        let mut lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
+        let lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
             .expect("Lazy checkout should succeed");
         let loaded_hash = lazy_loaded.hash();
 
