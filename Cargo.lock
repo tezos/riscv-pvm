@@ -2495,6 +2495,7 @@ dependencies = [
  "bincode",
  "blake3",
  "bytes",
+ "criterion",
  "derive_more",
  "hex",
  "memmap2",

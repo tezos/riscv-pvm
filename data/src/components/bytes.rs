@@ -39,6 +39,7 @@ use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
 use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
+use crate::hash::HashFold;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
 use crate::merkle_proof::Deserialiser;
@@ -136,6 +137,7 @@ impl<M: BytesMode> Bytes<M> {
         &self,
         builder: Build,
         length: usize,
+        arity: usize,
         length_node: impl Foldable<Build>,
         get_item: impl Fn(Range<usize>) -> Item,
     ) -> Build::Folded {
@@ -156,7 +158,7 @@ impl<M: BytesMode> Bytes<M> {
 
         let mut builder = builder.into_node_fold();
         builder.add(&length_node);
-        builder.add(&IndexableSeqAsTree::new(pages, NODE_ARITY, &generator));
+        builder.add(&IndexableSeqAsTree::new(pages, arity, &generator));
         builder.done()
     }
 
@@ -166,6 +168,17 @@ impl<M: BytesMode> Bytes<M> {
         &self,
         builder: Build,
         length: usize,
+        get_data: F,
+    ) -> <Build as Fold>::Folded {
+        self.fold_with_fold_leaf_arity(builder, length, NODE_ARITY, get_data)
+    }
+
+    /// Like [`Self::fold_with_fold_leaf`], but allows the page-tree arity to be chosen at runtime.
+    fn fold_with_fold_leaf_arity<D: Borrow<[u8]>, F: Fn(Range<usize>) -> D, Build: FoldLeaf>(
+        &self,
+        builder: Build,
+        length: usize,
+        arity: usize,
         get_data: F,
     ) -> <Build as Fold>::Folded {
         let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail.");
@@ -182,7 +195,17 @@ impl<M: BytesMode> Bytes<M> {
             })
         };
 
-        self.fold_generic(builder, length, length_node, get_item)
+        self.fold_generic(builder, length, arity, length_node, get_item)
+    }
+}
+
+impl Bytes<Normal> {
+    /// Compute the root hash of this byte array using a custom page-tree arity.
+    ///
+    /// This is intended for benchmarking and experimentation only — production code paths use
+    /// [`NODE_ARITY`] via the regular [`Foldable`] implementation.
+    pub fn hash_with_arity(&self, arity: usize) -> Hash {
+        self.fold_with_fold_leaf_arity(HashFold, self.bytes.len(), arity, |r| &self.bytes[r])
     }
 }
 
@@ -372,7 +395,7 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
             MerkleProofFold::new_leaf(constraint, leaf_data)
         };
 
-        self.fold_generic(builder, length, length_node, get_item)
+        self.fold_generic(builder, length, NODE_ARITY, length_node, get_item)
     }
 }
 
