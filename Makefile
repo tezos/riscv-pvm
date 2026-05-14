@@ -53,6 +53,17 @@ rustfmt-check:
 
 test: jstz/test etherlink/test durable/test cargo-nextest-run cargo-test-doc
 
+bench:
+	@cargo bench --bench proof --features='unstable-test-utils' -- \
+		--metric length \
+		--metric verifytime \
+		--metric verifyallocs \
+		--metric verifybytesalloc \
+		--metric verifymaxalloc \
+		--metric verifymaxrollingallocs \
+		--metric verifymaxbytesalloc \
+		--attempts 200
+
 test-deps: dummy/build page-cache-tester/build dummy-no-std/build
 
 codecov.json: test-deps
@@ -106,4 +117,4 @@ docs/%:
 	@make -C docs ${@:docs/%=%}
 
 # Mark all non-pattern targets as phony to make sure they're always executed
-.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format rustfmt-check codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc cargo-clean
+.PHONY: all build-deps build-deps-slim check check-nix check-format taplo-check-format rustfmt-check codecov.json audit build test test-deps clean cargo-nextest-run cargo-test-doc cargo-clean bench

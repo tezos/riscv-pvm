@@ -11,6 +11,8 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use clap::Parser;
+use derive_more::FromStr;
 use humansize::BINARY;
 use humansize::format_size;
 use octez_riscv_data::components::bytes::Bytes;
@@ -25,6 +27,35 @@ use octez_riscv_data::serialisation::serialise;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
+
+/// The different metrics that measure proof badness of different kinds.
+#[derive(FromStr, Parser, Debug, Clone)]
+enum ProofMetric {
+    Length,
+    VerifyTime,
+    VerifyAllocs,
+    VerifyBytesAlloc,
+    VerifyMaxAlloc,
+    VerifyMaxRollingAllocs,
+    VerifyMaxBytesAlloc,
+}
+
+/// Command line args to specify how long to search, and which metrics to consider.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Proof metrics to explore.
+    #[arg(short, long)]
+    metric: Vec<ProofMetric>,
+
+    /// Number of attempts to make.
+    #[arg(short, long)]
+    attempts: usize,
+
+    /// This will be true: it's always there because of how `cargo bench` works.
+    #[arg(long)]
+    bench: bool,
+}
 
 /// A struct to count the allocations or deallocations, compiles summary statistics from a sequence
 /// of `Layout`s.
@@ -310,62 +341,76 @@ fn proof_max_rolling_bytes(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
 }
 
 fn main() {
-    let (worst_op, eval) = find_worst(
-        BytesMutOp::any(NDS_BYTES_LENGTH),
-        init_state,
-        proof_size,
-        1000,
-    );
-    println!("Biggest: {worst_op:?}, {}", format_size(eval, BINARY));
+    let args = Args::parse();
 
-    let (worst_op, eval) = find_worst(
-        BytesMutOp::any(NDS_BYTES_LENGTH),
-        init_state,
-        proof_time,
-        1000,
-    );
-    println!("Slowest: {worst_op:?}, {eval:?}");
-
-    let (worst_op, eval) = find_worst(
-        BytesMutOp::any(NDS_BYTES_LENGTH),
-        init_state,
-        proof_allocs,
-        1000,
-    );
-    println!("Most allocs: {worst_op:?}, {eval:?}");
-
-    let (worst_op, eval) = find_worst(
-        BytesMutOp::any(NDS_BYTES_LENGTH),
-        init_state,
-        proof_alloc_bytes,
-        1000,
-    );
-    println!("Most bytes: {worst_op:?}, {}", format_size(eval, BINARY));
-
-    let (worst_op, eval) = find_worst(
-        BytesMutOp::any(NDS_BYTES_LENGTH),
-        init_state,
-        proof_biggest_alloc,
-        1000,
-    );
-    println!("Biggest alloc: {worst_op:?}, {}", format_size(eval, BINARY));
-
-    let (worst_op, eval) = find_worst(
-        BytesMutOp::any(NDS_BYTES_LENGTH),
-        init_state,
-        proof_max_rolling_allocs,
-        1000,
-    );
-    println!("Most allocs at once: {worst_op:?}, {eval:?}");
-
-    let (worst_op, eval) = find_worst(
-        BytesMutOp::any(NDS_BYTES_LENGTH),
-        init_state,
-        proof_max_rolling_bytes,
-        1000,
-    );
-    println!(
-        "Most bytes allocated at once: {worst_op:?}, {}",
-        format_size(eval, BINARY)
-    );
+    for metric in args.metric {
+        match metric {
+            ProofMetric::Length => {
+                let (worst_op, eval) = find_worst(
+                    BytesMutOp::any(NDS_BYTES_LENGTH),
+                    init_state,
+                    proof_size,
+                    args.attempts,
+                );
+                println!("Biggest: {worst_op:?}, {}", format_size(eval, BINARY));
+            }
+            ProofMetric::VerifyTime => {
+                let (worst_op, eval) = find_worst(
+                    BytesMutOp::any(NDS_BYTES_LENGTH),
+                    init_state,
+                    proof_time,
+                    args.attempts,
+                );
+                println!("Slowest: {worst_op:?}, {eval:?}");
+            }
+            ProofMetric::VerifyAllocs => {
+                let (worst_op, eval) = find_worst(
+                    BytesMutOp::any(NDS_BYTES_LENGTH),
+                    init_state,
+                    proof_allocs,
+                    args.attempts,
+                );
+                println!("Most allocs: {worst_op:?}, {eval:?}");
+            }
+            ProofMetric::VerifyBytesAlloc => {
+                let (worst_op, eval) = find_worst(
+                    BytesMutOp::any(NDS_BYTES_LENGTH),
+                    init_state,
+                    proof_alloc_bytes,
+                    args.attempts,
+                );
+                println!("Most bytes: {worst_op:?}, {}", format_size(eval, BINARY));
+            }
+            ProofMetric::VerifyMaxAlloc => {
+                let (worst_op, eval) = find_worst(
+                    BytesMutOp::any(NDS_BYTES_LENGTH),
+                    init_state,
+                    proof_biggest_alloc,
+                    args.attempts,
+                );
+                println!("Biggest alloc: {worst_op:?}, {}", format_size(eval, BINARY));
+            }
+            ProofMetric::VerifyMaxRollingAllocs => {
+                let (worst_op, eval) = find_worst(
+                    BytesMutOp::any(NDS_BYTES_LENGTH),
+                    init_state,
+                    proof_max_rolling_allocs,
+                    args.attempts,
+                );
+                println!("Most allocs at once: {worst_op:?}, {eval:?}");
+            }
+            ProofMetric::VerifyMaxBytesAlloc => {
+                let (worst_op, eval) = find_worst(
+                    BytesMutOp::any(NDS_BYTES_LENGTH),
+                    init_state,
+                    proof_max_rolling_bytes,
+                    args.attempts,
+                );
+                println!(
+                    "Most bytes allocated at once: {worst_op:?}, {}",
+                    format_size(eval, BINARY)
+                );
+            }
+        }
+    }
 }
