@@ -13,7 +13,6 @@ unstable-test-utils = ["dep:proptest"]
 [dependencies]
 bincode.workspace = true
 blake3.workspace = true
-derive_more.workspace = true
 hex.workspace = true
 thiserror.workspace = true
 perfect-derive.workspace = true
@@ -22,6 +21,10 @@ memmap2.workspace = true
 range-collections.workspace = true
 bytes.workspace = true
 unty.workspace = true
+
+[dependencies.derive_more]
+workspace = true
+features = ["from_str"]
 
 [dependencies.proptest]
 workspace = true
@@ -32,6 +35,7 @@ proptest.workspace = true
 rand.workspace = true
 humansize.workspace = true
 goldenfile.workspace = true
+clap.workspace = true
 
 [[bench]]
 name = "proof"

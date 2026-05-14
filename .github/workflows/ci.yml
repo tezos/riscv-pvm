@@ -44,6 +44,9 @@ jobs:
             make-target: test
             title: Linux Tests
           - runs-on: ubuntu-latest
+            make-target: bench
+            title: Linux Component Benches
+          - runs-on: ubuntu-latest
             make-target: codecov.json
             code-coverage: true
             title: Code Coverage
