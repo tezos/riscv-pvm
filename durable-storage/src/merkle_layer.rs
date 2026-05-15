@@ -701,7 +701,6 @@ mod tests {
     use std::sync::Arc;
 
     use octez_riscv_data::components::bytes::Bytes;
-    use octez_riscv_data::components::bytes::BytesMode;
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_proof::ProofError;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -714,7 +713,6 @@ mod tests {
     use proptest::prop_assert_eq;
 
     use super::MerkleLayer;
-    use super::MerkleLayerMode;
     use super::ProveImpl;
     use super::new_merkle_layer;
     use super::new_verify_layer;
@@ -731,10 +729,13 @@ mod tests {
     use crate::avl::tree::Tree;
     use crate::key::Key;
     use crate::merkle_layer::VerifyImpl;
+    use crate::proof_test_utils::apply_to_merkle_layer;
+    use crate::proof_test_utils::setup_data_len;
     use crate::storage::KeyValueStore;
     use crate::storage::PersistentKeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
+    use crate::test_helpers::Operation;
 
     impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
         fn tree(&self) -> &Tree<LazyNodeId> {
@@ -793,60 +794,6 @@ mod tests {
         }
     }
 
-    /// Operations executed during a prove step and replayed during verification.
-    #[derive(Debug, Clone)]
-    enum Operation {
-        /// Set (insert or overwrite) a key.
-        Set(Key, Vec<u8>),
-        /// Delete a key (may be absent — that is a no-op on both sides).
-        Delete(Key),
-        /// In-place write at the given offset.
-        /// Only applied to keys that are known to exist.
-        /// The offset must be `<= existing_data_len` for the write to succeed.
-        Write(Key, usize, Vec<u8>),
-        /// Read up to `count` bytes starting at `offset`. A missing key reads zero bytes; reads
-        /// past the end clamp to the data length. Recording the read range is what makes the
-        /// data resolvable in Verify mode.
-        Read(Key, usize, usize),
-    }
-
-    /// Apply `op` against `ml`. Returns `Some(bytes)` for [`Operation::Read`] so callers can
-    /// compare read results across modes, and `None` for state-mutating ops.
-    fn apply_operation<KV: KeyValueStore, M: MerkleLayerMode + BytesMode>(
-        ml: &mut MerkleLayer<KV, M>,
-        op: &Operation,
-    ) -> Option<Vec<u8>> {
-        match op {
-            Operation::Set(key, data) => {
-                ml.set(key, data).expect("set should succeed");
-                None
-            }
-            Operation::Delete(key) => {
-                ml.delete(key).expect("delete should succeed");
-                None
-            }
-            Operation::Write(key, offset, data) => {
-                ml.write(key, *offset, data).expect("write should succeed");
-                None
-            }
-            Operation::Read(key, offset, count) => {
-                let mut buf = vec![0u8; *count];
-                let n = ml
-                    .get(key)
-                    .expect("get should succeed")
-                    .map_or(0, |data| data.read(*offset, &mut buf));
-                buf.truncate(n);
-                Some(buf)
-            }
-        }
-    }
-
-    /// Derive a data length in the range [1, 8] from the key bytes. Used to generate
-    /// variable-length data for testing.
-    fn setup_data_len(key_bytes: &[u8; 2]) -> usize {
-        (key_bytes[0] as usize % 8) + 1
-    }
-
     /// Core assertion: prove-mode proof and hash are consistent with Normal mode and the proof
     /// can be replayed under Verify mode to reach the same final hash.
     ///
@@ -878,7 +825,7 @@ mod tests {
         let mut prove_ml = normal_ml.start_proof();
         let prove_reads: Vec<Vec<u8>> = operations
             .iter()
-            .filter_map(|op| apply_operation(&mut prove_ml, op))
+            .filter_map(|op| apply_to_merkle_layer(&mut prove_ml, op))
             .collect();
         let prove_final_hash = prove_ml.hash();
 
@@ -895,7 +842,7 @@ mod tests {
         // ---- Normal: replay same operations for reference hash and read values ----
         let normal_reads: Vec<Vec<u8>> = operations
             .iter()
-            .filter_map(|op| apply_operation(&mut normal_ml, op))
+            .filter_map(|op| apply_to_merkle_layer(&mut normal_ml, op))
             .collect();
         let normal_final_hash = normal_ml.hash();
 
@@ -926,7 +873,7 @@ mod tests {
         let (verify_final_hash, verify_reads) = catch_not_found(move || {
             let reads: Vec<Vec<u8>> = operations_for_verify
                 .iter()
-                .filter_map(|op| apply_operation(&mut verify_ml, op))
+                .filter_map(|op| apply_to_merkle_layer(&mut verify_ml, op))
                 .collect();
             (verify_ml.hash(), reads)
         })
@@ -2311,7 +2258,7 @@ mod tests {
         let ops_count = seed % 20;
         for i in 0..ops_count {
             let key = keys[i % keys.len()].clone();
-            let data = vec![seed as u8; 5];
+            let data = bytes::Bytes::from(vec![seed as u8; 5]);
             match (i + seed) % 4 {
                 0 => {
                     lengths.insert(key.clone(), data.len());
@@ -2364,7 +2311,7 @@ mod tests {
                 let key = Key::new(bytes).expect("key should be valid");
                 // The offset must be valid for the existing data length.
                 let offset = offsets[i % offsets.len()] % (setup_data_len(bytes) + 1);
-                Operation::Write(key, offset, vec![0xAA; 1 + (i % 8)])
+                Operation::Write(key, offset, bytes::Bytes::from(vec![0xAA; 1 + (i % 8)]))
             })
             .collect();
 
@@ -2402,7 +2349,7 @@ mod tests {
             .enumerate()
             .map(|(i, bytes)| {
                 let key = Key::new(bytes).expect("key should be valid");
-                Operation::Set(key, vec![0xBB; 1 + (i % 8)])
+                Operation::Set(key, bytes::Bytes::from(vec![0xBB; 1 + (i % 8)]))
             })
             .collect();
 

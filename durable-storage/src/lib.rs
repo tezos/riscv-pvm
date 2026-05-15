@@ -36,6 +36,8 @@ pub mod key;
 mod merkle_layer;
 mod merkle_worker;
 pub mod persistence_layer;
+#[cfg(test)]
+mod proof_test_utils;
 pub mod registry;
 pub mod repo;
 pub mod storage;

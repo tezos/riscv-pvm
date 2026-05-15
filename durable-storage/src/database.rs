@@ -584,7 +584,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
     }
 }
 
-mod traced_database;
+pub(crate) mod traced_database;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -613,9 +613,12 @@ pub(crate) mod tests {
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+    use crate::proof_test_utils::apply_to_database;
+    use crate::proof_test_utils::setup_data_len;
     use crate::storage::KeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
+    use crate::test_helpers::Operation;
 
     fn new_database<KV: BackgroundKeyValueStore>(
         handle: &Handle,
@@ -2195,6 +2198,168 @@ pub(crate) mod tests {
         assert_eq!(before, reverted);
 
         database.into_trace()
+    });
+
+    // Multi-step proof: starting from a populated state, run a sequence of independent proof
+    // batches. Each batch
+    // - calls `try_start_proof` on the current Normal-mode `Database`,
+    // - applies operations through the Prove-mode `Database` API,
+    // - derives a `Database<Verify>` from the generated proof, and replays the same operations.
+    // - The Normal-mode source-of-truth is then advanced with the same operations so the next
+    //   batch's initial state reflects the accumulated mutations.
+    //
+    // Clone operations (e.g. `try_clone_with`) are intentionally excluded — only set, write,
+    // delete, and read are exercised.
+    kv_test!(test_database_multi_step_prove_verify, KV: BackgroundKeyValueStore,
+        setup_runtime |handle, repo| = {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .build()
+                .expect("Creating a Tokio runtime should succeed");
+            let handle = runtime.handle().clone();
+            let (_keepalive, repo) = KV::setup_repo();
+            (runtime, handle, _keepalive, repo)
+        },
+    [
+        setup_keys in prop::collection::vec(any::<[u8; 2]>(), 1..15),
+        batch_seeds in prop::collection::vec(0usize..1000, 2..6),
+    ], {
+        let mut normal_db = new_database::<KV>(handle, repo);
+
+        let keys: Vec<Key> = setup_keys
+            .iter()
+            .map(|b| Key::new(b).expect("key should be valid"))
+            .collect();
+
+        // Track each key's current data length so generated ops stay valid as state evolves
+        // across steps. Mirrors the strategy used in `prove_verify_round_trips_mixed`.
+        let mut lengths: std::collections::HashMap<Key, usize> =
+            std::collections::HashMap::new();
+        for (bytes, key) in setup_keys.iter().zip(keys.iter()) {
+            let data_len = setup_data_len(bytes);
+            let data = Bytes::from(vec![bytes[1]; data_len]);
+            normal_db
+                .set(key.clone(), data)
+                .expect("setup set should succeed");
+            lengths.insert(key.clone(), data_len);
+        }
+
+        for &seed in batch_seeds.iter() {
+            // Build a small batch of ops for this batch. Mix of set/delete/write/read so we
+            // exercise structural and value-data accesses across the proof.
+            //
+            // Generated reads stay within `[0, len]` because `Database::read_bytes` errors on
+            // out-of-range offsets.
+            let ops_count = (seed % 8) + 1;
+            let mut step_ops: Vec<Operation> = Vec::with_capacity(ops_count);
+            for i in 0..ops_count {
+                let key = keys[(seed + i) % keys.len()].clone();
+                let data = Bytes::from(vec![(seed + i) as u8; 1 + ((seed + i) % 5)]);
+                match (seed + i) % 4 {
+                    0 => {
+                        lengths.insert(key.clone(), data.len());
+                        step_ops.push(Operation::Set(key, data));
+                    }
+                    1 => {
+                        lengths.remove(&key);
+                        step_ops.push(Operation::Delete(key));
+                    }
+                    2 => match lengths.get(&key).copied() {
+                        Some(len) => {
+                            let offset = (seed + i) % (len + 1);
+                            lengths.insert(
+                                key.clone(),
+                                std::cmp::max(len, offset + data.len()),
+                            );
+                            step_ops.push(Operation::Write(key, offset, data));
+                        }
+                        None => {
+                            // Writing to a non-existent key at non-zero offset would fail; fall
+                            // back to a Set instead so the op stays valid.
+                            lengths.insert(key.clone(), data.len());
+                            step_ops.push(Operation::Set(key, data));
+                        }
+                    },
+                    _ => match lengths.get(&key).copied() {
+                        Some(len) => {
+                            let offset = (seed + i) % (len + 1);
+                            let max_bytes = ((seed + i) % 5) + 1;
+                            step_ops.push(Operation::Read(key, offset, max_bytes));
+                        }
+                        None => {
+                            lengths.insert(key.clone(), data.len());
+                            step_ops.push(Operation::Set(key, data));
+                        }
+                    },
+                }
+            }
+
+            let initial_hash = normal_db
+                .hash()
+                .expect("hashing normal db should succeed");
+
+            let mut prove_db: TracedDatabase<KV, Prove<'static>> = normal_db
+                .try_start_proof()
+                .expect("starting proof should succeed");
+
+            let prove_reads: Vec<Vec<u8>> = step_ops
+                .iter()
+                .filter_map(|op| apply_to_database(&mut prove_db, op))
+                .collect();
+            let prove_final_hash = prove_db
+                .hash()
+                .expect("hashing prove db should succeed");
+
+            let (prove_inner, _) = prove_db.into_parts();
+            let mut verify_db: TracedDatabase<KV, Verify> =
+                TracedDatabase::from(to_verify::<KV>(&prove_inner));
+
+            let verify_initial_hash = verify_db
+                .hash()
+                .expect("hashing verify db should succeed");
+            prop_assert_eq!(
+                verify_initial_hash, initial_hash,
+                "verify initial hash must match normal initial hash"
+            );
+
+            let step_ops_for_verify = step_ops.clone();
+            let (verify_final_hash, verify_reads) = catch_not_found(move || {
+                let reads: Vec<Vec<u8>> = step_ops_for_verify
+                    .iter()
+                    .filter_map(|op| apply_to_database(&mut verify_db, op))
+                    .collect();
+                let h = verify_db
+                    .hash()
+                    .expect("hashing verify db should succeed");
+                (h, reads)
+            })
+            .expect("verify replay must not trigger not_found");
+
+            prop_assert_eq!(
+                &prove_reads, &verify_reads,
+                "verify reads must match prove reads"
+            );
+            prop_assert_eq!(
+                prove_final_hash, verify_final_hash,
+                "verify final hash must match prove final hash"
+            );
+
+            // advance Normal mode with the same operations so the next batch's initial
+            // state reflects the accumulated mutations.
+            for op in &step_ops {
+                apply_to_database(&mut normal_db, op);
+            }
+            let normal_final_hash = normal_db
+                .hash()
+                .expect("hashing normal db should succeed");
+
+            prop_assert_eq!(
+                normal_final_hash, prove_final_hash,
+                "normal final hash must match prove final hash"
+            );
+        }
+
+        normal_db.into_trace()
     });
 
     #[cfg(feature = "rocksdb")]
