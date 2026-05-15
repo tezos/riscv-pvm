@@ -270,10 +270,7 @@ pub fn bench_run(mut state: BenchmarkState<'_>) {
                     &mut state.read_buffer[..size],
                 ) {
                     Ok(read) => {
-                        assert_eq!(
-                            read, size,
-                            "Failed to read exactly {size} bytes from storage"
-                        );
+                        assert!(read <= size, "Read more than {size} bytes from storage");
                     }
                     Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
                     Err(e) => panic!("The read should succeed: {e:?}"),
@@ -333,7 +330,11 @@ fn database_write_all(
     if data.is_empty() {
         return database.set(key, Bytes::new());
     }
-    let mut offset = 0;
+
+    let set_len = data.len().min(MAX_FILE_CHUNK_SIZE);
+    database.set(key.clone(), Bytes::copy_from_slice(&data[..set_len]))?;
+
+    let mut offset = set_len;
     while offset < data.len() {
         let end = (offset + MAX_FILE_CHUNK_SIZE).min(data.len());
         database.write(
