@@ -2,9 +2,10 @@
 
 use bytes::Bytes;
 use octez_riscv_durable_storage::key::Key;
+use octez_riscv_durable_storage::test_helpers::DatabaseOperation;
 use octez_riscv_durable_storage::test_helpers::Operation;
-use octez_riscv_durable_storage::test_helpers::make_operations;
-use octez_riscv_durable_storage::test_helpers::operations_strategy;
+use octez_riscv_durable_storage::test_helpers::make_registry_operations;
+use octez_riscv_durable_storage::test_helpers::registry_operations_strategy;
 use octez_riscv_durable_storage::test_helpers::run_operations;
 use proptest::proptest;
 
@@ -40,18 +41,31 @@ cfg_if::cfg_if! {
 fn test_durable_storage_manual() {
     let operations = vec![
         Operation::GrowRegistry,
-        Operation::Set(Key::new(&[0]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
-        Operation::Exists(Key::new(&[0]).unwrap()),
-        Operation::Write(Key::new(&[0]).unwrap(), 5, Bytes::copy_from_slice(&[0; 4])),
+        Operation::Database(DatabaseOperation::Set(
+            Key::new(&[0]).unwrap(),
+            Bytes::copy_from_slice(&[0; 10]),
+        )),
+        Operation::Database(DatabaseOperation::Exists(Key::new(&[0]).unwrap())),
+        Operation::Database(DatabaseOperation::Write(
+            Key::new(&[0]).unwrap(),
+            5,
+            Bytes::copy_from_slice(&[0; 4]),
+        )),
         Operation::GrowRegistry,
-        Operation::Set(Key::new(&[1]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
-        Operation::Commit,
-        Operation::Checkout,
+        Operation::Database(DatabaseOperation::Set(
+            Key::new(&[1]).unwrap(),
+            Bytes::copy_from_slice(&[0; 10]),
+        )),
+        Operation::Database(DatabaseOperation::Commit),
+        Operation::Database(DatabaseOperation::Checkout),
         Operation::ShrinkRegistry,
-        Operation::Set(Key::new(&[2]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
-        Operation::Exists(Key::new(&[1]).unwrap()),
-        Operation::Delete(Key::new(&[1]).unwrap()),
-        Operation::Exists(Key::new(&[1]).unwrap()),
+        Operation::Database(DatabaseOperation::Set(
+            Key::new(&[2]).unwrap(),
+            Bytes::copy_from_slice(&[0; 10]),
+        )),
+        Operation::Database(DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
+        Operation::Database(DatabaseOperation::Delete(Key::new(&[1]).unwrap())),
+        Operation::Database(DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
         Operation::ShrinkRegistry,
         Operation::ShrinkRegistry,
     ];
@@ -63,9 +77,9 @@ fn test_durable_storage_manual() {
 proptest! {
     #![proptest_config(proptest::test_runner::Config::with_cases(PROPTEST_CASES))]
     #[test]
-    fn test_durable_storage_prop((keys, values, ops) in operations_strategy(1usize..100)) {
+    fn test_durable_storage_prop((keys, values, ops) in registry_operations_strategy(1usize..100)) {
         let (_keepalive, repo) = setup_repo();
-        let operations = make_operations(keys, values, ops);
+        let operations = make_registry_operations(keys, values, ops);
         run_operations::<TestKv>(repo, operations);
     }
 }

@@ -7,8 +7,8 @@
 
 //! Shared utilities for end to end durable storage property-based tests
 //!
-//! Used by the integration test in `tests/integration_test.rs` and
-//! its in-crate `kv_test!` mirror in `registry.rs`.
+//! Used by the integration test in `tests/integration_test.rs` and in-crate
+//! `kv_test!`s for `registry.rs` and `database.rs`.
 
 use std::collections::HashMap;
 
@@ -18,17 +18,28 @@ use octez_riscv_data::mode::Normal;
 use proptest::prelude::*;
 use proptest::sample::Index;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
+use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
+use crate::database::Database;
+#[cfg(test)]
+use crate::database::Trace;
+#[cfg(test)]
+use crate::database::TracedDatabase;
+use crate::errors::Error;
+use crate::errors::OperationalError;
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::registry::Registry;
 use crate::repo::RegistryRepo;
 
+/// Maximum size for the value argument of a sampled operation
+pub const VALUE_MAX_SIZE: usize = 10_000;
+
+/// Operations on a single [`Database`]
 #[derive(Debug, Clone)]
-pub enum Operation {
-    // Database operations
+pub enum DatabaseOperation {
     Set(Key, Bytes),
     Write(Key, usize, Bytes),
     Read(Key, usize, usize),
@@ -38,8 +49,12 @@ pub enum Operation {
     Hash,
     Commit,
     Checkout,
+}
 
-    // Registry operations
+/// Operations on a [`Registry`]
+#[derive(Debug, Clone)]
+pub enum Operation {
+    Database(DatabaseOperation),
     GrowRegistry,
     ShrinkRegistry,
     CopyDatabase,
@@ -47,11 +62,8 @@ pub enum Operation {
     ClearDatabase,
 }
 
-pub const VALUE_MAX_SIZE: usize = 10_000;
-
 #[derive(Debug, Clone)]
-pub enum OperationView {
-    // Database operations
+pub enum DatabaseOperationView {
     Set(Index, Index),
     Write(Index, usize, Index),
     Read(Index, usize, usize),
@@ -61,8 +73,11 @@ pub enum OperationView {
     Hash,
     Commit,
     Checkout,
+}
 
-    // Registry operations
+#[derive(Debug, Clone)]
+pub enum OperationView {
+    Database(DatabaseOperationView),
     GrowRegistry,
     ShrinkRegistry,
     CopyDatabase,
@@ -70,33 +85,49 @@ pub enum OperationView {
     ClearDatabase,
 }
 
-pub fn make_operations(
+fn make_database_operation(
+    keys: &[Key],
+    values: &[Bytes],
+    view: DatabaseOperationView,
+) -> DatabaseOperation {
+    match view {
+        DatabaseOperationView::Set(k_idx, v_idx) => DatabaseOperation::Set(
+            keys[k_idx.index(keys.len())].clone(),
+            values[v_idx.index(values.len())].clone(),
+        ),
+        DatabaseOperationView::Write(k_idx, offset, v_idx) => DatabaseOperation::Write(
+            keys[k_idx.index(keys.len())].clone(),
+            offset,
+            values[v_idx.index(values.len())].clone(),
+        ),
+        DatabaseOperationView::Read(k_idx, offset, len) => {
+            DatabaseOperation::Read(keys[k_idx.index(keys.len())].clone(), offset, len)
+        }
+        DatabaseOperationView::Delete(idx) => {
+            DatabaseOperation::Delete(keys[idx.index(keys.len())].clone())
+        }
+        DatabaseOperationView::Exists(idx) => {
+            DatabaseOperation::Exists(keys[idx.index(keys.len())].clone())
+        }
+        DatabaseOperationView::ValueLength(idx) => {
+            DatabaseOperation::ValueLength(keys[idx.index(keys.len())].clone())
+        }
+        DatabaseOperationView::Hash => DatabaseOperation::Hash,
+        DatabaseOperationView::Commit => DatabaseOperation::Commit,
+        DatabaseOperationView::Checkout => DatabaseOperation::Checkout,
+    }
+}
+
+pub fn make_registry_operations(
     keys: Vec<Key>,
     values: Vec<Bytes>,
     ops: Vec<OperationView>,
 ) -> Vec<Operation> {
     ops.into_iter()
         .map(|op| match op {
-            OperationView::Set(k_idx, v_idx) => Operation::Set(
-                keys[k_idx.index(keys.len())].clone(),
-                values[v_idx.index(values.len())].clone(),
-            ),
-            OperationView::Write(k_idx, offset, v_idx) => Operation::Write(
-                keys[k_idx.index(keys.len())].clone(),
-                offset,
-                values[v_idx.index(values.len())].clone(),
-            ),
-            OperationView::Read(k_idx, offset, len) => {
-                Operation::Read(keys[k_idx.index(keys.len())].clone(), offset, len)
+            OperationView::Database(view) => {
+                Operation::Database(make_database_operation(&keys, &values, view))
             }
-            OperationView::Delete(idx) => Operation::Delete(keys[idx.index(keys.len())].clone()),
-            OperationView::Exists(idx) => Operation::Exists(keys[idx.index(keys.len())].clone()),
-            OperationView::ValueLength(idx) => {
-                Operation::ValueLength(keys[idx.index(keys.len())].clone())
-            }
-            OperationView::Hash => Operation::Hash,
-            OperationView::Commit => Operation::Commit,
-            OperationView::Checkout => Operation::Checkout,
             OperationView::GrowRegistry => Operation::GrowRegistry,
             OperationView::ShrinkRegistry => Operation::ShrinkRegistry,
             OperationView::CopyDatabase => Operation::CopyDatabase,
@@ -115,58 +146,76 @@ fn value_strategy() -> impl Strategy<Value = Bytes> {
     proptest::collection::vec(any::<u8>(), 1usize..=VALUE_MAX_SIZE).prop_map(Bytes::from)
 }
 
-pub fn operations_strategy(
+fn database_operation_view_strategy() -> impl Strategy<Value = DatabaseOperationView> {
+    let set = (any::<Index>(), any::<Index>()).prop_map(|(k, v)| DatabaseOperationView::Set(k, v));
+
+    let read = (
+        any::<Index>(),
+        prop_oneof![
+            2 => Just(0),
+            1 => 1..=VALUE_MAX_SIZE,
+        ],
+        0..=VALUE_MAX_SIZE,
+    )
+        .prop_map(|(k, off, len)| DatabaseOperationView::Read(k, off, len));
+
+    // Writes biased towards valid offsets
+    let write_valid = (
+        any::<Index>(),
+        prop_oneof![
+            2 => Just(0),
+            1 => 1..=VALUE_MAX_SIZE,
+        ],
+        any::<Index>(),
+    )
+        .prop_map(|(k, off, v)| DatabaseOperationView::Write(k, off, v));
+
+    // Writes biased towards out-of-bounds offsets
+    let write_invalid = (any::<Index>(), VALUE_MAX_SIZE..=usize::MAX, any::<Index>())
+        .prop_map(|(k, off, v)| DatabaseOperationView::Write(k, off, v));
+
+    // The chosen frequencies emulate real workloads
+    prop_oneof![
+        20 => set,
+        20 => read,
+        3 => write_valid,
+        2 => write_invalid,
+
+        10 => any::<Index>().prop_map(DatabaseOperationView::Delete),
+        10 => any::<Index>().prop_map(DatabaseOperationView::Exists),
+        5 => any::<Index>().prop_map(DatabaseOperationView::ValueLength),
+        10 => Just(DatabaseOperationView::Hash),
+        3 => Just(DatabaseOperationView::Commit),
+        3 => Just(DatabaseOperationView::Checkout),
+    ]
+}
+
+pub fn database_operations_strategy(
+    length: impl Strategy<Value = usize>,
+) -> impl Strategy<Value = (Vec<Key>, Vec<Bytes>, Vec<DatabaseOperationView>)> {
+    length.prop_flat_map(|length| {
+        let count = length.div_ceil(10);
+        (
+            proptest::collection::vec(key_strategy(), count),
+            proptest::collection::vec(value_strategy(), count),
+            proptest::collection::vec(database_operation_view_strategy(), length),
+        )
+    })
+}
+
+pub fn registry_operations_strategy(
     length: impl Strategy<Value = usize>,
 ) -> impl Strategy<Value = (Vec<Key>, Vec<Bytes>, Vec<OperationView>)> {
     length.prop_flat_map(|length| {
         let count = length.div_ceil(10);
-        let set = (any::<Index>(), any::<Index>()).prop_map(|(k, v)| OperationView::Set(k, v));
-
-        let read = (
-            any::<Index>(),
-            prop_oneof![
-                2 => Just(0),
-                1 => 1..=VALUE_MAX_SIZE,
-            ],
-            0..=VALUE_MAX_SIZE,
-        )
-            .prop_map(|(k, off, len)| OperationView::Read(k, off, len));
-
-        // Writes biased towards valid offsets
-        let write_valid = (
-            any::<Index>(),
-            prop_oneof![
-                2 => Just(0),
-                1 => 1..=VALUE_MAX_SIZE,
-            ],
-            any::<Index>(),
-        )
-            .prop_map(|(k, off, v)| OperationView::Write(k, off, v));
-
-        // Writes biased towards out-of-bounds offsets
-        let write_invalid = (any::<Index>(), VALUE_MAX_SIZE..=usize::MAX, any::<Index>())
-            .prop_map(|(k, off, v)| OperationView::Write(k, off, v));
 
         (
             proptest::collection::vec(key_strategy(), count),
             proptest::collection::vec(value_strategy(), count),
-            // The chosen frequencies emulate real workloads
             proptest::collection::vec(
+                // The chosen frequencies emulate real workloads
                 prop_oneof![
-                    // Database operations
-                    20 => set,
-                    20 => read,
-                    3 => write_valid,
-                    2 => write_invalid,
-
-                    10 => any::<Index>().prop_map(OperationView::Delete),
-                    10 => any::<Index>().prop_map(OperationView::Exists),
-                    5 => any::<Index>().prop_map(OperationView::ValueLength),
-                    10 => Just(OperationView::Hash),
-                    3 => Just(OperationView::Commit),
-                    3 => Just(OperationView::Checkout),
-
-                    // Registry operations
+                    86 => database_operation_view_strategy().prop_map(OperationView::Database),
                     3 => Just(OperationView::GrowRegistry),
                     2 => Just(OperationView::ShrinkRegistry),
                     2 => Just(OperationView::CopyDatabase),
@@ -236,6 +285,228 @@ fn update_value(value: &mut Bytes, offset: usize, bytes: Bytes) {
     *value = Bytes::copy_from_slice(&new_value);
 }
 
+/// Abstracts the interface of [`Database`] so [`apply_database_operation`]
+/// can be used in both [`Registry`] (via [`Database`] references) and
+/// the `Database` tests which use [`TracedDatabase`] to capture a trace.
+trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>: Sized {
+    fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error>;
+
+    fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error>;
+
+    fn delete(&mut self, key: Key) -> Result<(), OperationalError>;
+
+    fn read(&self, key: &Key, offset: usize, output: &mut [u8]) -> Result<usize, Error>;
+
+    fn exists(&self, key: &Key) -> Result<bool, Error>;
+
+    fn value_length(&self, key: &Key) -> Result<usize, Error>;
+
+    fn hash(&self) -> Result<Hash, OperationalError>;
+
+    fn commit(&self, repo: &KV::Repo) -> Result<CommitId, OperationalError>;
+
+    fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error>;
+}
+
+impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Normal> {
+    fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
+        Database::set(self, key, data)
+    }
+
+    fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error> {
+        Database::write(self, key, offset, data)
+    }
+
+    fn delete(&mut self, key: Key) -> Result<(), OperationalError> {
+        Database::delete(self, key)
+    }
+
+    fn read(&self, key: &Key, offset: usize, output: &mut [u8]) -> Result<usize, Error> {
+        Database::read(self, key, offset, output)
+    }
+
+    fn exists(&self, key: &Key) -> Result<bool, Error> {
+        Database::exists(self, key)
+    }
+
+    fn value_length(&self, key: &Key) -> Result<usize, Error> {
+        Database::value_length(self, key)
+    }
+
+    fn hash(&self) -> Result<Hash, OperationalError> {
+        Database::hash(self)
+    }
+
+    fn commit(&self, repo: &KV::Repo) -> Result<CommitId, OperationalError> {
+        Database::commit(self, repo)
+    }
+
+    fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
+        Database::checkout(handle, repo, commit_id)
+    }
+}
+
+#[cfg(test)]
+impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<KV, Normal> {
+    fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
+        TracedDatabase::set(self, key, data)
+    }
+
+    fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error> {
+        TracedDatabase::write(self, key, offset, data)
+    }
+
+    fn delete(&mut self, key: Key) -> Result<(), OperationalError> {
+        TracedDatabase::delete(self, key)
+    }
+
+    fn read(&self, key: &Key, offset: usize, output: &mut [u8]) -> Result<usize, Error> {
+        TracedDatabase::read(self, key, offset, output)
+    }
+
+    fn exists(&self, key: &Key) -> Result<bool, Error> {
+        TracedDatabase::exists(self, key)
+    }
+
+    fn value_length(&self, key: &Key) -> Result<usize, Error> {
+        TracedDatabase::value_length(self, key)
+    }
+
+    fn hash(&self) -> Result<Hash, OperationalError> {
+        TracedDatabase::hash(self)
+    }
+
+    fn commit(&self, repo: &KV::Repo) -> Result<CommitId, OperationalError> {
+        TracedDatabase::commit(self, repo)
+    }
+
+    fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
+        TracedDatabase::checkout(handle, repo, commit_id)
+    }
+}
+
+fn apply_database_operation<KV, D>(
+    database: &mut D,
+    golden: &mut GoldenData,
+    op: DatabaseOperation,
+    handle: &Handle,
+    repo: &KV::Repo,
+    checkout_candidates: &mut HashMap<Hash, bool>,
+) where
+    KV: BackgroundPersistentKeyValueStore,
+    D: DatabaseOps<KV>,
+{
+    match op {
+        DatabaseOperation::Set(key, bytes) => {
+            let data = Bytes::copy_from_slice(&bytes);
+            let result = database.set(key.clone(), data);
+
+            if bytes.len() <= MAX_FILE_CHUNK_SIZE {
+                assert!(
+                    result.is_ok(),
+                    "Set should have succeeded but failed: {:?}",
+                    result.err()
+                );
+
+                golden.seen.insert(key, bytes.clone());
+            } else {
+                assert!(result.is_err(), "Set should have failed but succeeded");
+            }
+        }
+        DatabaseOperation::Write(key, offset, bytes) => {
+            let data = Bytes::copy_from_slice(&bytes);
+            let result = database.write(key.clone(), offset, data);
+
+            let should_succeed = if let Some(map_value) = golden.seen.get_mut(&key) {
+                if offset > map_value.len()
+                    || offset.checked_add(bytes.len()).is_none()
+                    || bytes.len() > MAX_FILE_CHUNK_SIZE
+                {
+                    false
+                } else {
+                    update_value(map_value, offset, bytes);
+                    true
+                }
+            } else if offset > 0 || bytes.len() > MAX_FILE_CHUNK_SIZE {
+                false
+            } else {
+                golden.seen.insert(key, bytes);
+                true
+            };
+
+            if should_succeed {
+                assert!(
+                    result.is_ok(),
+                    "Write should have succeeded but failed: {:?}",
+                    result.err()
+                );
+            } else {
+                assert!(result.is_err(), "Write should have failed but succeeded");
+            }
+        }
+        DatabaseOperation::Read(key, offset, len) => {
+            let mut database_value = vec![0; len];
+
+            let mut cursor = 0;
+            let mut result = database.read(&key, offset + cursor, &mut database_value[cursor..]);
+
+            while let Ok(read) = result {
+                if read == 0 {
+                    break;
+                }
+                cursor += read;
+                result = database.read(&key, offset + cursor, &mut database_value[cursor..])
+            }
+
+            if let Some(map_value) = golden.seen.get(&key) {
+                if offset > map_value.len() || len > MAX_FILE_CHUNK_SIZE {
+                    assert!(result.is_err());
+                } else {
+                    let expected_len = std::cmp::min(len, map_value.len() - offset);
+                    assert!(cursor >= expected_len);
+                    assert_eq!(
+                        &database_value[..expected_len],
+                        &map_value[offset..offset + expected_len]
+                    );
+                }
+            } else {
+                assert!(result.is_err());
+            }
+        }
+        DatabaseOperation::Delete(key) => {
+            // The hash of the `Database` can differ even if the key-value pairs stored are
+            // the same, because deletion and reinsertion can cause the shape of the AVL
+            // tree to change.
+            let deleted = golden.seen.remove(&key).is_some();
+            if deleted {
+                golden.ambiguous_hash = true;
+            }
+
+            database.delete(key).expect("Deleting should succeed");
+        }
+        DatabaseOperation::Exists(key) => {
+            let in_database = database.exists(&key).expect("Writing should succeed");
+            let in_map = golden.seen.contains_key(&key);
+            assert_eq!(in_database, in_map);
+        }
+        DatabaseOperation::ValueLength(key) => {
+            let database_length = database.value_length(&key);
+            let map_value = golden.seen.get(&key);
+
+            match (database_length, map_value) {
+                (Ok(database_length), Some(map_value)) => {
+                    assert_eq!(database_length, map_value.len())
+                }
+                (Err(_), None) => (),
+                _ => panic!("The value exists in one map but not the other"),
+            }
+        }
+        DatabaseOperation::Hash | DatabaseOperation::Commit | DatabaseOperation::Checkout => {
+            unreachable!("Intercepted by `apply_database_operation`")
+        }
+    }
+}
+
 pub fn run_operations<KV>(repo: KV::Repo, operations: Vec<Operation>)
 where
     KV: BackgroundPersistentKeyValueStore,
@@ -251,149 +522,7 @@ where
 
     for operation in operations {
         match operation {
-            // Database operations
-            Operation::Set(key, bytes) => {
-                let index = get_index(&mut registry, &mut golden);
-
-                let data = Bytes::copy_from_slice(&bytes);
-
-                let result = registry
-                    .database_mut(index)
-                    .expect("The index is in bounds")
-                    .set(key.clone(), data);
-
-                if bytes.len() <= MAX_FILE_CHUNK_SIZE {
-                    assert!(
-                        result.is_ok(),
-                        "Set should have succeeded but failed: {:?}",
-                        result.err()
-                    );
-
-                    golden[index].seen.insert(key, bytes.clone());
-                } else {
-                    assert!(result.is_err(), "Set should have failed but succeeded");
-                }
-            }
-            Operation::Write(key, offset, bytes) => {
-                let data = Bytes::copy_from_slice(&bytes);
-                let index = get_index(&mut registry, &mut golden);
-
-                let result = registry
-                    .database_mut(index)
-                    .expect("The index is in bounds")
-                    .write(key.clone(), offset, data);
-
-                let should_succeed = if let Some(map_value) = golden[index].seen.get_mut(&key) {
-                    if offset > map_value.len()
-                        || offset.checked_add(bytes.len()).is_none()
-                        || bytes.len() > MAX_FILE_CHUNK_SIZE
-                    {
-                        false
-                    } else {
-                        update_value(map_value, offset, bytes);
-                        true
-                    }
-                } else if offset > 0 || bytes.len() > MAX_FILE_CHUNK_SIZE {
-                    false
-                } else {
-                    golden[index].seen.insert(key, bytes);
-                    true
-                };
-
-                if should_succeed {
-                    assert!(
-                        result.is_ok(),
-                        "Write should have succeeded but failed: {:?}",
-                        result.err()
-                    );
-                } else {
-                    assert!(result.is_err(), "Write should have failed but succeeded");
-                }
-            }
-            Operation::Read(key, offset, len) => {
-                let index = get_index(&mut registry, &mut golden);
-                let mut database_value = vec![0; len];
-
-                let mut cursor = 0;
-                let mut result = registry
-                    .database(index)
-                    .expect("The index is in bounds")
-                    .read(&key, offset + cursor, &mut database_value[cursor..]);
-
-                while let Ok(read) = result {
-                    if read == 0 {
-                        break;
-                    }
-                    cursor += read;
-                    result = registry
-                        .database(index)
-                        .expect("The index is in bounds")
-                        .read(&key, offset + cursor, &mut database_value[cursor..])
-                }
-
-                if let Some(map_value) = golden[index].seen.get(&key) {
-                    if offset > map_value.len() || len > MAX_FILE_CHUNK_SIZE {
-                        assert!(result.is_err());
-                    } else {
-                        let expected_len = std::cmp::min(len, map_value.len() - offset);
-                        assert!(cursor >= expected_len);
-                        assert_eq!(
-                            &database_value[..expected_len],
-                            &map_value[offset..offset + expected_len]
-                        );
-                    }
-                } else {
-                    assert!(result.is_err());
-                }
-            }
-            Operation::Delete(key) => {
-                let index = get_index(&mut registry, &mut golden);
-
-                // The hash of the `Database` can differ even if the key-value pairs stored are
-                // the same, because deletion and reinsertion can cause the shape of the AVL
-                // tree to change.
-                let deleted = golden[index].seen.remove(&key).is_some();
-                if deleted {
-                    golden[index].ambiguous_hash = true;
-                }
-
-                registry
-                    .database_mut(index)
-                    .expect("The index is in bounds")
-                    .delete(key)
-                    .expect("Deleting should succeed");
-            }
-            Operation::Exists(key) => {
-                let index = get_index(&mut registry, &mut golden);
-
-                let in_database = registry
-                    .database(index)
-                    .expect("The index is in bounds")
-                    .exists(&key)
-                    .expect("Writing should succeed");
-                let in_map = golden[index].seen.contains_key(&key);
-
-                assert_eq!(in_database, in_map);
-            }
-            Operation::ValueLength(key) => {
-                let index = get_index(&mut registry, &mut golden);
-
-                let database_length = registry
-                    .database(index)
-                    .expect("The index is in bounds")
-                    .value_length(&key);
-
-                let map_value = golden[index].seen.get(&key);
-
-                match (database_length, map_value) {
-                    (Ok(database_length), Some(map_value)) => {
-                        assert_eq!(database_length, map_value.len())
-                    }
-                    (Err(_), None) => (),
-                    _ => panic!("The value exists in one map but not the other"),
-                }
-            }
-            Operation::Hash => {
+            Operation::Database(DatabaseOperation::Hash) => {
                 let index = get_index(&mut registry, &mut golden);
 
                 let new_digest = registry
@@ -414,11 +543,11 @@ where
                     .entry(Hash::from_foldable(&registry))
                     .or_insert(false);
             }
-            Operation::Commit => {
+            Operation::Database(DatabaseOperation::Commit) => {
                 let commit_id = registry.commit().expect("Committing should succeed");
                 checkout_candidates.insert(*commit_id.as_hash(), true);
             }
-            Operation::Checkout => {
+            Operation::Database(DatabaseOperation::Checkout) => {
                 if !checkout_candidates.is_empty() {
                     let index = rand::random_range(0..checkout_candidates.len());
                     let (&commit_hash, &committed) = checkout_candidates
@@ -437,8 +566,20 @@ where
                     );
                 }
             }
-
-            // Registry operations
+            Operation::Database(op) => {
+                let index = get_index(&mut registry, &mut golden);
+                let handle = registry.handle().clone();
+                apply_database_operation::<KV, _>(
+                    registry
+                        .database_mut(index)
+                        .expect("The index is in bounds"),
+                    &mut golden[index],
+                    op,
+                    &handle,
+                    &checkout_repo,
+                    &mut checkout_candidates,
+                );
+            }
             Operation::GrowRegistry => grow_registry(&mut registry, &mut golden),
             Operation::ShrinkRegistry => {
                 // Make sure there's a database to drop
