@@ -243,13 +243,13 @@ pub fn registry_operations_strategy(
 }
 
 #[derive(Clone, Debug, Default)]
-struct GoldenData {
-    seen: HashMap<Key, Bytes>,
+struct DatabaseModel {
+    data: HashMap<Key, Bytes>,
     last: Option<(Hash, HashMap<Key, Bytes>)>,
     ambiguous_hash: bool,
 }
 
-fn grow_registry<KV>(registry: &mut Registry<KV, Normal>, golden: &mut Vec<GoldenData>)
+fn grow_registry<KV>(registry: &mut Registry<KV, Normal>, registry_model: &mut Vec<DatabaseModel>)
 where
     KV: BackgroundPersistentKeyValueStore,
     KV::Repo: RegistryRepo,
@@ -266,15 +266,18 @@ where
             .expect("Copying the database should succeed");
     }
 
-    if golden.is_empty() {
-        golden.resize(1, Default::default());
+    if registry_model.is_empty() {
+        registry_model.resize(1, Default::default());
     } else {
-        golden.push(golden[golden.len() - 1].clone());
+        registry_model.push(registry_model[registry_model.len() - 1].clone());
     }
 }
 
 /// Get the index of the current database, growing the registry until it has a valid index.
-fn get_index<KV>(registry: &mut Registry<KV, Normal>, golden: &mut Vec<GoldenData>) -> usize
+fn get_index<KV>(
+    registry: &mut Registry<KV, Normal>,
+    registry_model: &mut Vec<DatabaseModel>,
+) -> usize
 where
     KV: BackgroundPersistentKeyValueStore,
     KV::Repo: RegistryRepo,
@@ -282,8 +285,8 @@ where
     if let Some(index) = registry.len().checked_sub(1) {
         index
     } else {
-        grow_registry(registry, golden);
-        get_index(registry, golden)
+        grow_registry(registry, registry_model);
+        get_index(registry, registry_model)
     }
 }
 
@@ -401,7 +404,7 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<K
 
 fn apply_database_operation<KV, D>(
     database: &mut D,
-    golden: &mut GoldenData,
+    model: &mut DatabaseModel,
     op: DatabaseOperation,
     handle: &Handle,
     repo: &KV::Repo,
@@ -422,7 +425,7 @@ fn apply_database_operation<KV, D>(
                     result.err()
                 );
 
-                golden.seen.insert(key, bytes.clone());
+                model.data.insert(key, bytes.clone());
             } else {
                 assert!(result.is_err(), "Set should have failed but succeeded");
             }
@@ -431,7 +434,7 @@ fn apply_database_operation<KV, D>(
             let data = Bytes::copy_from_slice(&bytes);
             let result = database.write(key.clone(), offset, data);
 
-            let should_succeed = if let Some(map_value) = golden.seen.get_mut(&key) {
+            let should_succeed = if let Some(map_value) = model.data.get_mut(&key) {
                 if offset > map_value.len()
                     || offset.checked_add(bytes.len()).is_none()
                     || bytes.len() > MAX_FILE_CHUNK_SIZE
@@ -444,7 +447,7 @@ fn apply_database_operation<KV, D>(
             } else if offset > 0 || bytes.len() > MAX_FILE_CHUNK_SIZE {
                 false
             } else {
-                golden.seen.insert(key, bytes);
+                model.data.insert(key, bytes);
                 true
             };
 
@@ -472,7 +475,7 @@ fn apply_database_operation<KV, D>(
                 result = database.read(&key, offset + cursor, &mut database_value[cursor..])
             }
 
-            if let Some(map_value) = golden.seen.get(&key) {
+            if let Some(map_value) = model.data.get(&key) {
                 if offset > map_value.len() || len > MAX_FILE_CHUNK_SIZE {
                     assert!(result.is_err());
                 } else {
@@ -491,21 +494,21 @@ fn apply_database_operation<KV, D>(
             // The hash of the `Database` can differ even if the key-value pairs stored are
             // the same, because deletion and reinsertion can cause the shape of the AVL
             // tree to change.
-            let deleted = golden.seen.remove(&key).is_some();
+            let deleted = model.data.remove(&key).is_some();
             if deleted {
-                golden.ambiguous_hash = true;
+                model.ambiguous_hash = true;
             }
 
             database.delete(key).expect("Deleting should succeed");
         }
         DatabaseOperation::Exists(key) => {
             let in_database = database.exists(&key).expect("Writing should succeed");
-            let in_map = golden.seen.contains_key(&key);
+            let in_map = model.data.contains_key(&key);
             assert_eq!(in_database, in_map);
         }
         DatabaseOperation::ValueLength(key) => {
             let database_length = database.value_length(&key);
-            let map_value = golden.seen.get(&key);
+            let map_value = model.data.get(&key);
 
             match (database_length, map_value) {
                 (Ok(database_length), Some(map_value)) => {
@@ -518,11 +521,11 @@ fn apply_database_operation<KV, D>(
         DatabaseOperation::Hash => {
             let new_digest = database.hash().expect("Hash should succeed");
 
-            if let (Some((old_digest, old_map)), false) = (&golden.last, &golden.ambiguous_hash) {
-                assert_eq!(new_digest == *old_digest, golden.seen == *old_map);
+            if let (Some((old_digest, old_map)), false) = (&model.last, &model.ambiguous_hash) {
+                assert_eq!(new_digest == *old_digest, model.data == *old_map);
             }
 
-            golden.last = Some((new_digest, golden.seen.clone()));
+            model.last = Some((new_digest, model.data.clone()));
 
             checkout_candidates.entry(new_digest).or_insert(false);
         }
@@ -560,12 +563,12 @@ where
     let mut registry: Registry<KV, Normal> =
         Registry::new(repo).expect("Creating the registry should succeed");
 
-    let mut golden: Vec<GoldenData> = vec![];
+    let mut registry_model: Vec<DatabaseModel> = vec![];
 
     for operation in operations {
         match operation {
             Operation::Database(DatabaseOperation::Hash) => {
-                let index = get_index(&mut registry, &mut golden);
+                let index = get_index(&mut registry, &mut registry_model);
 
                 let new_digest = registry
                     .database(index)
@@ -573,13 +576,17 @@ where
                     .hash()
                     .expect("Hash should succeed");
 
-                if let (Some((old_digest, old_map)), false) =
-                    (&golden[index].last, &golden[index].ambiguous_hash)
-                {
-                    assert_eq!(new_digest == *old_digest, golden[index].seen == *old_map);
+                if let (Some((old_digest, old_map)), false) = (
+                    &registry_model[index].last,
+                    &registry_model[index].ambiguous_hash,
+                ) {
+                    assert_eq!(
+                        new_digest == *old_digest,
+                        registry_model[index].data == *old_map
+                    );
                 }
 
-                golden[index].last = Some((new_digest, golden[index].seen.clone()));
+                registry_model[index].last = Some((new_digest, registry_model[index].data.clone()));
 
                 checkout_candidates
                     .entry(Hash::from_foldable(&registry))
@@ -609,24 +616,24 @@ where
                 }
             }
             Operation::Database(op) => {
-                let index = get_index(&mut registry, &mut golden);
+                let index = get_index(&mut registry, &mut registry_model);
                 let handle = registry.handle().clone();
                 apply_database_operation::<KV, _>(
                     registry
                         .database_mut(index)
                         .expect("The index is in bounds"),
-                    &mut golden[index],
+                    &mut registry_model[index],
                     op,
                     &handle,
                     &checkout_repo,
                     &mut checkout_candidates,
                 );
             }
-            Operation::GrowRegistry => grow_registry(&mut registry, &mut golden),
+            Operation::GrowRegistry => grow_registry(&mut registry, &mut registry_model),
             Operation::ShrinkRegistry => {
                 // Make sure there's a database to drop
                 if registry.is_empty() {
-                    grow_registry(&mut registry, &mut golden);
+                    grow_registry(&mut registry, &mut registry_model);
                 };
 
                 let new_size = registry.len().saturating_sub(1);
@@ -634,23 +641,23 @@ where
                     .resize_tick(new_size)
                     .expect("Resizing the registry should succeed");
 
-                golden.truncate(new_size);
+                registry_model.truncate(new_size);
             }
             Operation::ClearDatabase => {
-                let index = get_index(&mut registry, &mut golden);
+                let index = get_index(&mut registry, &mut registry_model);
 
                 registry
                     .clear_database(index)
                     .expect("Clearing the database should be successful");
 
-                golden[index].seen.clear();
-                golden[index].ambiguous_hash = false;
-                golden[index].last = None;
+                registry_model[index].data.clear();
+                registry_model[index].ambiguous_hash = false;
+                registry_model[index].last = None;
             }
             Operation::CopyDatabase => {
                 let (src, dst) = {
                     while registry.len() < 2 {
-                        grow_registry(&mut registry, &mut golden);
+                        grow_registry(&mut registry, &mut registry_model);
                     }
                     (registry.len() - 2, registry.len() - 1)
                 };
@@ -659,12 +666,12 @@ where
                     .copy_database(src, dst)
                     .expect("Copying the database should be successful");
 
-                golden[dst] = golden[src].clone();
+                registry_model[dst] = registry_model[src].clone();
             }
             Operation::MoveDatabase => {
                 let (src, dst) = {
                     while registry.len() < 2 {
-                        grow_registry(&mut registry, &mut golden);
+                        grow_registry(&mut registry, &mut registry_model);
                     }
                     (registry.len() - 2, registry.len() - 1)
                 };
@@ -674,15 +681,15 @@ where
                     .expect("Moving the database should be successful");
 
                 let empty = Default::default();
-                let new_dst = std::mem::replace(&mut golden[src], empty);
-                golden[dst] = new_dst;
+                let new_dst = std::mem::replace(&mut registry_model[src], empty);
+                registry_model[dst] = new_dst;
             }
         }
     }
 }
 
 /// Run a sequence of [`DatabaseOperation`]s against a single [`TracedDatabase`],
-/// asserting against a golden in-memory model after each step, and return the recorded [`Trace`].
+/// asserting against a reference in-memory model after each step, and return the recorded [`Trace`].
 #[cfg(test)]
 pub(crate) fn run_database_operations<KV>(
     repo: &KV::Repo,
@@ -699,13 +706,13 @@ where
 
     let mut database = TracedDatabase::<KV, Normal>::try_new(handle, repo)
         .expect("Creating the database should succeed");
-    let mut golden = GoldenData::default();
+    let mut model = DatabaseModel::default();
     let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
 
     for op in operations {
         apply_database_operation::<KV, _>(
             &mut database,
-            &mut golden,
+            &mut model,
             op,
             handle,
             repo,
