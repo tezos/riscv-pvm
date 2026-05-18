@@ -2229,4 +2229,19 @@ pub(crate) mod tests {
 
         database.into_trace()
     });
+
+    kv_test!(test_database_end_to_end, KV: BackgroundPersistentKeyValueStore,
+    [
+        generated in crate::test_helpers::database_operations_strategy(1usize..100)
+    ],
+    {
+        // Every test iteration expects an empty repo, so not setting it in a `setup` block.
+        // This is because a repo preserves database commits from previous test runs, resulting
+        // in test failures when checking out a commit which isn't expected to exist succeeds.
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let (keys, values, ops) = generated;
+        let operations = crate::test_helpers::make_database_operations(keys, values, ops);
+        crate::test_helpers::run_database_operations::<KV>(&repo, operations)
+    });
 }

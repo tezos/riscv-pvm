@@ -118,6 +118,20 @@ fn make_database_operation(
     }
 }
 
+/// Turn a set of [`DatabaseOperationView`]s into [`DatabaseOperation`]s
+/// on the given keys and values, where applicable
+pub fn make_database_operations(
+    keys: Vec<Key>,
+    values: Vec<Bytes>,
+    ops: Vec<DatabaseOperationView>,
+) -> Vec<DatabaseOperation> {
+    ops.into_iter()
+        .map(|op| make_database_operation(&keys, &values, op))
+        .collect()
+}
+
+/// Turn a set of [`OperationView`]s into [`Operation`]s on the given keys
+/// and values, where applicable
 pub fn make_registry_operations(
     keys: Vec<Key>,
     values: Vec<Bytes>,
@@ -501,8 +515,36 @@ fn apply_database_operation<KV, D>(
                 _ => panic!("The value exists in one map but not the other"),
             }
         }
-        DatabaseOperation::Hash | DatabaseOperation::Commit | DatabaseOperation::Checkout => {
-            unreachable!("Intercepted by `apply_database_operation`")
+        DatabaseOperation::Hash => {
+            let new_digest = database.hash().expect("Hash should succeed");
+
+            if let (Some((old_digest, old_map)), false) = (&golden.last, &golden.ambiguous_hash) {
+                assert_eq!(new_digest == *old_digest, golden.seen == *old_map);
+            }
+
+            golden.last = Some((new_digest, golden.seen.clone()));
+
+            checkout_candidates.entry(new_digest).or_insert(false);
+        }
+        DatabaseOperation::Commit => {
+            let commit_id = database.commit(repo).expect("Committing should succeed");
+            checkout_candidates.insert(*commit_id.as_hash(), true);
+        }
+        DatabaseOperation::Checkout => {
+            if !checkout_candidates.is_empty() {
+                let index = rand::random_range(0..checkout_candidates.len());
+                let (&commit_hash, &committed) = checkout_candidates
+                    .iter()
+                    .nth(index)
+                    .expect("Index is within bounds");
+                let checkout_result = D::checkout(handle, repo, CommitId::from(commit_hash));
+
+                assert_eq!(
+                    checkout_result.is_ok(),
+                    committed,
+                    "Checkout result did not match whether the commit id was committed"
+                );
+            }
         }
     }
 }
@@ -637,4 +679,39 @@ where
             }
         }
     }
+}
+
+/// Run a sequence of [`DatabaseOperation`]s against a single [`TracedDatabase`],
+/// asserting against a golden in-memory model after each step, and return the recorded [`Trace`].
+#[cfg(test)]
+pub(crate) fn run_database_operations<KV>(
+    repo: &KV::Repo,
+    operations: Vec<DatabaseOperation>,
+) -> Trace
+where
+    KV: BackgroundPersistentKeyValueStore,
+{
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .build()
+        .expect("Building the runtime should succeed");
+    let handle = runtime.handle();
+
+    let mut database = TracedDatabase::<KV, Normal>::try_new(handle, repo)
+        .expect("Creating the database should succeed");
+    let mut golden = GoldenData::default();
+    let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
+
+    for op in operations {
+        apply_database_operation::<KV, _>(
+            &mut database,
+            &mut golden,
+            op,
+            handle,
+            repo,
+            &mut checkout_candidates,
+        );
+    }
+
+    database.into_trace()
 }
