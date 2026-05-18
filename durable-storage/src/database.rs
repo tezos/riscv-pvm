@@ -587,6 +587,11 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 mod traced_database;
 
 #[cfg(test)]
+pub(crate) use self::traced_database::Trace;
+#[cfg(test)]
+pub(crate) use self::traced_database::TracedDatabase;
+
+#[cfg(test)]
 pub(crate) mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;

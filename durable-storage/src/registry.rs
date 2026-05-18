@@ -75,6 +75,12 @@ impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
             .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
         Ok(Arc::new(runtime))
     }
+
+    /// Get a [`Handle`] to the registry's runtime.
+    #[cfg(any(test, feature = "unstable-test-utils"))]
+    pub(crate) fn handle(&self) -> &tokio::runtime::Handle {
+        self.inner.runtime.handle()
+    }
 }
 
 impl<'normal, KV> ProvableExt<'normal, 'static, OperationalError> for Registry<KV, Normal>
@@ -1443,14 +1449,16 @@ pub(super) mod tests {
 
     kv_test!(test_durable_storage_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
-        generated in crate::test_helpers::operations_strategy(1usize..100)
+        generated in crate::test_helpers::registry_operations_strategy(1usize..100)
     ],
     {
-        // Every test iteration expects an empty repo, so not setting it in a `setup` block
+        // Every test iteration expects an empty repo, so not setting it in a `setup` block.
+        // This is because a repo preserves registry commits from previous test runs, resulting
+        // in test failures when checking out a commit which isn't expected to exist succeeds.
         let (_keepalive, repo) = KV::setup_repo();
 
         let (keys, values, ops) = generated;
-        let operations = crate::test_helpers::make_operations(keys, values, ops);
+        let operations = crate::test_helpers::make_registry_operations(keys, values, ops);
         crate::test_helpers::run_operations::<KV>(repo, operations)
     });
 }
