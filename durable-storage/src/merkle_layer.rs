@@ -89,6 +89,22 @@ impl<KV> MerkleLayer<KV, Normal> {
         }
     }
 
+    /// For tests only, construct a Merkle layer from its raw parts.
+    #[cfg(test)]
+    pub fn new_raw(
+        tree: Tree<LazyNodeId>,
+        persistence: Arc<KV>,
+        resolver: LazyResolver<KV>,
+    ) -> Self {
+        MerkleLayer {
+            inner: NormalImpl {
+                tree,
+                persistence,
+                resolver,
+            },
+        }
+    }
+
     /// Load the Merkle layer from the given key-value store.
     pub fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, Error>
     where
