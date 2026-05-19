@@ -97,6 +97,14 @@ impl<KV> Database<KV, Normal> {
         })
     }
 
+    /// For tests, construct a database from its raw parts.
+    #[cfg(test_utils)]
+    pub fn new_raw(persistent: Arc<KV>, merkle: MerkleWorker<KV>) -> Self {
+        Database {
+            inner: NormalImpl { persistent, merkle },
+        }
+    }
+
     /// Restore a database from a previously committed snapshot.
     ///
     /// The checked-out database is isolated from the committed snapshot: subsequent mutations are

@@ -92,6 +92,24 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_raw(
+        balance_factor: i64,
+        key: Key,
+        data: LazyDataId,
+        left: LazyTreeId,
+        right: LazyTreeId,
+    ) -> Self {
+        Node {
+            balance_factor: Atom::new(balance_factor),
+            key: Atom::new(key),
+            data,
+            left,
+            right,
+            hash: OnceLock::new(),
+        }
+    }
+
     /// Resolve the data field on a lazy node.
     pub(crate) fn resolve_data(
         &self,

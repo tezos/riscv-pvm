@@ -14,6 +14,7 @@
 //! [`Database`]: crate::database::Database
 //! [`Registry`]: crate::registry::Registry
 
+pub mod counterfeit;
 pub mod database;
 pub(crate) mod proof_size;
 pub mod registry;

@@ -62,6 +62,11 @@ impl Tree<LazyNodeId> {
     pub(crate) fn into_proof(self) -> Tree<ProveNodeId> {
         Tree(self.0.map(|id| id.into_proof()))
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_raw(node_id: LazyNodeId) -> Self {
+        Tree(Some(node_id))
+    }
 }
 
 impl<NodeId: FromProof> Tree<NodeId> {

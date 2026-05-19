@@ -285,7 +285,7 @@ impl<KV> MerkleWorker<KV> {
     /// Create a Merkle worker from an existing Merkle layer.
     ///
     /// The provided handle is used to spawn the background worker thread.
-    fn from_layer(async_handle: &Handle, layer: MerkleLayer<KV, Normal>) -> Self
+    pub(crate) fn from_layer(async_handle: &Handle, layer: MerkleLayer<KV, Normal>) -> Self
     where
         KV: Send + Sync + 'static,
     {
