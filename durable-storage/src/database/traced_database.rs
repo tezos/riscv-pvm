@@ -10,6 +10,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use bytes::Bytes;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -285,6 +287,15 @@ impl<KV, M: Mode> From<Database<KV, M>> for TracedDatabase<KV, M> {
             inner,
             trace: RefCell::new(Vec::new()),
         }
+    }
+}
+
+impl<KV, M: Mode, F: Fold> Foldable<F> for TracedDatabase<KV, M>
+where
+    Database<KV, M>: Foldable<F>,
+{
+    fn fold(&self, builder: F) -> <F as Fold>::Folded {
+        self.inner.fold(builder)
     }
 }
 

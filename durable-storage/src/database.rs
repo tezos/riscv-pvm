@@ -16,9 +16,11 @@ use std::sync::Arc;
 
 use bytes::BufMut;
 use bytes::Bytes;
+use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -269,6 +271,24 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
 impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Normal> {
     fn fold(&self, _builder: HashFold) -> Hash {
         self.inner.merkle.hash().expect("Hashing should not fail")
+    }
+}
+
+impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Prove<'_>> {
+    fn fold(&self, _builder: HashFold) -> Hash {
+        self.inner.merkle.hash()
+    }
+}
+
+impl<KV: KeyValueStore> Foldable<MerkleProofFold> for Database<KV, Prove<'_>> {
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        self.inner.merkle.fold(builder)
+    }
+}
+
+impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Verify> {
+    fn fold(&self, _builder: HashFold) -> Hash {
+        self.inner.merkle.hash()
     }
 }
 
