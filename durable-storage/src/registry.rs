@@ -18,7 +18,6 @@ use octez_riscv_data::components::vector::Vector;
 use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
-use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
@@ -39,8 +38,6 @@ use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::repo::RegistryRepo;
 use crate::storage::KeyValueStore;
-
-pub(super) const REGISTRY_ARITY: usize = 2;
 
 #[derive(Debug, Encode, Decode)]
 /// Structure to store the result of serialising a registry.
@@ -317,17 +314,13 @@ where
     }
 }
 
-impl<KV: KeyValueStore, F: Fold> Foldable<F> for Registry<KV, Normal>
+impl<KV: KeyValueStore, M: Mode, F: Fold> Foldable<F> for Registry<KV, M>
 where
-    Database<KV, Normal>: Foldable<F>,
+    Database<KV, M>: Foldable<F>,
+    Vector<Database<KV, M>, M>: Foldable<F>,
 {
     fn fold(&self, builder: F) -> <F as Fold>::Folded {
-        let get_hash = |idx: usize| {
-            self.database(idx)
-                .expect("Getting a database at a valid index should succeed")
-        };
-
-        IndexableSeqAsTree::new(self.len(), REGISTRY_ARITY, &get_hash).fold(builder)
+        self.databases.fold(builder)
     }
 }
 
@@ -824,7 +817,12 @@ pub(super) mod tests {
         let registry = setup_registry::<KV>(repo.clone());
 
         let expected_db_hashes: Vec<CommitId> = Vec::new();
-        let expected_root = CommitId::from(Hash::hash_bytes(&[]));
+
+        // the hash is of the empty vector (zero length and empty list):
+        // (hash (concat (hash 0) (hash-as-seq '())))
+        let zero = Hash::hash_encodable(0u64).expect("hashing u64 should succeed");
+        let empty_seq = Hash::hash_bytes(&[]);
+        let expected_root = CommitId::from(Hash::combine_hashes([zero, empty_seq]));
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
@@ -846,7 +844,12 @@ pub(super) mod tests {
             .iter()
             .map(|db| db.hash().unwrap().into())
             .collect();
-        let expected_root = expected_db_hashes[0];
+
+        // the hash is of the single-entry vector (one length and list size 1):
+        // (hash (concat (hash 1) (hash-as-seq '(db))))
+        let one = Hash::hash_encodable(1u64).expect("hashing u64 should succeed");
+        let db_hash = expected_db_hashes[0];
+        let expected_root = CommitId::from(Hash::combine_hashes([&one, db_hash.as_hash()]));
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
@@ -879,14 +882,17 @@ pub(super) mod tests {
         populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"alpha");
         populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"beta");
 
+        // the hash is of the dual-entry vector (two length and list size 2):
+        // (hash (concat (hash 2) (hash-as-seq '(db_0 db_1))))
         let expected_db_hashes: Vec<CommitId> = registry
             .databases
             .iter()
             .map(|db| db.hash().unwrap().into())
             .collect();
-        let expected_root = CommitId::from(Hash::combine_hashes(
-            expected_db_hashes.iter().map(CommitId::as_hash),
-        ));
+        let two = Hash::hash_encodable(2u64).expect("hashing u64 should succeed");
+        let dbs_root_hash = Hash::combine_hashes(expected_db_hashes.iter().map(CommitId::as_hash));
+
+        let expected_root = CommitId::from(Hash::combine_hashes([two, dbs_root_hash]));
 
         let root_commit = registry.commit().expect("Commit should succeed");
         assert_eq!(root_commit, expected_root);
@@ -964,6 +970,55 @@ pub(super) mod tests {
             Registry::<KV, Normal>::checkout(repo, fake_commit),
             Err(Error::Operational(OperationalError::RegistryCommitMismatch))
         ));
+    });
+
+    kv_test!(test_hashing_prove_registry_does_not_record_reads, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+
+        registry
+            .database_mut(0)
+            .expect("database at index 0 exists")
+            .set(key_a, Bytes::copy_from_slice(b"foo"))
+            .expect("Setting in Normal mode should succeed");
+
+        registry
+            .database_mut(1)
+            .expect("database at index 1 exists")
+            .set(key_b, Bytes::copy_from_slice(b"bar"))
+            .expect("Setting in Normal mode should succeed");
+
+        let prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+
+        let proof_before_hash =
+            octez_riscv_data::merkle_proof::proof_tree::MerkleProof::from_foldable(
+                &prove_registry.databases,
+            );
+
+        let proof_before_hash_bytes =
+            serialise(&proof_before_hash).expect("Serialising proof should succeed");
+
+        let normal_root = Hash::from_foldable(&registry);
+        let prove_root = Hash::from_foldable(&prove_registry);
+        assert_eq!(prove_root, normal_root);
+
+        let proof_after_hash =
+            octez_riscv_data::merkle_proof::proof_tree::MerkleProof::from_foldable(
+                &prove_registry.databases,
+            );
+        let proof_after_hash_bytes =
+            serialise(&proof_after_hash).expect("Serialising proof should succeed");
+
+        assert_eq!(
+            proof_after_hash_bytes, proof_before_hash_bytes,
+            "Proof should be unchanged by hashing"
+        );
     });
 
     kv_test!(test_prove_clear_database, KV: BackgroundKeyValueStore, {
@@ -1194,7 +1249,8 @@ pub(super) mod tests {
             .collect::<Vec<_>>();
         assert_eq!(prove_hashes_before.as_slice(), expected_hashes);
 
-        let root_hash_prove_before = Hash::from_foldable(&registry);
+        let root_hash_prove_before = Hash::from_foldable(&prove_registry);
+
         assert_eq!(root_hash_prove_before, root_hash, "Converting to proof mode concerves root hash");
 
         prove_registry
@@ -1215,7 +1271,7 @@ pub(super) mod tests {
                     .expect("Hashing should succeed.")
             })
             .collect::<Vec<_>>();
-        let root_hash_prove_after = Hash::from_foldable(&registry);
+        let root_hash_prove_after = Hash::from_foldable(&prove_registry);
 
         assert_eq!(
             prove_hashes_after, prove_hashes_before,
