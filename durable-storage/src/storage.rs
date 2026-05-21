@@ -115,6 +115,15 @@ cfg_if::cfg_if! {
 
 cfg_if::cfg_if! {
     if #[cfg(test)] {
+        /// Type of storage backend
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub(crate) enum Backend {
+            /// In-memory backend (`InMemoryKeyValueStore`)
+            InMemory,
+            /// Persistent backend (`PersistenceLayer`)
+            Persistent,
+        }
+
         // TODO: This trait currently duplicates the functionality of the `TestKeyValueStore` mechanism defined above.
         // Tests which use the `kv_test!` macro will be refactored to use `TestKeyValueStoreSetup`, which can supersede
         // `KeyValueStore` once all tests have been rewritten.
@@ -122,12 +131,17 @@ cfg_if::cfg_if! {
             /// Temporary directory handle that must stay in scope for the lifetime of the repo
             type Keepalive;
 
+            /// Allows tests to match on which backend is being used
+            const BACKEND: Backend;
+
             /// Create a test repository
             fn setup_repo() -> (Self::Keepalive, Self::Repo);
         }
 
         impl TestKeyValueStoreSetup for in_memory::InMemoryKeyValueStore {
             type Keepalive = ();
+
+            const BACKEND: Backend = Backend::InMemory;
 
             fn setup_repo() -> ((), in_memory::InMemoryRepo) {
                 ((), in_memory::InMemoryRepo::default())
@@ -137,6 +151,8 @@ cfg_if::cfg_if! {
         #[cfg(feature = "rocksdb")]
         impl TestKeyValueStoreSetup for crate::persistence_layer::PersistenceLayer {
             type Keepalive = octez_riscv_test_utils::TestableTmpdir;
+
+            const BACKEND: Backend = Backend::Persistent;
 
             fn setup_repo() -> (Self::Keepalive, Self::Repo) {
                 use crate::repo::DirectoryManager;

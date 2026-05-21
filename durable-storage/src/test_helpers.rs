@@ -49,6 +49,7 @@ pub enum DatabaseOperation {
     Hash,
     Commit,
     Checkout,
+    CommitCheckoutRoundtrip,
 }
 
 /// Operations on a [`Registry`]
@@ -73,6 +74,7 @@ pub enum DatabaseOperationView {
     Hash,
     Commit,
     Checkout,
+    CommitCheckoutRoundtrip,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +117,9 @@ fn make_database_operation(
         DatabaseOperationView::Hash => DatabaseOperation::Hash,
         DatabaseOperationView::Commit => DatabaseOperation::Commit,
         DatabaseOperationView::Checkout => DatabaseOperation::Checkout,
+        DatabaseOperationView::CommitCheckoutRoundtrip => {
+            DatabaseOperation::CommitCheckoutRoundtrip
+        }
     }
 }
 
@@ -214,6 +219,66 @@ pub fn database_operations_strategy(
             proptest::collection::vec(value_strategy(), count),
             proptest::collection::vec(database_operation_view_strategy(), length),
         )
+    })
+}
+
+/// Produces `Some(CommitCheckoutRoundtrip)` with the given probability, `None` otherwise.
+fn maybe_roundtrip_strategy(prob: f32) -> impl Strategy<Value = Option<DatabaseOperationView>> {
+    assert!(
+        (0.0..=1.0).contains(&prob),
+        "expected a probability, got {prob}"
+    );
+    let (yes, no) = proptest::strategy::float_to_weight(prob.into());
+    prop_oneof![
+        yes => Just(Some(DatabaseOperationView::CommitCheckoutRoundtrip)),
+        no => Just(None),
+    ]
+}
+
+/// Like [`database_operations_strategy`] but produces two operation vectors sharing
+/// identical base operations, with independently sampled
+/// [`DatabaseOperationView::CommitCheckoutRoundtrip`]. Intended to check that 2 test runs
+/// with differently-placed commit - checkout roundtrips are observationally equivalent.
+pub fn database_operations_commit_checkout_strategy(
+    length: impl Strategy<Value = usize>,
+    roundtrip_probability: f32,
+) -> impl Strategy<
+    Value = (
+        Vec<Key>,
+        Vec<Bytes>,
+        Vec<DatabaseOperationView>,
+        Vec<DatabaseOperationView>,
+    ),
+> {
+    length.prop_flat_map(move |length| {
+        let count = length.div_ceil(10);
+        (
+            proptest::collection::vec(key_strategy(), count),
+            proptest::collection::vec(value_strategy(), count),
+            proptest::collection::vec(
+                (
+                    maybe_roundtrip_strategy(roundtrip_probability),
+                    maybe_roundtrip_strategy(roundtrip_probability),
+                    database_operation_view_strategy(),
+                ),
+                length,
+            ),
+        )
+            .prop_map(|(keys, values, ops)| {
+                let mut ops_a = Vec::with_capacity(ops.len() * 2);
+                let mut ops_b = Vec::with_capacity(ops.len() * 2);
+                for (pre_a, pre_b, op) in ops {
+                    if let Some(r) = pre_a {
+                        ops_a.push(r);
+                    }
+                    if let Some(r) = pre_b {
+                        ops_b.push(r);
+                    }
+                    ops_a.push(op.clone());
+                    ops_b.push(op);
+                }
+                (keys, values, ops_a, ops_b)
+            })
     })
 }
 
@@ -323,6 +388,15 @@ trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>: Sized {
     fn commit(&self, repo: &KV::Repo) -> Result<CommitId, OperationalError>;
 
     fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error>;
+
+    /// Commit the database, then check out the resulting commit and replace
+    /// with the checked-out database. Tracing implementations must not record
+    /// these in the trace. Returns the resulting [`CommitId`].
+    fn commit_checkout_roundtrip(
+        &mut self,
+        handle: &Handle,
+        repo: &KV::Repo,
+    ) -> Result<CommitId, OperationalError>;
 }
 
 impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Normal> {
@@ -360,6 +434,22 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Nor
 
     fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
         Database::checkout(handle, repo, commit_id)
+    }
+
+    fn commit_checkout_roundtrip(
+        &mut self,
+        handle: &Handle,
+        repo: &KV::Repo,
+    ) -> Result<CommitId, OperationalError> {
+        let commit_id = Database::commit(self, repo)?;
+        let checked_out_db = Database::checkout(handle, repo, commit_id).map_err(|e| match e {
+            Error::Operational(e) => e,
+            Error::InvalidArgument(e) => {
+                panic!("checking out an existing commit should succeed {e:?}")
+            }
+        })?;
+        *self = checked_out_db;
+        Ok(commit_id)
     }
 }
 
@@ -399,6 +489,15 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<K
 
     fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
         TracedDatabase::checkout(handle, repo, commit_id)
+    }
+
+    fn commit_checkout_roundtrip(
+        &mut self,
+        handle: &Handle,
+        repo: &KV::Repo,
+    ) -> Result<CommitId, OperationalError> {
+        // Keep the trace but replace the inner database
+        self.inner_mut().commit_checkout_roundtrip(handle, repo)
     }
 }
 
@@ -549,6 +648,14 @@ fn apply_database_operation<KV, D>(
                 );
             }
         }
+        DatabaseOperation::CommitCheckoutRoundtrip => {
+            let commit_id = database
+                .commit_checkout_roundtrip(handle, repo)
+                .expect("Commit-checkout roundtrip should succeed");
+            // Register the resulting commit so a later `Checkout` operation
+            // does not see an unexpected success against this hash.
+            checkout_candidates.insert(*commit_id.as_hash(), true);
+        }
     }
 }
 
@@ -693,7 +800,7 @@ where
 #[cfg(test)]
 pub(crate) fn run_database_operations<KV>(
     repo: &KV::Repo,
-    operations: Vec<DatabaseOperation>,
+    mut operations: Vec<DatabaseOperation>,
 ) -> Trace
 where
     KV: BackgroundPersistentKeyValueStore,
@@ -708,6 +815,9 @@ where
         .expect("Creating the database should succeed");
     let mut model = DatabaseModel::default();
     let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
+
+    // Force a final hash to be recorded in the trace
+    operations.push(DatabaseOperation::Hash);
 
     for op in operations {
         apply_database_operation::<KV, _>(
