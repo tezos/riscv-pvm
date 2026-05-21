@@ -2216,15 +2216,10 @@ pub(crate) mod tests {
         let mut database = new_database::<KV>(handle, &repo);
 
         // Force a per-backend divergence in the recorded trace
-        let value: &[u8] =
-            if std::any::type_name::<KV>().contains("InMemoryKeyValueStore") {
-                b"in-memory"
-            } else {
-                b"rocksdb"
-            };
+        let value = [KV::BACKEND as u8];
         let key = Key::new(b"divergence-probe").expect("Size less than KEY_MAX_SIZE");
         database
-            .set(key, Bytes::copy_from_slice(value))
+            .set(key, Bytes::copy_from_slice(&value))
             .expect("Setting should succeed");
 
         database.into_trace()
@@ -2232,7 +2227,7 @@ pub(crate) mod tests {
 
     kv_test!(test_database_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
-        generated in crate::test_helpers::database_operations_strategy(1usize..100)
+        generated in crate::test_helpers::database_operations_commit_checkout_strategy(1usize..100, 0.1)
     ],
     {
         // Every test iteration expects an empty repo, so not setting it in a `setup` block.
@@ -2240,7 +2235,14 @@ pub(crate) mod tests {
         // in test failures when checking out a commit which isn't expected to exist succeeds.
         let (_keepalive, repo) = KV::setup_repo();
 
-        let (keys, values, ops) = generated;
+        let (keys, values, ops_a, ops_b) = generated;
+
+        // Pick an operations vector so each backend exercises a different
+        // `CommitCheckoutRoundtrip` placement against the same base operations.
+        let ops = match KV::BACKEND {
+            crate::storage::Backend::Persistent => ops_a,
+            crate::storage::Backend::InMemory => ops_b,
+        };
         let operations = crate::test_helpers::make_database_operations(keys, values, ops);
         crate::test_helpers::run_database_operations::<KV>(&repo, operations)
     });
