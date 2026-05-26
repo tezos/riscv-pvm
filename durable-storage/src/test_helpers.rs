@@ -162,19 +162,32 @@ fn key_strategy() -> impl Strategy<Value = Key> {
 }
 
 fn value_strategy() -> impl Strategy<Value = Bytes> {
-    proptest::collection::vec(any::<u8>(), 1usize..=VALUE_MAX_SIZE).prop_map(Bytes::from)
+    // Bias towards lengths that fit within `MAX_FILE_CHUNK_SIZE` so most
+    // sampled operations exercise the success path, while also producing
+    // some oversized values.
+    prop_oneof![
+        9 => proptest::collection::vec(any::<u8>(), 1usize..=MAX_FILE_CHUNK_SIZE),
+        1 => proptest::collection::vec(any::<u8>(), (MAX_FILE_CHUNK_SIZE + 1)..=VALUE_MAX_SIZE),
+    ]
+    .prop_map(Bytes::from)
 }
 
 fn database_operation_view_strategy() -> impl Strategy<Value = DatabaseOperationView> {
     let set = (any::<Index>(), any::<Index>()).prop_map(|(k, v)| DatabaseOperationView::Set(k, v));
 
+    // Bias length and offset towards having most sampled operations
+    // exercise the success path, while also producing some which are out of bounds.
     let read = (
         any::<Index>(),
         prop_oneof![
-            2 => Just(0),
-            1 => 1..=VALUE_MAX_SIZE,
+            5 => Just(0),
+            4 => 1..=MAX_FILE_CHUNK_SIZE,
+            1 => (MAX_FILE_CHUNK_SIZE + 1)..=VALUE_MAX_SIZE,
         ],
-        0..=VALUE_MAX_SIZE,
+        prop_oneof![
+            9 => 0..=MAX_FILE_CHUNK_SIZE,
+            1 => (MAX_FILE_CHUNK_SIZE + 1)..=VALUE_MAX_SIZE,
+        ],
     )
         .prop_map(|(k, off, len)| DatabaseOperationView::Read(k, off, len));
 
@@ -197,8 +210,8 @@ fn database_operation_view_strategy() -> impl Strategy<Value = DatabaseOperation
     prop_oneof![
         20 => set,
         20 => read,
-        3 => write_valid,
-        2 => write_invalid,
+        4 => write_valid,
+        1 => write_invalid,
 
         10 => any::<Index>().prop_map(DatabaseOperationView::Delete),
         10 => any::<Index>().prop_map(DatabaseOperationView::Exists),
