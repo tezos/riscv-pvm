@@ -19,6 +19,8 @@ use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::proof::Proof;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -100,6 +102,21 @@ where
             inner: ProveImpl { repo },
             databases,
         })
+    }
+}
+
+impl<KV: KeyValueStore> Registry<KV, Prove<'static>> {
+    /// Produce a [`Proof`] of the operations performed against this
+    /// Prove-mode registry.
+    ///
+    /// The proof bundles a partial Merkle tree of the initial state (the
+    /// read-set captured during the proving step, plus blinded hashes of any
+    /// subtrees that were not touched) with the registry's current — final —
+    /// state hash.
+    pub fn produce_proof(&self) -> Proof {
+        let merkle_proof = MerkleProof::from_foldable(self);
+        let final_state_hash = Hash::from_foldable(self);
+        Proof::new(merkle_proof, final_state_hash)
     }
 }
 
