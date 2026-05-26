@@ -5,6 +5,7 @@
 
 //! Merkle proofs
 
+pub mod proof;
 pub mod proof_binary;
 pub mod proof_tree;
 pub mod tag;

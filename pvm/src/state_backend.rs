@@ -27,7 +27,7 @@
 //! [Prove]: octez_riscv_data::mode::Prove
 
 mod elems;
-pub mod proof_backend;
+pub mod merkle;
 mod region;
 pub mod verify_backend;
 

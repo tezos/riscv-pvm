@@ -21,6 +21,8 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::proof::Proof;
+use octez_riscv_data::merkle_proof::proof::serialise_merkle_tree;
 use octez_riscv_data::merkle_proof::proof_binary;
 use octez_riscv_data::merkle_proof::proof_tree;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
@@ -61,8 +63,6 @@ use crate::pvm::outbox::Output;
 use crate::pvm::outbox::OutputInfo;
 use crate::range_utils;
 use crate::range_utils::bound_saturating_sub;
-use crate::state_backend::proof_backend::proof::Proof;
-use crate::state_backend::proof_backend::proof::serialise_merkle_tree;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 
 type PvmStepperMemConfig = M1G;

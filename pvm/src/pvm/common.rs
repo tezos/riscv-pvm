@@ -38,6 +38,7 @@ use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::merkle_proof::proof::Proof;
 use octez_riscv_data::merkle_proof::proof_tree;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
@@ -70,7 +71,6 @@ use crate::machine_state::registers::a0;
 use crate::pvm::hooks::PvmHooks;
 use crate::pvm::tezos;
 use crate::range_utils::less_than_bound;
-use crate::state_backend::proof_backend::proof::Proof;
 use crate::state_backend::verify_backend::ProofVerificationFailure;
 
 /// Type of input that can be passed to the PVM

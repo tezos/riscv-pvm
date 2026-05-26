@@ -3,27 +3,30 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! ## Module for handling proofs
+//! ## Proofs of state transitions
 //!
-//! - Serialise & Deserialise a [`Proof`]
+//! A [`Proof`] bundles a partial [`MerkleProof`] of the initial state (the
+//! read-set captured during the proving step, plus enough blinded hashes to
+//! reconstruct the initial root) with the hash of the final state after the
+//! step.
 //!
-//!   Structure of serialisation:
-//!   * Final hash state
-//!   * Tags which dictate the shape of the proof (a partial Merkle tree)
-//!   * Leaf contents
+//! Serialisation layout:
+//! - Final state hash (raw [`Hash::DIGEST_SIZE`] bytes)
+//! - Bincode-encoded [`MerkleProof`] (tags + leaf contents)
+//!
+//! Lengths are not necessary in the encoding, but tags are, since the tags
+//! depend on runtime structure rather than static type information.
 
 use bincode::Encode;
 use bincode::error::DecodeError;
-use octez_riscv_data::hash::Hash;
-use octez_riscv_data::merkle_proof::ProofError;
-use octez_riscv_data::merkle_proof::proof_binary;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-use octez_riscv_data::merkle_proof::proof_tree::OwnedProofTree;
-use octez_riscv_data::mode::Verify;
-use octez_riscv_data::serialisation::serialise;
 
-use crate::machine_state::page_cache::EmptyPageCache;
-use crate::pvm::node_pvm::NodePvm;
+use crate::hash::Hash;
+use crate::merkle_proof::FromProof;
+use crate::merkle_proof::ProofError;
+use crate::merkle_proof::proof_binary;
+use crate::merkle_proof::proof_tree::MerkleProof;
+use crate::merkle_proof::proof_tree::OwnedProofTree;
+use crate::serialisation::serialise;
 
 /// Structure of a proof transitioning from state A to state B.
 ///
@@ -32,9 +35,9 @@ use crate::pvm::node_pvm::NodePvm;
 /// - Obtain the hash of the state after the step
 #[derive(Clone, Debug, PartialEq, Encode)]
 pub struct Proof {
-    /// State of the final state B
+    /// Hash of the final state B.
     final_state_hash: Hash,
-    /// Partial Merkle tree representation of the initial state
+    /// Partial Merkle tree representation of the initial state A.
     partial_tree: MerkleProof,
 }
 
@@ -99,37 +102,40 @@ fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, 
     Ok(Hash::from(digest_bytes))
 }
 
-/// Deserialise a [`Proof`] from an iterator of bytes.
+/// Deserialise a [`Proof`] from an iterator of bytes, returning the proof
+/// together with the reconstructed verify-side state `T`.
 ///
-/// Obtain a [`Proof`] and the associated [`NodePvm<Verify>`].
-pub fn deserialise_proof<I: Iterator<Item = u8>>(
+/// `T` is any type that knows how to be built from the partial Merkle tree
+/// via [`FromProof`]; the choice of `T` selects the concrete shape the
+/// proof tree must match (PVM state, durable-storage registry, ...).
+pub fn deserialise_proof<T: FromProof, I: Iterator<Item = u8>>(
     mut bytes: I,
-) -> Result<(Proof, NodePvm<Verify, EmptyPageCache>), ProofError> {
+) -> Result<(Proof, T), ProofError> {
     let final_state_hash = deserialise_final_hash(&mut bytes)?;
 
-    let (pvm, proof_tree) = proof_binary::deserialise(bytes.collect::<Vec<u8>>().as_slice())?;
+    let (state, proof_tree) =
+        proof_binary::deserialise::<T>(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
         OwnedProofTree::Absent => return Err(ProofError::AbsentProof),
         OwnedProofTree::Present(tree) => tree,
     };
 
-    let pvm = NodePvm::wrap(pvm);
-    Ok((Proof::new(merkle_tree, final_state_hash), pvm))
+    Ok((Proof::new(merkle_tree, final_state_hash), state))
 }
 
 #[cfg(test)]
 mod tests {
-    use octez_riscv_data::hash::Hash;
-    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-    use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-    use octez_riscv_data::merkle_proof::tag::TAG_BLIND;
-    use octez_riscv_data::merkle_proof::tag::TAG_NODE;
-    use octez_riscv_data::merkle_proof::tag::TAG_READ;
     use proptest::proptest;
 
+    use super::Proof;
     use super::serialise_proof;
-    use crate::state_backend::proof_backend::proof::Proof;
+    use crate::hash::Hash;
+    use crate::merkle_proof::proof_tree::MerkleProof;
+    use crate::merkle_proof::proof_tree::MerkleProofLeaf;
+    use crate::merkle_proof::tag::TAG_BLIND;
+    use crate::merkle_proof::tag::TAG_NODE;
+    use crate::merkle_proof::tag::TAG_READ;
 
     /// Utility struct that computes the bounds of a [`MerkleProof`] serialisation
     /// based on total number of nodes in the tree and total size of raw data in the leaves.
