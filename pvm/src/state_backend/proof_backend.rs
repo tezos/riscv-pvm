@@ -6,4 +6,3 @@
 //! Proof-related functionality
 
 pub mod merkle;
-pub mod proof;
