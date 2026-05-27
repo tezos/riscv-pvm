@@ -37,16 +37,19 @@ use crate::storage::TestKeyValueStoreSetup;
 pub(crate) type Trace = Vec<TraceEntry>;
 
 /// The trace of a [`Database`] operation
-#[derive(Debug, Clone, PartialEq)]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum TraceEntry {
     Set {
         key: Key,
+        #[serde_as(as = "serde_with::hex::Hex")]
         data: Bytes,
         result: Result<(), String>,
     },
     Write {
         key: Key,
         offset: usize,
+        #[serde_as(as = "serde_with::hex::Hex")]
         data: Bytes,
         result: Result<usize, String>,
     },
@@ -57,12 +60,14 @@ pub(crate) enum TraceEntry {
     Read {
         key: Key,
         offset: usize,
+        #[serde_as(as = "Result<serde_with::hex::Hex, serde_with::Same>")]
         result: Result<Vec<u8>, String>,
     },
     ReadBytes {
         key: Key,
         offset: usize,
         max_bytes: usize,
+        #[serde_as(as = "Result<serde_with::hex::Hex, serde_with::Same>")]
         result: Result<Vec<u8>, String>,
     },
     Exists {

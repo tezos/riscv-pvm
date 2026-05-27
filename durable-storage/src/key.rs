@@ -67,6 +67,23 @@ impl<'de, Context> BorrowDecode<'de, Context> for Key {
     }
 }
 
+#[cfg(feature = "unstable-test-utils")]
+impl serde::Serialize for Key {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&hex::encode(&self.0))
+    }
+}
+
+#[cfg(feature = "unstable-test-utils")]
+impl<'de> serde::Deserialize<'de> for Key {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let s = String::deserialize(d)?;
+        let bytes = hex::decode(&s).map_err(D::Error::custom)?;
+        Key::new(&bytes).map_err(D::Error::custom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use proptest::proptest;

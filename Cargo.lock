@@ -2532,6 +2532,7 @@ dependencies = [
  "rocksdb",
  "serde",
  "serde_json",
+ "serde_with",
  "tempfile",
  "tezos-smart-rollup-constants",
  "thiserror 2.0.18",
