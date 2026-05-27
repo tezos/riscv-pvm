@@ -37,6 +37,12 @@ use crate::repo::RegistryRepo;
 /// Maximum size for the value argument of a sampled operation
 pub const VALUE_MAX_SIZE: usize = 10_000;
 
+/// Path to regression test inputs relative to the crate root
+pub const REGRESSION_INPUTS_DIR: &str = "tests/inputs";
+
+/// Path to regression test expected outputs relative to the crate root
+pub const REGRESSION_EXPECTED_DIR: &str = "tests/expected";
+
 /// Operations on a single [`Database`]
 #[serde_with::serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

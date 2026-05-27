@@ -2225,6 +2225,55 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
+    kv_test!(test_database_regression, KV: BackgroundPersistentKeyValueStore, {
+        use goldenfile::Mint;
+
+        use crate::test_helpers::DatabaseOperation;
+        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::REGRESSION_INPUTS_DIR;
+
+        let mut inputs: Vec<_> = std::fs::read_dir(REGRESSION_INPUTS_DIR)
+            .unwrap_or_else(|e| panic!("reading {REGRESSION_INPUTS_DIR} should succeed: {e}"))
+            .map(|e| {
+                e.unwrap_or_else(|e| {
+                    panic!("reading {REGRESSION_INPUTS_DIR} entry should succeed: {e}")
+                })
+            })
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("database_") && name.ends_with(".input"))
+            })
+            .collect();
+        inputs.sort_by_key(|e| e.path());
+
+        let mut mint = Mint::new(REGRESSION_EXPECTED_DIR);
+
+        for input in inputs {
+            let path = input.path();
+            let stem = path
+                .file_stem()
+                .expect("input path must have a file stem")
+                .to_str()
+                .expect("input path must be UTF-8")
+                .to_string();
+
+            let file =
+                std::fs::File::open(&path).expect("opening input file should succeed");
+            let ops: Vec<DatabaseOperation> =
+                serde_json::from_reader(file).expect("decoding JSON input should succeed");
+
+            let (_keepalive, repo) = KV::setup_repo();
+            let trace = crate::test_helpers::run_database_operations::<KV>(&repo, ops);
+
+            let mut golden = mint
+                .new_goldenfile(format!("{stem}.trace"))
+                .expect("opening goldenfile should succeed");
+            serde_json::to_writer_pretty(&mut golden, &trace)
+                .expect("writing goldenfile should succeed");
+        }
+    });
+
     kv_test!(test_database_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
         generated in crate::test_helpers::database_operations_commit_checkout_strategy(1usize..100, 0.1)
