@@ -8,7 +8,7 @@ rust-version.workspace = true
 workspace = true
 
 [features]
-unstable-test-utils = ["dep:proptest"]
+unstable-test-utils = ["dep:proptest", "dep:serde"]
 
 [dependencies]
 bincode.workspace = true
@@ -21,6 +21,10 @@ memmap2.workspace = true
 range-collections.workspace = true
 bytes.workspace = true
 unty.workspace = true
+
+[dependencies.serde]
+workspace = true
+optional = true
 
 [dependencies.derive_more]
 workspace = true
