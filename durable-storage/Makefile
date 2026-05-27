@@ -1,14 +1,22 @@
 # SPDX-FileCopyrightText: 2026 TriliTech <contact@trili.tech>
+# SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
+#
 # SPDX-License-Identifier: MIT
 
 all: check test
 
 check:
 	@cargo clippy --all-targets --no-default-features -- --deny warnings
+	@cargo clippy -p xtask --all-targets -- --deny warnings
 
 # distinct from the workspace-level test in that it actually turns off
 # rocksdb: using the in-memory implementation instead
 test:
 	@cargo nextest run --no-default-features
 
-.PHONY: all check test
+# Regenerate the checked-in inputs and refresh the matching goldenfiles
+reset-regressions:
+	@cargo run -p xtask -- gen-database-regression-inputs
+	@UPDATE_GOLDENFILES=1 cargo nextest run test_database_regression
+
+.PHONY: all check test gen-regression-inputs

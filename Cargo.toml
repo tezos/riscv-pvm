@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "pvm",
   "durable-storage",
+  "durable-storage/xtask",
   "data",
   "tools/sandbox",
   "tools/analyse-jit-functions",
