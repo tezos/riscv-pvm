@@ -38,10 +38,11 @@ use crate::repo::RegistryRepo;
 pub const VALUE_MAX_SIZE: usize = 10_000;
 
 /// Operations on a single [`Database`]
-#[derive(Debug, Clone)]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum DatabaseOperation {
-    Set(Key, Bytes),
-    Write(Key, usize, Bytes),
+    Set(Key, #[serde_as(as = "serde_with::hex::Hex")] Bytes),
+    Write(Key, usize, #[serde_as(as = "serde_with::hex::Hex")] Bytes),
     Read(Key, usize, usize),
     Delete(Key),
     Exists(Key),

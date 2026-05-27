@@ -9,7 +9,12 @@ workspace = true
 
 [features]
 default = ["rocksdb"]
-unstable-test-utils = ["dep:proptest"]
+unstable-test-utils = [
+  "dep:proptest",
+  "dep:serde",
+  "dep:serde_with",
+  "octez-riscv-data/unstable-test-utils",
+]
 
 [dependencies]
 bincode.workspace = true
@@ -33,6 +38,14 @@ workspace = true
 optional = true
 
 [dependencies.proptest]
+workspace = true
+optional = true
+
+[dependencies.serde]
+workspace = true
+optional = true
+
+[dependencies.serde_with]
 workspace = true
 optional = true
 
