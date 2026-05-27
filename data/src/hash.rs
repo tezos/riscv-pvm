@@ -48,6 +48,30 @@ pub struct Hash {
     digest: [u8; Hash::DIGEST_SIZE],
 }
 
+#[cfg(feature = "unstable-test-utils")]
+impl serde::Serialize for Hash {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&hex::encode(self.digest))
+    }
+}
+
+#[cfg(feature = "unstable-test-utils")]
+impl<'de> serde::Deserialize<'de> for Hash {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+        let s = String::deserialize(d)?;
+        let bytes = hex::decode(&s).map_err(D::Error::custom)?;
+        let digest: [u8; Hash::DIGEST_SIZE] = bytes.as_slice().try_into().map_err(|_| {
+            D::Error::custom(format!(
+                "expected {} hex-encoded bytes, got {}",
+                Hash::DIGEST_SIZE,
+                bytes.len()
+            ))
+        })?;
+        Ok(Hash { digest })
+    }
+}
+
 impl Hash {
     /// Size of digest produced by the underlying hash function
     pub const DIGEST_SIZE: usize = 32;
