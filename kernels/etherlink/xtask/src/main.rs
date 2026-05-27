@@ -209,6 +209,7 @@ fn run_profile(config: BuildConfig, sample_interval_us: u64) -> Result<()> {
     Ok(())
 }
 
+// TODO TZX-145: move to a xtask helpers crate instead of duplicating in other xtasks
 fn find_repo_root() -> Result<PathBuf> {
     let current_dir = env::current_dir().context("Failed to get current directory")?;
 
