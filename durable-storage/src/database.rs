@@ -444,6 +444,19 @@ impl<KV> Database<KV, Verify> {
             },
         }
     }
+
+    /// Construct a Verify-mode database by deserialising a [`MerkleProof`].
+    ///
+    /// [`MerkleProof`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProof
+    #[cfg(test)]
+    pub(crate) fn from_proof(
+        proof: octez_riscv_data::merkle_proof::proof_tree::MerkleProof,
+    ) -> Result<Self, octez_riscv_data::merkle_proof::ProofError> {
+        let merkle = MerkleLayer::from_proof(proof)?;
+        Ok(Database {
+            inner: VerifyImpl { merkle },
+        })
+    }
 }
 
 /// Verify-mode implementation for the [`Database`].
@@ -2313,6 +2326,9 @@ pub(crate) mod tests {
             crate::storage::Backend::InMemory => ops_b,
         };
         let operations = crate::test_helpers::make_database_operations(keys, values, ops);
-        crate::test_helpers::run_database_operations::<KV>(&repo, operations)
+
+        // A proof is generated for vvery supported operation, which is then verified
+        // and recorded in the trace.
+        crate::test_helpers::run_and_prove_database_operations::<KV>(&repo, operations)
     });
 }
