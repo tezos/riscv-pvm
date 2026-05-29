@@ -34,6 +34,7 @@ use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::TestKeyValueStoreSetup;
+use crate::test_helpers::DatabaseOperation;
 
 /// A sequence of recorded [`Database`] operations
 pub(crate) type Trace = Vec<TraceEntry>;
@@ -86,6 +87,11 @@ pub(crate) enum TraceEntry {
     Commit {
         result: Result<CommitId, String>,
     },
+    Proof {
+        step: DatabaseOperation,
+        #[serde_as(as = "serde_with::hex::Hex")]
+        proof: Vec<u8>,
+    },
 }
 
 /// A [`Database`] wrapper which can record execution traces
@@ -132,6 +138,13 @@ impl<KV: BackgroundKeyValueStore> TracedDatabase<KV, Normal> {
     /// (e.g. setting values larger than MAX_FILE_CHUNK_SIZE).
     pub(crate) fn inner_mut(&mut self) -> &mut Database<KV, Normal> {
         &mut self.inner
+    }
+
+    /// Record a [`TraceEntry::Proof`] for the proof of `step`.
+    pub(crate) fn record_proof(&self, step: DatabaseOperation, proof: Vec<u8>) {
+        self.trace
+            .borrow_mut()
+            .push(TraceEntry::Proof { step, proof });
     }
 }
 

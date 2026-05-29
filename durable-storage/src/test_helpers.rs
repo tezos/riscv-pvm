@@ -14,7 +14,15 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
+#[cfg(test)]
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Normal;
+#[cfg(test)]
+use octez_riscv_data::mode::ProvableExt;
+#[cfg(test)]
+use octez_riscv_data::mode::Verify;
+#[cfg(test)]
+use octez_riscv_data::serialisation::serialise;
 use proptest::prelude::*;
 use proptest::sample::Index;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
@@ -23,6 +31,8 @@ use tokio::runtime::Handle;
 use crate::commit::CommitId;
 use crate::database::Database;
 #[cfg(test)]
+use crate::database::DatabaseMode;
+#[cfg(test)]
 use crate::database::Trace;
 #[cfg(test)]
 use crate::database::TracedDatabase;
@@ -30,6 +40,8 @@ use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
+#[cfg(test)]
+use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::registry::Registry;
 use crate::repo::RegistryRepo;
@@ -45,7 +57,7 @@ pub const REGRESSION_EXPECTED_DIR: &str = "tests/expected";
 
 /// Operations on a single [`Database`]
 #[serde_with::serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum DatabaseOperation {
     Set(Key, #[serde_as(as = "serde_with::hex::Hex")] Bytes),
     Write(Key, usize, #[serde_as(as = "serde_with::hex::Hex")] Bytes),
@@ -844,6 +856,142 @@ where
             &mut database,
             &mut model,
             op,
+            handle,
+            repo,
+            &mut checkout_candidates,
+        );
+    }
+
+    database.into_trace()
+}
+
+/// Apply `operation` to a traced `database`, recording its [`TraceEntry`].
+///
+/// Returns `true` if the operation was a provable step.
+#[cfg(test)]
+fn apply_step<KV: BackgroundKeyValueStore, M: DatabaseMode>(
+    database: &mut TracedDatabase<KV, M>,
+    operation: &DatabaseOperation,
+) -> Result<bool, OperationalError> {
+    fn result_operational<T>(result: Result<T, Error>) -> Result<(), OperationalError> {
+        match result {
+            Ok(_) | Err(Error::InvalidArgument(_)) => Ok(()),
+            Err(Error::Operational(e)) => Err(e),
+        }
+    }
+
+    match operation {
+        DatabaseOperation::Set(key, data) => {
+            result_operational(database.set(key.clone(), data.clone()))?;
+        }
+        DatabaseOperation::Write(key, offset, data) => {
+            result_operational(database.write(key.clone(), *offset, data.clone()))?;
+        }
+        DatabaseOperation::Read(key, offset, len) => {
+            result_operational(database.read_bytes(key, *offset, *len))?;
+        }
+        DatabaseOperation::Delete(key) => {
+            database.delete(key.clone())?;
+        }
+        DatabaseOperation::Exists(key) => {
+            result_operational(database.exists(key))?;
+        }
+        DatabaseOperation::ValueLength(key) => {
+            result_operational(database.value_length(key))?;
+        }
+        DatabaseOperation::Hash => {
+            database.hash()?;
+        }
+        DatabaseOperation::Commit
+        | DatabaseOperation::Checkout
+        | DatabaseOperation::CommitCheckoutRoundtrip => {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+/// Generate and verify a proof for a single [`DatabaseOperation`] applied to `database`
+#[cfg(test)]
+fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
+    database: &TracedDatabase<KV, Normal>,
+    operation: &DatabaseOperation,
+) {
+    let pre_root_hash = Hash::from_foldable(database);
+
+    // Produce a proof and record the trace of applying `operation`
+    let mut prover = database
+        .try_start_proof()
+        .expect("starting a proof should succeed");
+
+    // Nothing to record or compare if the step was not provable
+    if !apply_step(&mut prover, operation).expect("applying a step should succeed") {
+        return;
+    }
+
+    let post_root_hash = Hash::from_foldable(&prover);
+    let proof = MerkleProof::from_foldable(&prover);
+    let proof_step_trace = prover.into_trace();
+    let proof_bytes = serialise(&proof).expect("serialising the proof should succeed");
+
+    // Construct the Verify-mode database from the proof and verify
+    let mut verify_db = TracedDatabase::from(
+        Database::<KV, Verify>::from_proof(proof).expect("proof should be valid"),
+    );
+    assert_eq!(
+        Hash::from_foldable(&verify_db),
+        pre_root_hash,
+        "the proof must reconstruct the pre-operation root hash"
+    );
+    apply_step(&mut verify_db, operation).expect("applying a step should succeed");
+    let verify_post_root_hash = Hash::from_foldable(&verify_db);
+    let verify_step_trace = verify_db.into_trace();
+
+    assert_eq!(
+        verify_step_trace, proof_step_trace,
+        "Prove- and Verify-mode execution traces should match"
+    );
+    assert_eq!(
+        verify_post_root_hash, post_root_hash,
+        "Prove- and Verify-mode root hashes should match"
+    );
+
+    database.record_proof(operation.clone(), proof_bytes)
+}
+
+/// Like [`run_database_operations`], but additionally generates and verifies a proof for
+/// every supported operation, recording the serialised proof in the trace.
+#[cfg(test)]
+pub(crate) fn run_and_prove_database_operations<KV>(
+    repo: &KV::Repo,
+    mut operations: Vec<DatabaseOperation>,
+) -> Trace
+where
+    KV: BackgroundPersistentKeyValueStore,
+{
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .build()
+        .expect("Building the runtime should succeed");
+    let handle = runtime.handle();
+
+    let mut database = TracedDatabase::<KV, Normal>::try_new(handle, repo)
+        .expect("Creating the database should succeed");
+    let mut model = DatabaseModel::default();
+    let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
+
+    // Force a final hash to be recorded in the trace
+    operations.push(DatabaseOperation::Hash);
+
+    for operation in operations {
+        // Provable operations are proven over their pre-operation state, so prove before applying.
+        prove_and_verify_operation::<KV>(&database, &operation);
+
+        apply_database_operation::<KV, _>(
+            &mut database,
+            &mut model,
+            operation,
             handle,
             repo,
             &mut checkout_candidates,
