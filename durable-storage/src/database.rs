@@ -2307,6 +2307,37 @@ pub(crate) mod tests {
         }
     });
 
+    // Like `test_database_regression`, but runs a single input through
+    // `run_and_prove_database_operations` so the trace additionally captures the proof
+    // recorded for every supported operation.
+    //
+    // Defined as a separate test so that if only proofs diverge, this test fails but `test_database_regression`
+    // still passes.
+    kv_test!(test_database_proof_regression, KV: BackgroundPersistentKeyValueStore, {
+        use goldenfile::Mint;
+
+        use crate::test_helpers::DatabaseOperation;
+        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::REGRESSION_INPUTS_DIR;
+
+        let path = std::path::Path::new(REGRESSION_INPUTS_DIR).join("database_00.input");
+        let file = std::fs::File::open(&path).expect("opening input file should succeed");
+        let ops: Vec<DatabaseOperation> =
+            serde_json::from_reader(file).expect("decoding JSON input should succeed");
+
+        let (_keepalive, repo) = KV::setup_repo();
+        let trace = crate::test_helpers::run_and_prove_database_operations::<KV>(&repo, ops);
+
+        let mut mint = Mint::new(REGRESSION_EXPECTED_DIR);
+        let mut golden = mint
+            .new_goldenfile("database_00.proof-trace")
+            .expect("opening goldenfile should succeed");
+        serde_json::to_writer_pretty(&mut golden, &trace)
+            .expect("writing goldenfile should succeed");
+
+        trace
+    });
+
     kv_test!(test_database_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
         generated in crate::test_helpers::database_operations_commit_checkout_strategy(1usize..100, 0.1)
