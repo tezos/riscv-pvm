@@ -20,6 +20,10 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
@@ -444,18 +448,14 @@ impl<KV> Database<KV, Verify> {
             },
         }
     }
+}
 
-    /// Construct a Verify-mode database by deserialising a [`MerkleProof`].
-    ///
-    /// [`MerkleProof`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProof
-    #[cfg(test)]
-    pub(crate) fn from_proof(
-        proof: octez_riscv_data::merkle_proof::proof_tree::MerkleProof,
-    ) -> Result<Self, octez_riscv_data::merkle_proof::ProofError> {
-        let merkle = MerkleLayer::from_proof(proof)?;
-        Ok(Database {
+impl<KV> FromProof for Database<KV, Verify> {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let suspended = <MerkleLayer<KV, Verify> as FromProof>::from_proof(proof)?;
+        Ok(suspended.map(|merkle| Database {
             inner: VerifyImpl { merkle },
-        })
+        }))
     }
 }
 

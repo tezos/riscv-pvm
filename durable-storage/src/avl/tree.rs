@@ -21,9 +21,12 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::merkle_proof::ProofError;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::utils::not_found;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
@@ -413,6 +416,23 @@ impl Foldable<PartialHashFold> for Tree<VerifyNodeId> {
         }
 
         node.done()
+    }
+}
+
+impl FromProof for Tree<VerifyNodeId> {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let ctx = proof.into_node()?;
+        let (ctx, tree) = Tree::from_branches(ctx)?;
+        // The top-level fold for a Normal-mode `Tree<LazyNodeId>` always emits a node fold,
+        // so a well-formed proof's root deserialises as `Present`. `Blinded`/`Absent` here
+        // would mean the entire state has been hidden, which would make the `Tree` unusable
+        // for verification.
+        let Partial::Present(tree) = tree else {
+            return Err(Proof::Error::custom(ProofError::Custom(
+                "malformed proof - deserialising MAVL tree without being present.".into(),
+            )));
+        };
+        ctx.done(tree)
     }
 }
 
