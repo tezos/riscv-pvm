@@ -27,6 +27,12 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::DeserialiserError;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::ProofError;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
@@ -153,6 +159,25 @@ impl<KV> MerkleLayer<KV, Verify> {
                 original_proof: Arc::new(MerkleProof::leaf_blind(Hash::hash_bytes(&[]))),
             },
         }
+    }
+}
+
+impl<KV> FromProof for MerkleLayer<KV, Verify> {
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        // Capture before consuming `proof`
+        let original_proof = proof
+            .capture_owned_proof()
+            .map(Arc::new)
+            .ok_or_else(|| Proof::Error::custom(ProofError::AbsentProof))?;
+
+        let suspended = Tree::<VerifyNodeId>::from_proof(proof)?;
+        Ok(suspended.map(move |tree| MerkleLayer {
+            inner: VerifyImpl {
+                tree,
+                resolver: VerifyResolver,
+                original_proof,
+            },
+        }))
     }
 }
 
@@ -726,11 +751,8 @@ mod tests {
     use crate::avl::resolver::LazyTreeId;
     use crate::avl::resolver::ProveNodeId;
     use crate::avl::resolver::ProveResolver;
-    use crate::avl::resolver::VerifyResolver;
-    use crate::avl::resolver::VerifyTreeId;
     use crate::avl::tree::Tree;
     use crate::key::Key;
-    use crate::merkle_layer::VerifyImpl;
     use crate::storage::KeyValueStore;
     use crate::storage::PersistentKeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
@@ -744,6 +766,14 @@ mod tests {
         /// Clear all data from the [MerkleLayer].
         fn clear(&mut self) {
             self.inner.tree.take();
+        }
+    }
+
+    impl<KV> MerkleLayer<KV, Verify> {
+        /// Construct a Verify-mode [`MerkleLayer`] by deserialising a [`MerkleProof`]
+        pub fn from_proof(proof: MerkleProof) -> Result<Self, ProofError> {
+            let suspended = <Self as FromProof>::from_proof(ProofTree::Present(&proof))?;
+            Ok(suspended.into_result())
         }
     }
 
@@ -764,32 +794,6 @@ mod tests {
         pub(crate) fn to_verify(&self) -> MerkleLayer<KV, Verify> {
             let proof = MerkleProof::from_foldable(self);
             MerkleLayer::from_proof(proof).expect("proof deserialization should succeed")
-        }
-    }
-
-    impl<KV> MerkleLayer<KV, Verify> {
-        /// Construct a Verify-mode [`MerkleLayer`] by deserialising a [`MerkleProof`].
-        ///
-        /// The proof is retained so [`MerkleLayer::hash`] can resolve `prev_hash` substitutions for
-        /// blinded subtrees that fold to [`PartialHash::Previous`].
-        pub fn from_proof(proof: MerkleProof) -> Result<Self, ProofError> {
-            let proof = Arc::new(proof);
-            let tree_id = VerifyTreeId::from_proof(ProofTree::Present(&proof))?.into_result();
-            let VerifyTreeId::Present { tree, .. } = tree_id else {
-                // The top-level fold for a Normal-mode `Tree<LazyNodeId>` always emits a node fold,
-                // so a well-formed proof's root deserialises as `Present`. `Blinded`/`Absent` here
-                // would mean the entire state has been hidden — an unusable verify layer.
-                return Err(ProofError::Custom(
-                    "malformed proof - deserialising MAVL tree without being present.".into(),
-                ));
-            };
-            Ok(MerkleLayer {
-                inner: VerifyImpl {
-                    tree,
-                    resolver: VerifyResolver,
-                    original_proof: proof,
-                },
-            })
         }
     }
 
