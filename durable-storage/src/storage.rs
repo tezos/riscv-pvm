@@ -86,7 +86,7 @@ pub trait PersistentKeyValueStore: KeyValueStore + Sized {
 
 #[cfg(test)]
 cfg_if::cfg_if! {
-    if #[cfg(feature = "rocksdb")] {
+    if #[cfg(rocksdb)] {
         /// Key-value store backend used when the `rocksdb` feature is enabled.
         pub(crate) type TestKeyValueStore = crate::persistence_layer::PersistenceLayer;
 
@@ -148,7 +148,7 @@ cfg_if::cfg_if! {
             }
         }
 
-        #[cfg(feature = "rocksdb")]
+        #[cfg(rocksdb)]
         impl TestKeyValueStoreSetup for crate::persistence_layer::PersistenceLayer {
             type Keepalive = octez_riscv_test_utils::TestableTmpdir;
 
@@ -275,7 +275,7 @@ cfg_if::cfg_if! {
                         $setup
                     }
 
-                    #[cfg(feature = "rocksdb")]
+                    #[cfg(rocksdb)]
                     let rocksdb_setup =
                         _kv_test_setup::<$crate::persistence_layer::PersistenceLayer>();
 
@@ -283,7 +283,7 @@ cfg_if::cfg_if! {
                         _kv_test_setup::<$crate::storage::in_memory::InMemoryKeyValueStore>();
 
                     ::proptest::proptest!(|($($arg in $strat),*)| {
-                        #[cfg(feature = "rocksdb")]
+                        #[cfg(rocksdb)]
                         let rocksdb_trace = {
                             type $ty_name = $crate::persistence_layer::PersistenceLayer;
                             let $setup_values = &rocksdb_setup;
@@ -299,7 +299,7 @@ cfg_if::cfg_if! {
                             $body
                         };
 
-                        #[cfg(feature = "rocksdb")]
+                        #[cfg(rocksdb)]
                         ::proptest::prop_assert_eq!(
                             rocksdb_trace, _in_memory_trace,
                             "trace mismatch"
@@ -322,7 +322,7 @@ cfg_if::cfg_if! {
                             $crate::repo::RegistryRepo,
                     {}
 
-                    #[cfg(feature = "rocksdb")]
+                    #[cfg(rocksdb)]
                     let rocksdb_trace = {
                         type $ty_name = $crate::persistence_layer::PersistenceLayer;
                         _bound_check::<$ty_name>();
@@ -337,7 +337,7 @@ cfg_if::cfg_if! {
                         $body
                     };
 
-                    #[cfg(feature = "rocksdb")]
+                    #[cfg(rocksdb)]
                     assert_eq!(
                         rocksdb_trace, _in_memory_trace,
                         "trace mismatch"

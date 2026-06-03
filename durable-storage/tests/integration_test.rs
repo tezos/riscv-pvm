@@ -10,7 +10,7 @@ use octez_riscv_durable_storage::test_helpers::run_operations;
 use proptest::proptest;
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "rocksdb")] {
+    if #[cfg(rocksdb)] {
         use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
         use octez_riscv_durable_storage::repo::DirectoryManager;
         use octez_riscv_test_utils::TestableTmpdir;

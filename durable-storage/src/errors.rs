@@ -25,7 +25,7 @@ pub enum OperationalError {
     #[error("Commit is missing data for the value of key {key:?}")]
     CommitValueMissing { key: Key, source: Box<Error> },
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[error("Unable to create checkpoint: {error}")]
     CheckpointCreationFailed { error: rocksdb::Error },
 
@@ -47,15 +47,15 @@ pub enum OperationalError {
         error: std::io::Error,
     },
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[error("Unable to open RocksDB: {error}")]
     OpenRocksDbFailed { error: rocksdb::Error },
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[error("Failed to create column family {name}: {error}")]
     ColumnFamilyCreationFailed { name: String, error: rocksdb::Error },
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[error("RocksDB lookup failed {key:?} in {column}: {error}")]
     GetFailed {
         column: String,
@@ -63,7 +63,7 @@ pub enum OperationalError {
         error: rocksdb::Error,
     },
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[error("RocksDB update failed {key:?} in {column}: {error}")]
     PutFailed {
         column: String,
@@ -71,7 +71,7 @@ pub enum OperationalError {
         error: rocksdb::Error,
     },
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[error("RocksDB delete failed {key:?} in {column}: {error}")]
     DeleteFailed {
         column: String,
@@ -79,7 +79,7 @@ pub enum OperationalError {
         error: rocksdb::Error,
     },
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[error("RocksDB merge failed {key:?} at {offset}: {error}")]
     MergeFailed {
         key: Vec<u8>,

@@ -44,7 +44,7 @@ fn get_operations_batch(mut rng: &mut impl Rng, keys: &[Key], batch_size: usize)
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "rocksdb")] {
+    if #[cfg(rocksdb)] {
         use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
         use octez_riscv_test_utils::TestableTmpdir;
 

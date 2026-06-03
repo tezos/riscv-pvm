@@ -76,7 +76,7 @@ impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
     }
 
     /// Get a [`Handle`] to the registry's runtime.
-    #[cfg(any(test, feature = "unstable-test-utils"))]
+    #[cfg(test_utils)]
     pub(crate) fn handle(&self) -> &tokio::runtime::Handle {
         self.inner.runtime.handle()
     }
@@ -1536,7 +1536,7 @@ pub(super) mod tests {
     });
 }
 
-#[cfg(feature = "rocksdb")]
+#[cfg(rocksdb)]
 #[cfg(test)]
 mod rocksdb_tests {
     use octez_riscv_data::mode::Normal;
