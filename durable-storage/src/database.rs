@@ -678,7 +678,7 @@ pub(crate) mod tests {
         })
     }
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     fn new_persistent_database<KV>() -> (
         tokio::runtime::Runtime,
         KV::Keepalive,
@@ -1023,7 +1023,7 @@ pub(crate) mod tests {
         (original.into_trace(), checked_out.into_trace())
     });
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     #[test]
     fn test_database_checkout_missing_root_blob_fails_operationally() {
         use rocksdb::ColumnFamilyDescriptor;
@@ -2235,7 +2235,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    #[cfg(feature = "rocksdb")]
+    #[cfg(rocksdb)]
     kv_test!(
         #[should_panic(expected = "trace mismatch")]
         test_database_trace_comparison_detects_divergence,

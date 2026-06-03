@@ -465,7 +465,7 @@ mod tests {
             key: Key,
         },
         Hash,
-        #[cfg(feature = "rocksdb")]
+        #[cfg(rocksdb)]
         Commit,
         Clone,
     }
@@ -502,7 +502,7 @@ mod tests {
                     assert_eq!(hash1, hash2);
                 }
 
-                #[cfg(feature = "rocksdb")]
+                #[cfg(rocksdb)]
                 Self::Commit => {
                     let options = crate::storage::StoreOptions::default()
                         .with_deep()
@@ -546,14 +546,14 @@ mod tests {
 
             let hash = Just(TestCommand::Hash);
 
-            #[cfg(feature = "rocksdb")]
+            #[cfg(rocksdb)]
             let commit = Just(TestCommand::Commit);
 
             let clone = Just(TestCommand::Clone);
 
             // The frequencies are chosen to reflect a typical workload.
             cfg_if::cfg_if! {
-                if #[cfg(feature = "rocksdb")] {
+                if #[cfg(rocksdb)] {
                     proptest::prop_oneof![
                         250 => write,
                         250 => set,

@@ -13,7 +13,7 @@ use octez_riscv_data::hash::Hash;
 /// from a `DirectoryManager`.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode, Hash)]
 #[cfg_attr(
-    feature = "unstable-test-utils",
+    test_utils,
     derive(serde::Serialize, serde::Deserialize),
     serde(transparent)
 )]

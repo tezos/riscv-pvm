@@ -27,7 +27,7 @@
 //!          <rocksdb internals>
 //! ```
 
-#![cfg(feature = "rocksdb")]
+#![cfg(rocksdb)]
 
 use std::mem::ManuallyDrop;
 use std::path::Path;
