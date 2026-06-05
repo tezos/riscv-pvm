@@ -506,13 +506,18 @@ pub(super) mod tests {
     use bytes::Bytes;
     use octez_riscv_data::components::vector::VectorMode;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::proof::Proof;
+    use octez_riscv_data::merkle_proof::proof::deserialise_proof;
+    use octez_riscv_data::merkle_proof::proof::serialise_proof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
+    use octez_riscv_data::mode::utils::catch_not_found;
     use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_data::serialisation::serialise;
 
@@ -1535,6 +1540,378 @@ pub(super) mod tests {
         assert_eq!(registry.len(), 1);
 
         assert!(registry.resize_tick(5).is_err());
+    });
+
+    /// Round-trip a registry [`Proof`] via bytes.
+    ///
+    /// Deserialising the bytes requires two passes over the registry state:
+    ///
+    /// 1. The stream pass parses the raw bytes — driven by the registry's [`FromProof`]
+    ///    shape — and reconstructs the proof tree. The registry it returns is structurally
+    ///    correct, but it cannot be hashed: the stream deserialiser cannot capture the owned
+    ///    sub-proofs that verify-mode hashing folds against (TZX-161).
+    /// 2. The reconstructed proof tree is deserialised again, this time with the proof-tree
+    ///    deserialiser, which does capture owned sub-proofs and therefore yields a verifiable
+    ///    registry.
+    ///
+    /// Returns the registries produced by both passes.
+    fn deserialise_proof_via_bytes<KV: BackgroundKeyValueStore>(
+        proof: &Proof,
+    ) -> (Registry<KV, Verify>, Registry<KV, Verify>) {
+        let bytes = serialise_proof(proof);
+
+        let (reconstructed_proof, stream_registry) =
+            deserialise_proof::<Registry<KV, Verify>, _>(bytes.into_iter())
+                .expect("Stream deserialisation of the proof bytes should succeed");
+        assert_eq!(
+            &reconstructed_proof, proof,
+            "The proof reconstructed from bytes should match the original"
+        );
+
+        let verify_registry =
+            Registry::<KV, Verify>::from_proof(ProofPart::Present(reconstructed_proof.tree()))
+                .expect("from_proof should succeed")
+                .into_result();
+
+        (stream_registry, verify_registry)
+    }
+
+    /// Recompute the registry root hash of a verify-mode registry.
+    ///
+    /// This relies on the databases all fitting in a single level in the tree,
+    /// (up to 4 currently). Additionally, the registry as a whole cannot be
+    /// blinded (ie at least one database must be used).
+    ///
+    /// Future full e2e tests should additionally pass the whole proof to
+    /// allow registry partial hash fold to function if these don't apply.
+    fn registry_root_hash_small<KV: BackgroundKeyValueStore>(
+        registry: &Registry<KV, Verify>,
+    ) -> Hash {
+        PartialHash::from_foldable(None, registry)
+            .to_hash()
+            .expect("Database captures owned proof, should be able to hash")
+    }
+
+    kv_test!(test_proof_via_bytes_end_to_end, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        let key_c = Key::new(&[3]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
+
+        let initial_root = Hash::from_foldable(&registry);
+
+        // The step: read a value from database 0, write a fresh key to database 1.
+        let mut prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+        prove_registry
+            .database(0)
+            .expect("Database should exist.")
+            .assert_database_value(&key_a, b"foo");
+        prove_registry
+            .database(1)
+            .expect("Database should exist.")
+            .assert_database_value(&key_b, b"bar");
+        prove_registry
+            .database_mut(1)
+            .expect("Database should exist.")
+            .set(key_c.clone(), Bytes::from_static(b"baz"))
+            .expect("Setting a value should succeed");
+
+        let final_root = Hash::from_foldable(&prove_registry);
+        let proof = prove_registry.produce_proof();
+
+        assert_eq!(
+            proof.initial_state_hash(),
+            initial_root,
+            "The proof must encode the registry's initial state"
+        );
+        assert_eq!(
+            proof.final_state_hash(),
+            final_root,
+            "The proof must carry the prove-mode final state hash"
+        );
+
+        let (_stream_registry, mut verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
+
+        assert_eq!(
+            registry_root_hash_small(&verify_registry),
+            initial_root,
+            "The verify-mode registry must start from the initial state hash"
+        );
+
+        // Replay the step.
+        verify_registry
+            .database(0)
+            .expect("Database should exist.")
+            .assert_database_value(&key_a, b"foo");
+        verify_registry
+            .database(1)
+            .expect("Database should exist.")
+            .assert_database_value(&key_b, b"bar");
+        verify_registry
+            .database_mut(1)
+            .expect("Database should exist.")
+            .set(key_c, Bytes::from_static(b"baz"))
+            .expect("Setting a value should succeed");
+
+        assert_eq!(
+            registry_root_hash_small(&verify_registry),
+            proof.final_state_hash(),
+            "Replaying the step in verify mode must reach the proof's final state hash"
+        );
+    });
+
+    // TODO (TZX-161): once the stream deserialiser can capture owned proofs, the first pass
+    // should become verifiable on its own and this test should be updated.
+    kv_test!(test_proof_via_bytes_requires_second_deserialisation, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+        // Database 0 holds several keys so that reading one of them traverses nodes whose
+        // data stays unread — those fields are absent from the proof and can only be
+        // resolved against the captured owned proof.
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[4], b"unread");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[5], b"unread");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
+
+        let db_0_initial_hash = registry
+            .database(0)
+            .expect("Database should exist.")
+            .hash()
+            .expect("Hashing should succeed.");
+
+        // The step only reads one key from database 0.
+        let prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+        prove_registry
+            .database(0)
+            .expect("Database should exist.")
+            .assert_database_value(&key_a, b"foo");
+
+        let proof = prove_registry.produce_proof();
+        let (stream_registry, verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
+
+        // The stream-pass registry is structurally correct: recorded reads replay fine.
+        stream_registry
+            .database(0)
+            .expect("Database should exist.")
+            .assert_database_value(&key_a, b"foo");
+
+        // ... but it cannot be hashed, because the owned proof was not captured.
+        let stream_hash_attempt = catch_not_found(|| {
+            stream_registry
+                .database(0)
+                .expect("Database should exist.")
+                .hash()
+        });
+        assert!(
+            stream_hash_attempt.is_err(),
+            "Hashing a stream-deserialised database should fail: the owned proof was not captured"
+        );
+
+        // The second pass captured the owned proof, so the hash is available and matches the
+        // initial state.
+        assert_eq!(
+            verify_registry
+                .database(0)
+                .expect("Database should exist.")
+                .hash()
+                .expect("Hashing should succeed."),
+            db_0_initial_hash,
+            "The proof-tree pass must recover the partially-read database's hash"
+        );
+        assert_eq!(
+            registry_root_hash_small(&verify_registry),
+            proof.initial_state_hash(),
+            "The proof-tree pass must recover the registry's initial root hash"
+        );
+    });
+
+    kv_test!(test_proof_database_hash_queries_replay_in_verify_mode, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let key_c = Key::new(&[3]).expect("Size less than KEY_MAX_SIZE");
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
+
+        let mut prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+
+        // Query the hash of database 0 without accessing it otherwise.
+        let prove_hash_untouched = prove_registry
+            .database(0)
+            .expect("Database should exist.")
+            .hash()
+            .expect("Hashing should succeed.");
+
+        // Mutate database 1, then query its hash mid-step.
+        prove_registry
+            .database_mut(1)
+            .expect("Database should exist.")
+            .set(key_c.clone(), Bytes::from_static(b"baz"))
+            .expect("Setting a value should succeed");
+        let prove_hash_after_write = prove_registry
+            .database(1)
+            .expect("Database should exist.")
+            .hash()
+            .expect("Hashing should succeed.");
+
+        let proof = prove_registry.produce_proof();
+        let (_stream_registry, mut verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
+
+        // Replay: the same queries must give the same answers.
+        assert_eq!(
+            verify_registry
+                .database(0)
+                .expect("Database should exist.")
+                .hash()
+                .expect("Hashing should succeed."),
+            prove_hash_untouched,
+            "The verifier must reproduce the hash of the untouched database"
+        );
+
+        verify_registry
+            .database_mut(1)
+            .expect("Database should exist.")
+            .set(key_c, Bytes::from_static(b"baz"))
+            .expect("Setting a value should succeed");
+        assert_eq!(
+            verify_registry
+                .database(1)
+                .expect("Database should exist.")
+                .hash()
+                .expect("Hashing should succeed."),
+            prove_hash_after_write,
+            "The verifier must reproduce the mid-step hash of the written database"
+        );
+
+        assert_eq!(
+            registry_root_hash_small(&verify_registry),
+            proof.final_state_hash(),
+            "Replaying the step in verify mode must reach the proof's final state hash"
+        );
+    });
+
+    // Currently broken: prove-mode `copy_database` installs a clone whose initial tree and
+    // access tracking come from the *source* slot, so the produced proof encodes the wrong
+    // initial state for the destination slot.
+    // TODO (TZX-170): fix copy proof semantics
+    kv_test!(
+        #[ignore = "prove-mode copy_database breaks the proof's initial-state encoding"]
+        test_proof_copy_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
+
+        let initial_root = Hash::from_foldable(&registry);
+
+        let mut prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+        prove_registry
+            .copy_database(0, 1)
+            .expect("Copying should succeed");
+        let final_root = Hash::from_foldable(&prove_registry);
+
+        // Reference: the same step in Normal mode.
+        registry
+            .copy_database(0, 1)
+            .expect("Copying should succeed");
+        assert_eq!(
+            Hash::from_foldable(&registry),
+            final_root,
+            "Prove-mode copy must produce the Normal-mode final hash"
+        );
+
+        let proof = prove_registry.produce_proof();
+        assert_eq!(
+            proof.initial_state_hash(),
+            initial_root,
+            "The proof must encode the registry's true initial state"
+        );
+        assert_eq!(proof.final_state_hash(), final_root);
+
+        // Replaying the copy in verify mode must reach the final state hash.
+        let (_stream_registry, mut verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
+        assert_eq!(registry_root_hash_small(&verify_registry), initial_root);
+        verify_registry
+            .copy_database(0, 1)
+            .expect("Copying should succeed");
+        assert_eq!(
+            registry_root_hash_small(&verify_registry),
+            proof.final_state_hash(),
+            "Replaying the copy in verify mode must reach the proof's final state hash"
+        );
+    });
+
+    // Currently broken: prove-mode `move_database` replaces the source slot with an empty
+    // database whose initial tree is empty, and moves the source database — along with its
+    // initial tree — to the destination slot, so the produced proof encodes the wrong
+    // initial state for both slots.
+    // TODO (TZX-170): fix move proof semantics
+    kv_test!(
+        #[ignore = "prove-mode move_database breaks the proof's initial-state encoding"]
+        test_proof_move_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
+
+        let initial_root = Hash::from_foldable(&registry);
+
+        let mut prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+        prove_registry
+            .move_database(0, 1)
+            .expect("Moving should succeed");
+        let final_root = Hash::from_foldable(&prove_registry);
+
+        // Reference: the same step in Normal mode.
+        registry
+            .move_database(0, 1)
+            .expect("Moving should succeed");
+        assert_eq!(
+            Hash::from_foldable(&registry),
+            final_root,
+            "Prove-mode move must produce the Normal-mode final hash"
+        );
+
+        let proof = prove_registry.produce_proof();
+        assert_eq!(
+            proof.initial_state_hash(),
+            initial_root,
+            "The proof must encode the registry's true initial state"
+        );
+        assert_eq!(proof.final_state_hash(), final_root);
+
+        // Replaying the move in verify mode must reach the final state hash.
+        let (_stream_registry, mut verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
+        assert_eq!(registry_root_hash_small(&verify_registry), initial_root);
+        verify_registry
+            .move_database(0, 1)
+            .expect("Moving should succeed");
+        assert_eq!(
+            registry_root_hash_small(&verify_registry),
+            proof.final_state_hash(),
+            "Replaying the move in verify mode must reach the proof's final state hash"
+        );
     });
 
     kv_test!(test_durable_storage_end_to_end, KV: BackgroundPersistentKeyValueStore,
