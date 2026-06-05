@@ -27,6 +27,7 @@ use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -547,6 +548,18 @@ struct VerifyImpl {
     /// Original proof the verify-mode tree was deserialised from. Required by [`MerkleLayer::hash`]
     /// to resolve `prev_hash` substitutions in [`PartialHashFold::previous`] for blinded subtrees.
     original_proof: Arc<MerkleProof>,
+}
+
+impl<KV> Foldable<PartialHashFold> for MerkleLayer<KV, Verify> {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        // Override whatever proof the parent fold passed down with the proof this layer was
+        // deserialised from: it is the source of truth for the `prev_hash` substitutions performed
+        // by [`PartialHashFold::previous`] for blinded subtrees of this tree. This mirrors what
+        // [`MerkleLayer::hash`] does, but threads the parent fold's builder so the layer can be
+        // folded as a child of a larger state (e.g. a `Database` or `Registry`).
+        let builder = builder.with_proof(Some(self.inner.original_proof.clone()));
+        self.inner.tree.fold(builder)
+    }
 }
 
 /// Prove-mode backing state for a [`MerkleLayer`].

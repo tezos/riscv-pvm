@@ -918,6 +918,8 @@ fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
     database: &TracedDatabase<KV, Normal>,
     operation: &DatabaseOperation,
 ) {
+    use octez_riscv_data::hash::PartialHash;
+
     let pre_root_hash = Hash::from_foldable(database);
 
     // Produce a proof and record the trace of applying `operation`
@@ -944,12 +946,16 @@ fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
         .into_result(),
     );
     assert_eq!(
-        Hash::from_foldable(&verify_db),
+        PartialHash::from_foldable(None, &verify_db)
+            .to_hash()
+            .unwrap(),
         pre_root_hash,
         "the proof must reconstruct the pre-operation root hash"
     );
     apply_step(&mut verify_db, operation).expect("applying a step should succeed");
-    let verify_post_root_hash = Hash::from_foldable(&verify_db);
+    let verify_post_root_hash = PartialHash::from_foldable(None, &verify_db)
+        .to_hash()
+        .unwrap();
     let verify_step_trace = verify_db.into_trace();
 
     assert_eq!(
