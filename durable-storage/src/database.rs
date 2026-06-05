@@ -20,6 +20,8 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
@@ -290,9 +292,9 @@ impl<KV: KeyValueStore> Foldable<MerkleProofFold> for Database<KV, Prove<'_>> {
     }
 }
 
-impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Verify> {
-    fn fold(&self, _builder: HashFold) -> Hash {
-        self.inner.merkle.hash()
+impl<KV: KeyValueStore> Foldable<PartialHashFold> for Database<KV, Verify> {
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        self.inner.merkle.fold(builder)
     }
 }
 
