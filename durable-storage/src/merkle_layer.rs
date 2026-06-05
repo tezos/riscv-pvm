@@ -29,9 +29,7 @@ use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
-use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::FromProof;
-use octez_riscv_data::merkle_proof::ProofError;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -42,6 +40,7 @@ use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
+use octez_riscv_data::mode::utils::not_found;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
@@ -157,7 +156,7 @@ impl<KV> MerkleLayer<KV, Verify> {
             inner: VerifyImpl {
                 tree: Tree::default(),
                 resolver: VerifyResolver,
-                original_proof: Arc::new(MerkleProof::leaf_blind(Hash::hash_bytes(&[]))),
+                original_proof: Some(Arc::new(MerkleProof::leaf_blind(Hash::hash_bytes(&[])))),
             },
         }
     }
@@ -165,11 +164,16 @@ impl<KV> MerkleLayer<KV, Verify> {
 
 impl<KV> FromProof for MerkleLayer<KV, Verify> {
     fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
-        // Capture before consuming `proof`
-        let original_proof = proof
-            .capture_owned_proof()
-            .map(Arc::new)
-            .ok_or_else(|| Proof::Error::custom(ProofError::AbsentProof))?;
+        // Capture before consuming `proof`.
+        //
+        // This is `None` for deserialisers that cannot capture an owned proof (e.g. the stream
+        // deserialiser): the layer still deserialises structurally — which is required to
+        // reconstruct the proof tree from the raw bytes in the first place — but it cannot be
+        // hashed. To obtain a verifiable layer, deserialise a second time from the proof tree
+        // recovered by the first pass.
+        //
+        // TODO TZX-161: StreamDeserialiser should allow capturing owned proof
+        let original_proof = proof.capture_owned_proof().map(Arc::new);
 
         let suspended = Tree::<VerifyNodeId>::from_proof(proof)?;
         Ok(suspended.map(move |tree| MerkleLayer {
@@ -402,9 +406,15 @@ impl MerkleLayerMode for Verify {
         let tree_id = VerifyTreeId::Present {
             tree: this.inner.tree.clone(),
         };
-        PartialHash::from_foldable(Some((*this.inner.original_proof).clone()), &tree_id)
+        let original_proof = this
+            .inner
+            .original_proof
+            .as_ref()
+            .map(|proof| proof.as_ref().clone());
+        PartialHash::from_foldable(original_proof, &tree_id)
             .to_hash()
-            .expect("verify-mode hash should resolve to Present")
+            // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+            .unwrap_or_else(|| unsafe { not_found() })
     }
 
     fn delete<KV: KeyValueStore>(
@@ -547,7 +557,12 @@ struct VerifyImpl {
     resolver: VerifyResolver,
     /// Original proof the verify-mode tree was deserialised from. Required by [`MerkleLayer::hash`]
     /// to resolve `prev_hash` substitutions in [`PartialHashFold::previous`] for blinded subtrees.
-    original_proof: Arc<MerkleProof>,
+    ///
+    /// `None` when the layer was deserialised by a deserialiser that cannot capture an owned
+    /// proof (the stream deserialiser, see TZX-161). Such a layer deserialises structurally but
+    /// cannot be hashed; it must be re-deserialised from the proof tree recovered by the first
+    /// deserialisation pass.
+    original_proof: Option<Arc<MerkleProof>>,
 }
 
 impl<KV> Foldable<PartialHashFold> for MerkleLayer<KV, Verify> {
@@ -557,7 +572,7 @@ impl<KV> Foldable<PartialHashFold> for MerkleLayer<KV, Verify> {
         // by [`PartialHashFold::previous`] for blinded subtrees of this tree. This mirrors what
         // [`MerkleLayer::hash`] does, but threads the parent fold's builder so the layer can be
         // folded as a child of a larger state (e.g. a `Database` or `Registry`).
-        let builder = builder.with_proof(Some(self.inner.original_proof.clone()));
+        let builder = builder.with_proof(self.inner.original_proof.clone());
         self.inner.tree.fold(builder)
     }
 }
