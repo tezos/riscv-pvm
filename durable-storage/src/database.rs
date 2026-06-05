@@ -701,18 +701,6 @@ pub(crate) mod tests {
         (runtime, keepalive, repo, database)
     }
 
-    /// Generate a Merkle proof from `database` and produce a Verify-mode database that replays
-    /// the same data via that proof.
-    pub(crate) fn to_verify<KV: KeyValueStore>(
-        database: &Database<KV, Prove<'static>>,
-    ) -> Database<KV, Verify> {
-        Database {
-            inner: super::VerifyImpl {
-                merkle: database.inner.merkle.to_verify(),
-            },
-        }
-    }
-
     kv_test!(test_database_commit_and_checkout, KV: BackgroundPersistentKeyValueStore,
         setup_runtime |handle, repo| = {
             let runtime = tokio::runtime::Builder::new_multi_thread()

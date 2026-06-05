@@ -166,7 +166,8 @@ pub trait Deserialiser {
     /// retain their original sub-proof so they can fold against it later, even after the working
     /// tree has been structurally rearranged.
     ///
-    /// TODO RV-994: Investigate avoiding the extra allocation required for this.
+    // TODO RV-994: Investigate avoiding the extra allocation required for this.
+    // TODO TZX-161: StreamDeserialiser should allow capturing owned proof
     fn capture_owned_proof(&self) -> Option<MerkleProof> {
         None
     }

@@ -19,6 +19,10 @@ use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof::Proof;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Modal;
@@ -341,6 +345,21 @@ where
     }
 }
 
+impl<KV: KeyValueStore> FromProof for Registry<KV, Verify> {
+    // TODO (TZX-161): for a verify mode Registry, the resulting registry state is currently
+    // only usable if `proof` is the ProofTree. Otherwise, if created using the stream
+    // deserialiser, verification will fail (as this does not support capturing the owned proof).
+    // Deserialising from raw bytes therefore requires two passes: a stream pass to reconstruct
+    // the proof tree, then a proof-tree pass to obtain a verifiable registry.
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let suspended = Vector::<Database<KV, Verify>, Verify>::from_proof(proof)?;
+        Ok(suspended.map(|databases| Self {
+            inner: VerifyImpl(PhantomData),
+            databases,
+        }))
+    }
+}
+
 /// Modal template for the [`Registry`]
 ///
 /// This is used to select the appropriate implementation for the mode.
@@ -487,6 +506,9 @@ pub(super) mod tests {
     use bytes::Bytes;
     use octez_riscv_data::components::vector::VectorMode;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
@@ -499,7 +521,6 @@ pub(super) mod tests {
     use super::RegistryManifest;
     use super::VerifyImpl;
     use crate::commit::CommitId;
-    use crate::database::tests::to_verify;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
     use crate::errors::OperationalError;
@@ -1232,7 +1253,7 @@ pub(super) mod tests {
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
         let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
 
-        let mut registry = setup_size_2_registry(repo);
+        let mut registry = setup_size_2_registry::<KV>(repo);
 
         let db_0 = registry.database_mut(0)
             .expect("database at index 0 exists");
@@ -1296,14 +1317,10 @@ pub(super) mod tests {
         );
         assert_eq!(root_hash_prove_after, root_hash_prove_before, "Reads must not affect Prove-mode hashes");
 
-        let verify_databases = (0..prove_registry.len())
-            .map(|i| to_verify::<KV>(prove_registry.database(i).expect("Database should exist.")))
-            .collect();
-
-        let verify_registry = Registry::<KV, Verify> {
-            inner: VerifyImpl(PhantomData),
-            databases: <Verify as VectorMode>::new(verify_databases),
-        };
+        let proof = MerkleProof::from_foldable(&prove_registry);
+        let verify_registry = Registry::<KV, _>::from_proof(ProofPart::Present(&proof))
+            .expect("from_proof should succeed")
+            .into_result();
 
         let verify_hashes_before = (0..verify_registry.len())
             .map(|i| {
