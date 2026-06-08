@@ -10,6 +10,7 @@ workspace = true
 [features]
 default = ["rocksdb"]
 unstable-test-utils = [
+  "dep:clap",
   "dep:proptest",
   "dep:serde",
   "dep:serde_with",
@@ -44,6 +45,10 @@ optional = true
 workspace = true
 optional = true
 
+[dependencies.clap]
+workspace = true
+optional = true
+
 [dependencies.serde_json]
 workspace = true
 optional = true
@@ -71,6 +76,11 @@ octez-riscv-durable-storage = { path = ".", features = ["unstable-test-utils"] }
 octez-riscv-test-utils.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[[bin]]
+name = "database_long_test"
+path = "src/bin/database_long_test.rs"
+required-features = ["rocksdb", "unstable-test-utils"]
 
 [[bench]]
 name = "avl_tree"

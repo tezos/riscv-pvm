@@ -21,7 +21,6 @@ pub mod strategy;
 
 use std::fs;
 use std::path::Path;
-use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -69,8 +68,6 @@ pub struct LongTestConfig {
     pub seed: Option<Hash>,
     /// Time budget. The loop stops cleanly once exceeded.
     pub time_budget: Option<Duration>,
-    /// If set, replay the failing epoch described by `<dir>/meta.json`.
-    pub replay: Option<PathBuf>,
 }
 
 /// Metadata persisted alongside a failure which enables replaying it.
@@ -94,11 +91,6 @@ struct FailureMeta {
 
 /// Run the long-running test
 pub fn run_long_test(config: LongTestConfig) -> Result<()> {
-    // Replay reconstructs only the failing epoch; it is handled separately.
-    if let Some(replay_dir) = &config.replay {
-        return replay_failure(replay_dir);
-    }
-
     let seed = config
         .seed
         .unwrap_or_else(|| rand::random::<[u8; 32]>().into());
@@ -110,9 +102,19 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
         .tempdir()?
         .keep();
 
-    eprintln!("test seed: {seed}");
+    let mut rerun = format!(
+        "cargo run --release --features rocksdb,unstable-test-utils --bin database_long_test -- \
+         test --seed {seed} --ops-per-epoch {ops_per_epoch} --cases-per-epoch {cases_per_epoch}"
+    );
+    if let Some(epochs) = max_epochs {
+        rerun.push_str(&format!(" --epochs {epochs}"));
+    }
+    if let Some(budget) = config.time_budget {
+        rerun.push_str(&format!(" --max-minutes {}", budget.as_secs() / 60));
+    }
     eprintln!(
-        "out-dir: {} | ops/epoch: {ops_per_epoch} | cases/epoch: {cases_per_epoch}",
+        "test directory: {} | ops/epoch: {ops_per_epoch} | cases/epoch: {cases_per_epoch}\n\
+         rerun with:\n{rerun}",
         out_dir.display(),
     );
 
@@ -171,6 +173,19 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
 
         match result {
             Ok(()) => {
+                // Size reporting only via the binary, not the crate test.
+                #[cfg(not(test))]
+                {
+                    let snapshot_dir = persistent_repo.database_commit_dir(&base.commit);
+                    let snapshot_size = dir_size(&snapshot_dir)
+                        .context("measuring the size of the latest snapshot")?;
+                    eprintln!(
+                        "epoch {epoch} ok ({} keys, latest snapshot: {:.2} MiB)",
+                        base.model.data.len(),
+                        snapshot_size as f64 / (1024.0 * 1024.0),
+                    );
+                }
+                #[cfg(test)]
                 eprintln!(
                     "epoch {epoch} ok (db contains {} entries)",
                     base.model.data.len()
@@ -208,7 +223,36 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
     }
 
     eprintln!("completed {epoch} epochs");
+
+    // Size reporting only via the binary, not the crate test.
+    #[cfg(not(test))]
+    {
+        drop(runtime);
+
+        let repo_size = dir_size(&repo_dir).context("measuring the size of the repo")?;
+        eprintln!(
+            "total repo size: {:.2} MiB",
+            repo_size as f64 / (1024.0 * 1024.0)
+        );
+    }
+
     Ok(())
+}
+
+/// Total size in bytes of all files under `dir`, recursively.
+#[cfg(not(test))]
+fn dir_size(dir: &Path) -> std::io::Result<u64> {
+    let mut size = 0;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            size += dir_size(&entry.path())?;
+        } else {
+            size += metadata.len();
+        }
+    }
+    Ok(size)
 }
 
 /// Build a deterministically seeded test runner for `epoch`.
@@ -274,9 +318,11 @@ fn write_failure(
         .context("writing the persistent base snapshot")?;
 
     eprintln!(
-        "failure artifacts written to {}; replay with --replay {}",
-        failure_dir.display(),
-        failure_dir.display(),
+        "failure artifacts written to {failure}\n\
+         replay with:\n\
+         cargo run --release \
+         --features rocksdb,unstable-test-utils --bin database_long_test -- replay {failure}",
+        failure = failure_dir.display(),
     );
     Ok(())
 }
@@ -284,7 +330,7 @@ fn write_failure(
 /// Reproduce a recorded failure by reconstructing only the failing epoch.
 /// Both the persistence backend's base and the in-memory backend's base
 /// are restored from disk, and the saved (shrunk) operation sequence is applied once.
-fn replay_failure(dir: &Path) -> Result<()> {
+pub fn replay_failure(dir: &Path) -> Result<()> {
     fn read_failure_file<T: serde::de::DeserializeOwned>(
         failure_dir: &Path,
         name: &str,
@@ -374,6 +420,8 @@ fn replay_failure(dir: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use bytes::Bytes;
     use octez_riscv_test_utils::TestableTmpdir;
     use tokio::runtime::Runtime;
@@ -390,7 +438,6 @@ mod tests {
             cases_per_epoch: 32,
             seed: None,
             time_budget: None,
-            replay: None,
         })
         .expect("the short long test run should succeed");
     }

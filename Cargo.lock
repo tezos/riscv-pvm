@@ -2561,6 +2561,7 @@ dependencies = [
  "bincode",
  "bytes",
  "cfg-if",
+ "clap",
  "criterion",
  "derive_more",
  "goldenfile",
