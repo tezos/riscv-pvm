@@ -53,6 +53,9 @@ jobs:
           - runs-on: macos-latest
             make-target: check
             title: MacOS Checks
+          - runs-on: ubuntu-latest
+            make-target: durable/long-test
+            title: Durable Storage Long Tests
 
     name: ${{ matrix.title }}
     runs-on: ${{ matrix.runs-on }}
