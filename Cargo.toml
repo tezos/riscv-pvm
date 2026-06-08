@@ -65,6 +65,7 @@ proptest = "1.11.0"
 quanta = "0.12.6"
 rand = "0.10.1"
 range-collections = "0.4.6"
+rkyv = { version = "0.8", features = ["bytes-1"] }
 rustc-demangle = "0.1"
 rocksdb = "0.24.0"
 rustc_apfloat = "0.2.3"

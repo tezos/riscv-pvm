@@ -13,6 +13,9 @@ unstable-test-utils = [
   "dep:proptest",
   "dep:serde",
   "dep:serde_with",
+  "dep:anyhow",
+  "dep:serde_json",
+  "dep:rkyv",
   "octez-riscv-data/unstable-test-utils",
 ]
 
@@ -37,7 +40,19 @@ trait-set.workspace = true
 workspace = true
 optional = true
 
+[dependencies.anyhow]
+workspace = true
+optional = true
+
+[dependencies.serde_json]
+workspace = true
+optional = true
+
 [dependencies.proptest]
+workspace = true
+optional = true
+
+[dependencies.rkyv]
 workspace = true
 optional = true
 
