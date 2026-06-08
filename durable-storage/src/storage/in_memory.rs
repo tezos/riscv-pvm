@@ -6,6 +6,10 @@
 //! In-memory storage backend [`KeyValueStore`]-compatible with the Persistence layer
 
 use std::collections::HashMap;
+#[cfg(test_utils)]
+use std::io::Read;
+#[cfg(test_utils)]
+use std::io::Write;
 use std::sync::RwLock;
 
 use bytes::Bytes;
@@ -195,18 +199,50 @@ impl KeyValueStore for InMemoryKeyValueStore {
     }
 }
 
-/// Test-only snapshot repository for [`InMemoryRepo`]
+/// Test-only snapshot of an [`InMemoryKeyValueStore`]
 #[cfg(test_utils)]
-#[derive(Debug)]
+#[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct InMemorySnapshot {
     blobs: HashMap<Bytes, Bytes>,
-    values: HashMap<Bytes, BytesMut>,
+    values: HashMap<Bytes, Bytes>,
 }
+
+/// File name used within a commit directory by [`InMemoryKeyValueStore`].
+#[cfg(test_utils)]
+const STORE_FILE: &str = "in_memory_snapshot.bin";
 
 #[cfg(test_utils)]
 impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
-    fn commit_to_path(&self, _path: &std::path::Path) -> Result<(), OperationalError> {
-        unimplemented!("In-memory store cannot commit to disk")
+    fn commit_to_path(&self, path: &std::path::Path) -> Result<(), OperationalError> {
+        let blobs = self
+            .blobs
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .clone();
+        let values = self
+            .values
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .iter()
+            .map(|(k, v)| (k.clone(), Bytes::copy_from_slice(v)))
+            .collect();
+        let snapshot = InMemorySnapshot { blobs, values };
+
+        std::fs::create_dir_all(path).map_err(|error| OperationalError::DirCreationFailed {
+            path: path.to_path_buf(),
+            error,
+        })?;
+        let file = std::fs::File::create(path.join(STORE_FILE))
+            .map_err(|error| OperationalError::FileWriteFailed { error })?;
+        let writer = rkyv::ser::writer::IoWriter::new(std::io::BufWriter::new(file));
+
+        rkyv::api::high::to_bytes_in::<_, rkyv::rancor::Error>(&snapshot, writer)
+            .map_err(|error| OperationalError::FileWriteFailed {
+                error: std::io::Error::other(error),
+            })?
+            .into_inner()
+            .flush()
+            .map_err(|error| OperationalError::FileWriteFailed { error })
     }
 
     fn commit(
@@ -223,7 +259,9 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
             .values
             .read()
             .map_err(|_| OperationalError::LockPoisoned)?
-            .clone();
+            .iter()
+            .map(|(k, v)| (k.clone(), Bytes::copy_from_slice(v)))
+            .collect();
         repo.commits
             .write()
             .map_err(|_| OperationalError::LockPoisoned)?
@@ -232,10 +270,41 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
     }
 
     fn checkout_from_path(
-        _source_path: &std::path::Path,
+        source_path: &std::path::Path,
+        // The in-memory store keeps no working copy on disk
         _working_path: tempfile::TempDir,
     ) -> Result<Self, OperationalError> {
-        unimplemented!("In-memory store cannot check out from disk")
+        let store_file = source_path.join(STORE_FILE);
+        if !store_file.exists() {
+            return Err(OperationalError::CommitNotFound);
+        }
+
+        let file = std::fs::File::open(&store_file)
+            .map_err(|error| OperationalError::FileReadFailed { error })?;
+        let mut reader = std::io::BufReader::new(file);
+        let mut bytes = Vec::new();
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|error| OperationalError::FileReadFailed { error })?;
+
+        // Fully deserialise the snapshot
+        let snapshot =
+            rkyv::from_bytes::<InMemorySnapshot, rkyv::rancor::Error>(&bytes).map_err(|error| {
+                OperationalError::FileReadFailed {
+                    error: std::io::Error::other(error),
+                }
+            })?;
+
+        Ok(Self {
+            blobs: RwLock::new(snapshot.blobs),
+            values: RwLock::new(
+                snapshot
+                    .values
+                    .into_iter()
+                    .map(|(k, v)| (k, BytesMut::from(v.as_ref())))
+                    .collect(),
+            ),
+        })
     }
 
     fn checkout(
@@ -249,8 +318,67 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
         let snapshot = commits.get(id).ok_or(OperationalError::CommitNotFound)?;
         Ok(Self {
             blobs: RwLock::new(snapshot.blobs.clone()),
-            values: RwLock::new(snapshot.values.clone()),
+            values: RwLock::new(
+                snapshot
+                    .values
+                    .iter()
+                    .map(|(k, v)| (k.clone(), BytesMut::from(v.as_ref())))
+                    .collect(),
+            ),
         })
+    }
+}
+
+#[cfg(all(test, test_utils))]
+mod tests {
+    use octez_riscv_test_utils::TestableTmpdir;
+
+    use super::*;
+    use crate::storage::PersistentKeyValueStore;
+
+    // Test for the commit to and checkout from path implementations for
+    // `InMemoryKeyValueStore`, which are themselves only used in tests
+    #[test]
+    fn test_commit_to_path_checkout_roundtrip() {
+        let store = InMemoryKeyValueStore::default();
+
+        store
+            .blob_set(b"blob-key", b"blob-data")
+            .expect("Should be able to set a blob");
+        store
+            .set(b"/key/a", b"value-a")
+            .expect("Should be able to set a value");
+        store
+            .set(b"/key/b", b"value-b")
+            .expect("Should be able to set another value");
+        store
+            .write(b"/key/b", 5, b"b-amended")
+            .expect("Should be able to write at an offset");
+        store
+            .set(b"/key/c", b"value-c")
+            .expect("Should be able to set a third value");
+        store
+            .delete(b"/key/c")
+            .expect("Should be able to delete a value");
+
+        let commit_dir = TestableTmpdir::new();
+        store
+            .commit_to_path(commit_dir.path())
+            .expect("Should be able to commit to a path");
+
+        let working_path =
+            tempfile::TempDir::new().expect("Should be able to create a working dir");
+        let restored = InMemoryKeyValueStore::checkout_from_path(commit_dir.path(), working_path)
+            .expect("Should be able to checkout from a path");
+
+        assert_eq!(
+            *store.blobs.read().expect("Lock should not be poisoned"),
+            *restored.blobs.read().expect("Lock should not be poisoned"),
+        );
+        assert_eq!(
+            *store.values.read().expect("Lock should not be poisoned"),
+            *restored.values.read().expect("Lock should not be poisoned"),
+        );
     }
 }
 
