@@ -451,14 +451,15 @@ impl PersistentKeyValueStore for PersistenceLayer {
             return Err(OperationalError::CommitNotFound);
         };
 
-        // Open the previous commitment from the given source path
-        let read_only_database = rocksdb::DB::open_cf_descriptors(
+        // Open the previous commitment from the given source path in read-only mode
+        let read_only_database = rocksdb::DB::open_cf_descriptors_read_only(
             &rocksdb_checkpoint_options(),
             commit_path,
             [
                 ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
                 ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
             ],
+            false,
         )
         .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 

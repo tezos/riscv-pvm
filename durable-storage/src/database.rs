@@ -1052,6 +1052,9 @@ pub(crate) mod tests {
         commit_db
             .delete_cf(blob_cf, commit_id.as_hash().as_ref())
             .expect("Deleting the root blob should succeed");
+        commit_db
+            .flush_cf(blob_cf)
+            .expect("Flushing the blob column family should succeed");
         drop(commit_db);
 
         assert!(matches!(
