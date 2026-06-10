@@ -19,7 +19,9 @@ pub mod model;
 pub mod run_case;
 pub mod strategy;
 
+use std::collections::VecDeque;
 use std::fs;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
@@ -68,6 +70,8 @@ pub struct LongTestConfig {
     pub seed: Option<Hash>,
     /// Time budget. The loop stops cleanly once exceeded.
     pub time_budget: Option<Duration>,
+    /// Number of most recent epoch snapshots to keep. `None` keeps everything.
+    pub keep_epochs: Option<NonZeroUsize>,
 }
 
 /// Metadata persisted alongside a failure which enables replaying it.
@@ -97,6 +101,7 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
     let max_epochs = config.epochs;
     let ops_per_epoch = config.ops_per_epoch;
     let cases_per_epoch = config.cases_per_epoch;
+    let keep_epochs = config.keep_epochs;
     let out_dir = tempfile::Builder::new()
         .prefix("database_long_test-")
         .tempdir()?
@@ -108,6 +113,9 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
     );
     if let Some(epochs) = max_epochs {
         rerun.push_str(&format!(" --epochs {epochs}"));
+    }
+    if let Some(keep_epochs) = keep_epochs {
+        rerun.push_str(&format!(" --keep-epochs {keep_epochs}"));
     }
     if let Some(budget) = config.time_budget {
         rerun.push_str(&format!(" --max-minutes {}", budget.as_secs() / 60));
@@ -133,6 +141,10 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
 
     let mut base = initial_base(handle, &in_memory_repo, &persistent_repo);
     let mut epoch = 0u64;
+
+    // Base commits of the most recent epochs, oldest first; the newest entry is
+    // the current base.
+    let mut recent_commits = VecDeque::from([base.commit]);
 
     let start = Instant::now();
     loop {
@@ -163,6 +175,7 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
             &base,
             &advance_ops,
         );
+        recent_commits.push_back(base.commit);
 
         // Run the property test on this base.
         let strategy = long_test_ops_strategy(&base.model.pools(), ops_per_epoch);
@@ -180,7 +193,7 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
                     let snapshot_size = dir_size(&snapshot_dir)
                         .context("measuring the size of the latest snapshot")?;
                     eprintln!(
-                        "epoch {epoch} ok ({} keys, latest snapshot: {:.2} MiB)",
+                        "epoch {epoch} ok (db contains {} entries, latest snapshot: {:.2} MiB)",
                         base.model.data.len(),
                         snapshot_size as f64 / (1024.0 * 1024.0),
                     );
@@ -190,6 +203,28 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
                     "epoch {epoch} ok (db contains {} entries)",
                     base.model.data.len()
                 );
+
+                // Clear snapshots older than the retention window. Only the
+                // current base is needed for the next epoch and for failure replay.
+                if let Some(keep_epochs) = keep_epochs {
+                    while recent_commits.len() > keep_epochs.get() {
+                        let old = recent_commits.pop_front().expect("non-empty");
+                        // Content-addressed commits can repeat; keep the
+                        // snapshot if a retained epoch still references it.
+                        if recent_commits.contains(&old) {
+                            continue;
+                        }
+                        let old_dir = persistent_repo.database_commit_dir(&old);
+                        if old_dir.exists() {
+                            fs::remove_dir_all(&old_dir).with_context(|| {
+                                format!("removing disk snapshot {}", old_dir.display())
+                            })?;
+                        }
+                        in_memory_repo
+                            .remove_commit(&old)
+                            .context("removing in-memory snapshot {old}")?;
+                    }
+                }
             }
             Err(TestError::Fail(reason, ops)) => {
                 let meta = FailureMeta {
@@ -438,6 +473,7 @@ mod tests {
             cases_per_epoch: 32,
             seed: None,
             time_budget: None,
+            keep_epochs: Some(NonZeroUsize::new(2).expect("non-zero")),
         })
         .expect("the short long test run should succeed");
     }

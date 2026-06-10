@@ -22,6 +22,6 @@ reset-regressions:
 
 long-test:
 	@cargo run --release --features rocksdb,unstable-test-utils \
-		--bin database_long_test -- test --max-minutes 10
+		--bin database_long_test -- test --max-minutes 10 --keep-epochs 1
 
 .PHONY: all check test gen-regression-inputs long-test
