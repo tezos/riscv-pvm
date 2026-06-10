@@ -143,6 +143,27 @@ impl<KV> MerkleLayer<KV, Prove<'static>> {
             },
         }
     }
+
+    /// Clone of the current working tree.
+    pub(crate) fn clone_working_tree(&self) -> Tree<ProveNodeId> {
+        self.inner.working_tree.clone()
+    }
+
+    /// Replace the working tree with `new`, returning the outgoing tree.
+    ///
+    /// The layer's initial tree and access tracking are deliberately kept: the proof must still
+    /// encode this layer's state at the start of the step, with everything read before the
+    /// replacement included. The outgoing tree's resolved nodes are stashed as unlinked so the
+    /// proof fold can still find their read flags.
+    ///
+    /// TODO RV-985: For multi-step proofs, the working tree will no longer be in-sync with the
+    /// the associated initial tree after this operation, which will break the fold method.
+    pub(crate) fn replace_working_tree(&mut self, new: Tree<ProveNodeId>) -> Tree<ProveNodeId> {
+        self.inner
+            .resolver
+            .track_unlinked_tree(&self.inner.working_tree);
+        std::mem::replace(&mut self.inner.working_tree, new)
+    }
 }
 
 impl<KV> MerkleLayer<KV, Verify> {

@@ -35,6 +35,7 @@ use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use tokio::runtime::Runtime;
 
+use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::database::Database;
 use crate::errors::Error;
@@ -283,8 +284,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
             return Ok(());
         }
 
-        let db_copy = M::try_clone_database(&self.inner, &self.databases[src_index])?;
-        self.databases[dst_index] = db_copy;
+        M::copy_database(&self.inner, &mut self.databases, src_index, dst_index)?;
 
         Ok(())
     }
@@ -304,9 +304,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
             return Ok(());
         }
 
-        let empty = M::try_new_database(&self.inner)?;
-        let db_to_move = std::mem::replace(&mut self.databases[src_index], empty);
-        self.databases[dst_index] = db_to_move;
+        M::move_database(&self.inner, &mut self.databases, src_index, dst_index)?;
 
         Ok(())
     }
@@ -318,7 +316,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
         M: RegistryMode + VectorMode,
     {
         self.validate_index(index)?;
-        self.databases[index] = M::try_new_database(&self.inner)?;
+        M::clear_database(&self.inner, &mut self.databases, index)?;
         Ok(())
     }
 }
@@ -378,17 +376,35 @@ impl<KV: KeyValueStore> Modal for RegistryTemplate<KV> {
     private_interfaces,
     reason = "This method should not be used outside of this module"
 )]
-pub trait RegistryMode: Mode {
+pub trait RegistryMode: VectorMode {
     /// Create a new database.
     fn try_new_database<KV: BackgroundKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
     ) -> Result<Database<KV, Self>, OperationalError>;
 
-    /// Clone a database
-    fn try_clone_database<KV: BackgroundKeyValueStore>(
+    /// Copy the database at `src_index` over the one at `dst_index`.
+    fn copy_database<KV: BackgroundKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
-        database: &Database<KV, Self>,
-    ) -> Result<Database<KV, Self>, OperationalError>;
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError>;
+
+    /// Move the database at `src_index` over the one at `dst_index`, leaving an empty database
+    /// at `src_index`.
+    fn move_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError>;
+
+    /// Clear the database at `index`.
+    fn clear_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        index: usize,
+    ) -> Result<(), OperationalError>;
 }
 
 #[expect(
@@ -402,11 +418,36 @@ impl RegistryMode for Normal {
         Database::try_new(inner.runtime.handle(), &inner.repo)
     }
 
-    fn try_clone_database<KV: BackgroundKeyValueStore>(
+    fn copy_database<KV: BackgroundKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
-        database: &Database<KV, Self>,
-    ) -> Result<Database<KV, Self>, OperationalError> {
-        database.try_clone_with(inner.runtime.handle(), &inner.repo)
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError> {
+        let db_copy = databases[src_index].try_clone_with(inner.runtime.handle(), &inner.repo)?;
+        databases[dst_index] = db_copy;
+        Ok(())
+    }
+
+    fn move_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError> {
+        let empty = Self::try_new_database(inner)?;
+        let db_to_move = std::mem::replace(&mut databases[src_index], empty);
+        databases[dst_index] = db_to_move;
+        Ok(())
+    }
+
+    fn clear_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        index: usize,
+    ) -> Result<(), OperationalError> {
+        databases[index] = Self::try_new_database(inner)?;
+        Ok(())
     }
 }
 
@@ -422,12 +463,44 @@ impl RegistryMode for Prove<'static> {
         Ok(<Database<KV, Prove<'static>>>::empty(persistence))
     }
 
-    fn try_clone_database<KV: BackgroundKeyValueStore>(
-        inner: &Self::Select<RegistryTemplate<KV>>,
-        database: &Database<KV, Self>,
-    ) -> Result<Database<KV, Self>, OperationalError> {
-        let persistence = Arc::new(KV::new(&inner.repo)?);
-        Ok(database.clone_with(persistence))
+    // Copy, move and clear replace only the destination's *working* tree: the destination
+    // database keeps its initial tree and access tracking, so the proof still encodes the
+    // destination's true state at the start of the step (blinded if it was not read).
+    // See TZX-170.
+    //
+    // TODO TZX-173: reads of the destination *after* a copy/move hit nodes that originate from
+    // the source slot's initial tree, but are recorded against the destination slot — the
+    // source's fold blinds them, so such proofs under-include data and fail to verify.
+
+    fn copy_database<KV: BackgroundKeyValueStore>(
+        _inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError> {
+        let working_tree = databases[src_index].clone_working_tree();
+        databases[dst_index].replace_working_tree(working_tree);
+        Ok(())
+    }
+
+    fn move_database<KV: BackgroundKeyValueStore>(
+        _inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError> {
+        let working_tree = databases[src_index].replace_working_tree(Tree::default());
+        databases[dst_index].replace_working_tree(working_tree);
+        Ok(())
+    }
+
+    fn clear_database<KV: BackgroundKeyValueStore>(
+        _inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        index: usize,
+    ) -> Result<(), OperationalError> {
+        databases[index].replace_working_tree(Tree::default());
+        Ok(())
     }
 }
 
@@ -442,11 +515,36 @@ impl RegistryMode for Verify {
         Ok(<Database<KV, Verify>>::empty())
     }
 
-    fn try_clone_database<KV: BackgroundKeyValueStore>(
+    fn copy_database<KV: BackgroundKeyValueStore>(
         _inner: &Self::Select<RegistryTemplate<KV>>,
-        database: &Database<KV, Self>,
-    ) -> Result<Database<KV, Self>, OperationalError> {
-        Ok(database.clone())
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError> {
+        let db_copy = databases[src_index].clone();
+        databases[dst_index] = db_copy;
+        Ok(())
+    }
+
+    fn move_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        src_index: usize,
+        dst_index: usize,
+    ) -> Result<(), OperationalError> {
+        let empty = Self::try_new_database(inner)?;
+        let db_to_move = std::mem::replace(&mut databases[src_index], empty);
+        databases[dst_index] = db_to_move;
+        Ok(())
+    }
+
+    fn clear_database<KV: BackgroundKeyValueStore>(
+        inner: &Self::Select<RegistryTemplate<KV>>,
+        databases: &mut Vector<Database<KV, Self>, Self>,
+        index: usize,
+    ) -> Result<(), OperationalError> {
+        databases[index] = Self::try_new_database(inner)?;
+        Ok(())
     }
 }
 
@@ -1805,12 +1903,7 @@ pub(super) mod tests {
         );
     });
 
-    // Currently broken: prove-mode `copy_database` installs a clone whose initial tree and
-    // access tracking come from the *source* slot, so the produced proof encodes the wrong
-    // initial state for the destination slot.
-    // TODO (TZX-170): fix copy proof semantics
     kv_test!(
-        #[ignore = "prove-mode copy_database breaks the proof's initial-state encoding"]
         test_proof_copy_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
@@ -1859,13 +1952,7 @@ pub(super) mod tests {
         );
     });
 
-    // Currently broken: prove-mode `move_database` replaces the source slot with an empty
-    // database whose initial tree is empty, and moves the source database — along with its
-    // initial tree — to the destination slot, so the produced proof encodes the wrong
-    // initial state for both slots.
-    // TODO (TZX-170): fix move proof semantics
     kv_test!(
-        #[ignore = "prove-mode move_database breaks the proof's initial-state encoding"]
         test_proof_move_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
@@ -1911,6 +1998,55 @@ pub(super) mod tests {
             registry_root_hash_small(&verify_registry),
             proof.final_state_hash(),
             "Replaying the move in verify mode must reach the proof's final state hash"
+        );
+    });
+
+    kv_test!(
+        test_proof_clear_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
+
+        let initial_root = Hash::from_foldable(&registry);
+
+        let mut prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+        prove_registry
+            .clear_database(1)
+            .expect("Clearing should succeed");
+        let final_root = Hash::from_foldable(&prove_registry);
+
+        // Reference: the same step in Normal mode.
+        registry
+            .clear_database(1)
+            .expect("Clearing should succeed");
+        assert_eq!(
+            Hash::from_foldable(&registry),
+            final_root,
+            "Prove-mode clear must produce the Normal-mode final hash"
+        );
+
+        let proof = prove_registry.produce_proof();
+        assert_eq!(
+            proof.initial_state_hash(),
+            initial_root,
+            "The proof must encode the registry's true initial state"
+        );
+        assert_eq!(proof.final_state_hash(), final_root);
+
+        // Replaying the clear in verify mode must reach the final state hash.
+        let (_stream_registry, mut verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
+        assert_eq!(registry_root_hash_small(&verify_registry), initial_root);
+        verify_registry
+            .clear_database(1)
+            .expect("Clearing should succeed");
+        assert_eq!(
+            registry_root_hash_small(&verify_registry),
+            proof.final_state_hash(),
+            "Replaying the clear in verify mode must reach the proof's final state hash"
         );
     });
 
