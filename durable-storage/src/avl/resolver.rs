@@ -855,6 +855,46 @@ impl<R> ProveResolver<R> {
         self.deleted_nodes.deref().borrow()
     }
 
+    /// Stash the prove-mode projections of every initial-origin node in `tree` into the
+    /// deleted-nodes map.
+    ///
+    /// Replacing an entire working tree (database copy/move/clear) unlinks every node in it at
+    /// once. The `MerkleLayer`-level fold looks up the read flags of an accessed initial node
+    /// either in the deleted-nodes map or in the current working tree, so the outgoing tree's
+    /// resolved nodes must be stashed just like individually deleted ones.
+    ///
+    /// Unresolved nodes were never accessed — the fold blinds them without needing their flags —
+    /// and nothing beneath an unresolved node can have been materialised, so such subtrees are
+    /// skipped wholesale. Nodes created during the step carry no lazy identifier and are not part
+    /// of the initial tree, but their subtrees may be, so only the recursion continues for them.
+    pub(crate) fn track_unlinked_tree(&self, tree: &Tree<ProveNodeId>) {
+        let mut stack = vec![tree];
+
+        while let Some(tree) = stack.pop() {
+            let Some(id) = tree.root() else {
+                continue;
+            };
+            let Some(node) = id.cache.get() else {
+                continue;
+            };
+
+            if let Some(lazy_id) = &id.lazy_id {
+                let fields = DeletedNodeFields {
+                    meta: node.meta().clone(),
+                    data: node.data().clone(),
+                };
+                self.deleted_nodes
+                    .borrow_mut()
+                    .insert(Hash::from_foldable(lazy_id), fields);
+            }
+
+            [node.left_id(), node.right_id()]
+                .iter()
+                .filter_map(|child| child.inner())
+                .for_each(|subtree| stack.push(subtree));
+        }
+    }
+
     /// Track node access and resolve the underlying lazy node in one step.
     fn resolve_and_track_node<'a>(
         &self,

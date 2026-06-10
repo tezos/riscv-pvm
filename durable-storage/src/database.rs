@@ -37,6 +37,8 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
+use crate::avl::resolver::ProveNodeId;
+use crate::avl::tree::Tree;
 use crate::commit::CommitId;
 use crate::database::value_ref::AsRefValueRef;
 use crate::database::value_ref::ValueRef;
@@ -428,16 +430,16 @@ impl<KV> Database<KV, Prove<'static>> {
         }
     }
 
-    /// Clone the database, attaching the new clone to a fresh persistence layer.
-    pub(crate) fn clone_with(&self, persistence: Arc<KV>) -> Self
-    where
-        KV: KeyValueStore,
-    {
-        Database {
-            inner: ProveImpl {
-                merkle: self.inner.merkle.clone_with(persistence),
-            },
-        }
+    /// Clone of the current working tree.
+    pub(crate) fn clone_working_tree(&self) -> Tree<ProveNodeId> {
+        self.inner.merkle.clone_working_tree()
+    }
+
+    /// Replace the working tree with `new`, returning the outgoing tree.
+    ///
+    /// See [`MerkleLayer::replace_working_tree`].
+    pub(crate) fn replace_working_tree(&mut self, new: Tree<ProveNodeId>) -> Tree<ProveNodeId> {
+        self.inner.merkle.replace_working_tree(new)
     }
 }
 
