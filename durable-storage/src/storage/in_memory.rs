@@ -32,6 +32,18 @@ pub struct InMemoryRepo {
     registry_commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, Vec<u8>>>>,
 }
 
+#[cfg(test_utils)]
+impl InMemoryRepo {
+    /// Remove the snapshot stored for `id` if it exists
+    pub fn remove_commit(&self, id: &crate::commit::CommitId) -> Result<(), OperationalError> {
+        self.commits
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .remove(id);
+        Ok(())
+    }
+}
+
 /// In-memory key-value store
 #[derive(Debug, Default)]
 pub struct InMemoryKeyValueStore {

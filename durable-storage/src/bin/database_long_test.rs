@@ -9,6 +9,7 @@
 //!
 //! [`Database`]: octez_riscv_durable_storage::database::Database
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -51,6 +52,11 @@ enum Commands {
         /// Maximum number of epochs to run (default: run until the time budget).
         #[arg(long)]
         epochs: Option<u64>,
+
+        /// Number of most recent epoch snapshots to keep; older snapshots and
+        /// commits are cleared after each successful epoch (default: keep everything).
+        #[arg(long)]
+        keep_epochs: Option<NonZeroUsize>,
     },
     /// Replay the failing epoch described by `<DIR>/meta.json`.
     Replay {
@@ -67,6 +73,7 @@ fn main() -> Result<()> {
             seed,
             max_minutes,
             epochs,
+            keep_epochs,
         } => {
             let seed = match seed {
                 Some(seed) => {
@@ -86,6 +93,7 @@ fn main() -> Result<()> {
                 seed,
                 time_budget: max_minutes.map(|m| Duration::from_secs(m * 60)),
                 epochs,
+                keep_epochs,
             };
 
             run_long_test(config)
