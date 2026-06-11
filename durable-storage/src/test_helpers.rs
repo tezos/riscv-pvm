@@ -14,14 +14,14 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
 use octez_riscv_data::mode::Normal;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 use octez_riscv_data::mode::ProvableExt;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 use octez_riscv_data::mode::Verify;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 use octez_riscv_data::serialisation::serialise;
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -30,17 +30,17 @@ use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
 use crate::database::Database;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 use crate::database::DatabaseMode;
 #[cfg(test)]
 use crate::database::Trace;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 use crate::database::TracedDatabase;
 use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::registry::Registry;
@@ -175,12 +175,12 @@ pub fn make_registry_operations(
         .collect()
 }
 
-fn key_strategy() -> impl Strategy<Value = Key> {
+pub(crate) fn key_strategy() -> impl Strategy<Value = Key> {
     proptest::collection::vec(any::<u8>(), 1usize..=KEY_MAX_SIZE)
         .prop_map(|bytes| Key::new(&bytes).expect("The size is less than KEY_MAX_SIZE"))
 }
 
-fn value_strategy() -> impl Strategy<Value = Bytes> {
+pub(crate) fn value_strategy() -> impl Strategy<Value = Bytes> {
     // Bias towards lengths that fit within `MAX_FILE_CHUNK_SIZE` so most
     // sampled operations exercise the success path, while also producing
     // some oversized values.
@@ -469,7 +469,7 @@ where
     }
 }
 
-fn update_value(value: &mut Bytes, offset: usize, bytes: Bytes) {
+pub(crate) fn update_value(value: &mut Bytes, offset: usize, bytes: Bytes) {
     let mut new_value: Vec<u8> = value.clone().into();
     let overwrite_len = std::cmp::min(bytes.len(), new_value.len().saturating_sub(offset));
     if overwrite_len > 0 {
@@ -484,7 +484,7 @@ fn update_value(value: &mut Bytes, offset: usize, bytes: Bytes) {
 /// Abstracts the interface of [`Database`] so [`apply_database_operation`]
 /// can be used in both [`Registry`] (via [`Database`] references) and
 /// the `Database` tests which use [`TracedDatabase`] to capture a trace.
-trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>: Sized {
+pub(crate) trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>: Sized {
     fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error>;
 
     fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error>;
@@ -567,7 +567,7 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Nor
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<KV, Normal> {
     fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
         TracedDatabase::set(self, key, data)
@@ -946,7 +946,7 @@ where
 /// Apply `operation` to a traced `database`, recording its [`TraceEntry`].
 ///
 /// Returns `true` if the operation was a provable step.
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 fn apply_step<KV: BackgroundKeyValueStore, M: DatabaseMode>(
     database: &mut TracedDatabase<KV, M>,
     operation: &DatabaseOperation,
