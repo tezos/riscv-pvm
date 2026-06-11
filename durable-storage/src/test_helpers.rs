@@ -339,11 +339,93 @@ pub fn registry_operations_strategy(
     })
 }
 
+/// A reference model of the key-value store of a [`Database`]
+pub(crate) trait DatabaseReferenceModel {
+    /// The modelled key-value store
+    fn data(&self) -> &HashMap<Key, Bytes>;
+
+    /// Update the model to reflect a successfully applied `operation`
+    fn apply(&mut self, operation: &DatabaseOperation);
+
+    /// The value resulting from a successful `Write`, or `None` if it should fail
+    fn write_outcome(&self, key: &Key, offset: usize, data: &Bytes) -> Option<Bytes> {
+        match self.data().get(key) {
+            Some(existing) => {
+                if offset > existing.len()
+                    || offset.checked_add(data.len()).is_none()
+                    || data.len() > MAX_FILE_CHUNK_SIZE
+                {
+                    None
+                } else {
+                    let mut new_value = existing.clone();
+                    update_value(&mut new_value, offset, data.clone());
+                    Some(new_value)
+                }
+            }
+            None => {
+                if offset > 0 || data.len() > MAX_FILE_CHUNK_SIZE {
+                    None
+                } else {
+                    Some(data.clone())
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct DatabaseModel {
     data: HashMap<Key, Bytes>,
     last: Option<(Hash, HashMap<Key, Bytes>)>,
     ambiguous_hash: bool,
+}
+
+impl DatabaseModel {
+    /// Record an observed root hash, asserting it is consistent with the
+    /// previously recorded one: equal hashes must correspond to equal contents
+    /// and vice versa, unless a deletion made the hash ambiguous.
+    fn observe_hash(&mut self, new_digest: Hash) {
+        if let (Some((old_digest, old_map)), false) = (&self.last, &self.ambiguous_hash) {
+            assert_eq!(new_digest == *old_digest, self.data == *old_map);
+        }
+        self.last = Some((new_digest, self.data.clone()));
+    }
+}
+
+impl DatabaseReferenceModel for DatabaseModel {
+    fn data(&self) -> &HashMap<Key, Bytes> {
+        &self.data
+    }
+
+    fn apply(&mut self, operation: &DatabaseOperation) {
+        match operation {
+            DatabaseOperation::Set(key, data) => {
+                if data.len() <= MAX_FILE_CHUNK_SIZE {
+                    self.data.insert(key.clone(), data.clone());
+                }
+            }
+            DatabaseOperation::Write(key, offset, data) => {
+                if let Some(new_value) = self.write_outcome(key, *offset, data) {
+                    self.data.insert(key.clone(), new_value);
+                }
+            }
+            DatabaseOperation::Delete(key) => {
+                // The hash of the `Database` can differ even if the key-value
+                // pairs stored are the same, because deletion and reinsertion
+                // can cause the shape of the AVL tree to change.
+                if self.data.remove(key).is_some() {
+                    self.ambiguous_hash = true;
+                }
+            }
+            DatabaseOperation::Read(..)
+            | DatabaseOperation::Exists(..)
+            | DatabaseOperation::ValueLength(..)
+            | DatabaseOperation::Hash
+            | DatabaseOperation::Commit
+            | DatabaseOperation::Checkout
+            | DatabaseOperation::CommitCheckoutRoundtrip => {}
+        }
+    }
 }
 
 fn grow_registry<KV>(registry: &mut Registry<KV, Normal>, registry_model: &mut Vec<DatabaseModel>)
@@ -533,20 +615,25 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<K
     }
 }
 
-fn apply_database_operation<KV, D>(
+/// Apply a single operation to `database` and assert its observable
+/// result matches that of applying it to `model`. The model itself is
+/// not mutated. Callers need to advance it separately via
+/// [`DatabaseReferenceModel::apply`]. This is in order to allow callers to
+/// check and apply the same operation to multiple databases at the same time.
+/// Commits and checkouts are not handled.
+pub(crate) fn check_and_apply_value_operation<KV, D, M>(
     database: &mut D,
-    model: &mut DatabaseModel,
-    op: DatabaseOperation,
-    handle: &Handle,
-    repo: &KV::Repo,
-    checkout_candidates: &mut HashMap<Hash, bool>,
-) where
+    model: &M,
+    op: &DatabaseOperation,
+) -> Option<Hash>
+where
     KV: BackgroundPersistentKeyValueStore,
     D: DatabaseOps<KV>,
+    M: DatabaseReferenceModel,
 {
     match op {
         DatabaseOperation::Set(key, bytes) => {
-            let data = Bytes::copy_from_slice(&bytes);
+            let data = Bytes::copy_from_slice(bytes);
             let result = database.set(key.clone(), data);
 
             if bytes.len() <= MAX_FILE_CHUNK_SIZE {
@@ -555,32 +642,15 @@ fn apply_database_operation<KV, D>(
                     "Set should have succeeded but failed: {:?}",
                     result.err()
                 );
-
-                model.data.insert(key, bytes.clone());
             } else {
                 assert!(result.is_err(), "Set should have failed but succeeded");
             }
         }
         DatabaseOperation::Write(key, offset, bytes) => {
-            let data = Bytes::copy_from_slice(&bytes);
-            let result = database.write(key.clone(), offset, data);
+            let data = Bytes::copy_from_slice(bytes);
+            let result = database.write(key.clone(), *offset, data);
 
-            let should_succeed = if let Some(map_value) = model.data.get_mut(&key) {
-                if offset > map_value.len()
-                    || offset.checked_add(bytes.len()).is_none()
-                    || bytes.len() > MAX_FILE_CHUNK_SIZE
-                {
-                    false
-                } else {
-                    update_value(map_value, offset, bytes);
-                    true
-                }
-            } else if offset > 0 || bytes.len() > MAX_FILE_CHUNK_SIZE {
-                false
-            } else {
-                model.data.insert(key, bytes);
-                true
-            };
+            let should_succeed = model.write_outcome(key, *offset, bytes).is_some();
 
             if should_succeed {
                 assert!(
@@ -593,28 +663,28 @@ fn apply_database_operation<KV, D>(
             }
         }
         DatabaseOperation::Read(key, offset, len) => {
-            let mut database_value = vec![0; len];
+            let mut database_value = vec![0; *len];
 
             let mut cursor = 0;
-            let mut result = database.read(&key, offset + cursor, &mut database_value[cursor..]);
+            let mut result = database.read(key, offset + cursor, &mut database_value[cursor..]);
 
             while let Ok(read) = result {
                 if read == 0 {
                     break;
                 }
                 cursor += read;
-                result = database.read(&key, offset + cursor, &mut database_value[cursor..])
+                result = database.read(key, offset + cursor, &mut database_value[cursor..])
             }
 
-            if let Some(map_value) = model.data.get(&key) {
-                if offset > map_value.len() || len > MAX_FILE_CHUNK_SIZE {
+            if let Some(map_value) = model.data().get(key) {
+                if *offset > map_value.len() || *len > MAX_FILE_CHUNK_SIZE {
                     assert!(result.is_err());
                 } else {
-                    let expected_len = std::cmp::min(len, map_value.len() - offset);
+                    let expected_len = std::cmp::min(*len, map_value.len() - offset);
                     assert!(cursor >= expected_len);
                     assert_eq!(
                         &database_value[..expected_len],
-                        &map_value[offset..offset + expected_len]
+                        &map_value[*offset..*offset + expected_len]
                     );
                 }
             } else {
@@ -622,24 +692,18 @@ fn apply_database_operation<KV, D>(
             }
         }
         DatabaseOperation::Delete(key) => {
-            // The hash of the `Database` can differ even if the key-value pairs stored are
-            // the same, because deletion and reinsertion can cause the shape of the AVL
-            // tree to change.
-            let deleted = model.data.remove(&key).is_some();
-            if deleted {
-                model.ambiguous_hash = true;
-            }
-
-            database.delete(key).expect("Deleting should succeed");
+            database
+                .delete(key.clone())
+                .expect("Deleting should succeed");
         }
         DatabaseOperation::Exists(key) => {
-            let in_database = database.exists(&key).expect("Writing should succeed");
-            let in_map = model.data.contains_key(&key);
+            let in_database = database.exists(key).expect("Writing should succeed");
+            let in_map = model.data().contains_key(key);
             assert_eq!(in_database, in_map);
         }
         DatabaseOperation::ValueLength(key) => {
-            let database_length = database.value_length(&key);
-            let map_value = model.data.get(&key);
+            let database_length = database.value_length(key);
+            let map_value = model.data().get(key);
 
             match (database_length, map_value) {
                 (Ok(database_length), Some(map_value)) => {
@@ -650,14 +714,34 @@ fn apply_database_operation<KV, D>(
             }
         }
         DatabaseOperation::Hash => {
-            let new_digest = database.hash().expect("Hash should succeed");
+            return Some(database.hash().expect("Hash should succeed"));
+        }
+        DatabaseOperation::Commit
+        | DatabaseOperation::Checkout
+        | DatabaseOperation::CommitCheckoutRoundtrip => {
+            unimplemented!("commit and checkout operations are not handled")
+        }
+    }
 
-            if let (Some((old_digest, old_map)), false) = (&model.last, &model.ambiguous_hash) {
-                assert_eq!(new_digest == *old_digest, model.data == *old_map);
-            }
+    None
+}
 
-            model.last = Some((new_digest, model.data.clone()));
-
+fn apply_database_operation<KV, D>(
+    database: &mut D,
+    model: &mut DatabaseModel,
+    op: &DatabaseOperation,
+    handle: &Handle,
+    repo: &KV::Repo,
+    checkout_candidates: &mut HashMap<Hash, bool>,
+) where
+    KV: BackgroundPersistentKeyValueStore,
+    D: DatabaseOps<KV>,
+{
+    match op {
+        DatabaseOperation::Hash => {
+            let new_digest = check_and_apply_value_operation(database, model, op)
+                .expect("Hash operations produce a digest");
+            model.observe_hash(new_digest);
             checkout_candidates.entry(new_digest).or_insert(false);
         }
         DatabaseOperation::Commit => {
@@ -688,6 +772,10 @@ fn apply_database_operation<KV, D>(
             // does not see an unexpected success against this hash.
             checkout_candidates.insert(*commit_id.as_hash(), true);
         }
+        op => {
+            check_and_apply_value_operation(database, model, op);
+            model.apply(op);
+        }
     }
 }
 
@@ -715,17 +803,7 @@ where
                     .hash()
                     .expect("Hash should succeed");
 
-                if let (Some((old_digest, old_map)), false) = (
-                    &registry_model[index].last,
-                    &registry_model[index].ambiguous_hash,
-                ) {
-                    assert_eq!(
-                        new_digest == *old_digest,
-                        registry_model[index].data == *old_map
-                    );
-                }
-
-                registry_model[index].last = Some((new_digest, registry_model[index].data.clone()));
+                registry_model[index].observe_hash(new_digest);
 
                 checkout_candidates
                     .entry(Hash::from_foldable(&registry))
@@ -762,7 +840,7 @@ where
                         .database_mut(index)
                         .expect("The index is in bounds"),
                     &mut registry_model[index],
-                    op,
+                    &op,
                     &handle,
                     &checkout_repo,
                     &mut checkout_candidates,
@@ -855,7 +933,7 @@ where
         apply_database_operation::<KV, _>(
             &mut database,
             &mut model,
-            op,
+            &op,
             handle,
             repo,
             &mut checkout_candidates,
@@ -912,12 +990,13 @@ fn apply_step<KV: BackgroundKeyValueStore, M: DatabaseMode>(
     Ok(true)
 }
 
-/// Generate and verify a proof for a single [`DatabaseOperation`] applied to `database`
-#[cfg(test)]
-fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
+/// Generate and verify a proof for a single [`DatabaseOperation`] applied to `database`.
+/// Returns the serialised proof or `None` if `operation` is not a provable step.
+#[cfg(any(test, rocksdb_test_utils))]
+pub(crate) fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
     database: &TracedDatabase<KV, Normal>,
     operation: &DatabaseOperation,
-) {
+) -> Option<Vec<u8>> {
     use octez_riscv_data::hash::PartialHash;
 
     let pre_root_hash = Hash::from_foldable(database);
@@ -929,7 +1008,7 @@ fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
 
     // Nothing to record or compare if the step was not provable
     if !apply_step(&mut prover, operation).expect("applying a step should succeed") {
-        return;
+        return None;
     }
 
     let post_root_hash = Hash::from_foldable(&prover);
@@ -948,14 +1027,14 @@ fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
     assert_eq!(
         PartialHash::from_foldable(None, &verify_db)
             .to_hash()
-            .unwrap(),
+            .expect("hashing the Verify database should succeed"),
         pre_root_hash,
         "the proof must reconstruct the pre-operation root hash"
     );
     apply_step(&mut verify_db, operation).expect("applying a step should succeed");
     let verify_post_root_hash = PartialHash::from_foldable(None, &verify_db)
         .to_hash()
-        .unwrap();
+        .expect("hashing the Verify database should succeed");
     let verify_step_trace = verify_db.into_trace();
 
     assert_eq!(
@@ -967,7 +1046,7 @@ fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
         "Prove- and Verify-mode root hashes should match"
     );
 
-    database.record_proof(operation.clone(), proof_bytes)
+    Some(proof_bytes)
 }
 
 /// Like [`run_database_operations`], but additionally generates and verifies a proof for
@@ -995,13 +1074,16 @@ where
     operations.push(DatabaseOperation::Hash);
 
     for operation in operations {
-        // Provable operations are proven over their pre-operation state, so prove before applying.
-        prove_and_verify_operation::<KV>(&database, &operation);
+        // Provable operations are proven over their pre-operation state, so prove before applying,
+        // recording the serialised proof in the database's trace.
+        if let Some(proof_bytes) = prove_and_verify_operation(&database, &operation) {
+            database.record_proof(operation.clone(), proof_bytes)
+        }
 
         apply_database_operation::<KV, _>(
             &mut database,
             &mut model,
-            operation,
+            &operation,
             handle,
             repo,
             &mut checkout_candidates,
