@@ -2,11 +2,15 @@
 //
 // SPDX-License-Identifier: MIT
 
-#![cfg(test)]
+#![cfg(any(test, rocksdb_test_utils))]
 
-//! Test-only [`Database`] wrapper which can record execution traces
+//! [`Database`] wrapper which can record execution traces.
+//!
+//! Available to unit tests and, under the `unstable-test-utils` feature, to the
+//! long-running test binary (`src/bin/database_long_test.rs`).
 
 use std::cell::RefCell;
+#[cfg(test)]
 use std::collections::HashMap;
 
 use bytes::Bytes;
@@ -17,22 +21,28 @@ use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Prove;
+#[cfg(test)]
 use octez_riscv_data::mode::Verify;
 use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
 use crate::database::Database;
 use crate::database::DatabaseMode;
+#[cfg(test)]
 use crate::database::VerifyImpl;
 use crate::errors::Error;
+#[cfg(test)]
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
+#[cfg(test)]
 use crate::merkle_layer::new_verify_layer;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+#[cfg(test)]
 use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+#[cfg(test)]
 use crate::storage::TestKeyValueStoreSetup;
 use crate::test_helpers::DatabaseOperation;
 
@@ -102,6 +112,7 @@ pub(crate) struct TracedDatabase<KV, M: Mode = Normal> {
 
 impl<KV: BackgroundKeyValueStore> TracedDatabase<KV, Normal> {
     /// Equivalent to [`Database::try_new`] which also records a [`TraceEntry`].
+    #[cfg(test)]
     pub(crate) fn try_new(handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError> {
         Ok(TracedDatabase::from(Database::try_new(handle, repo)?))
     }
@@ -141,6 +152,7 @@ impl<KV: BackgroundKeyValueStore> TracedDatabase<KV, Normal> {
     }
 
     /// Record a [`TraceEntry::Proof`] for the proof of `step`.
+    #[cfg(test)]
     pub(crate) fn record_proof(&self, step: DatabaseOperation, proof: Vec<u8>) {
         self.trace
             .borrow_mut()
@@ -148,6 +160,7 @@ impl<KV: BackgroundKeyValueStore> TracedDatabase<KV, Normal> {
     }
 }
 
+#[cfg(test)]
 impl<KV> TracedDatabase<KV, Verify>
 where
     KV: KeyValueStore + TestKeyValueStoreSetup,
@@ -270,6 +283,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> TracedDatabase<KV, M> {
     }
 
     /// Insert entries into the database and return the inserted key pairs
+    #[cfg(test)]
     pub(crate) fn insert_entries(
         &mut self,
         entries: Vec<(Vec<u8>, Vec<u8>)>,
@@ -286,11 +300,13 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> TracedDatabase<KV, M> {
     }
 
     /// Assert that a database contains the expected value for a given key.
+    #[cfg(test)]
     pub(crate) fn assert_database_value(&self, key: &Key, expected: &[u8]) {
         self.inner.assert_database_value(key, expected);
     }
 
     /// Assert that a database does not contain the given key.
+    #[cfg(test)]
     pub(crate) fn assert_traced_database_missing(&self, key: &Key) {
         assert!(matches!(
             self.read_bytes(key, 0, 0),

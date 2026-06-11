@@ -33,6 +33,10 @@ pub mod commit;
 pub mod database;
 pub mod errors;
 pub mod key;
+// The long-running test exercises the persistence backend directly, so it is
+// only available when `rocksdb` is enabled.
+#[cfg(rocksdb_test_utils)]
+pub mod long_test;
 mod merkle_layer;
 mod merkle_worker;
 pub mod persistence_layer;

@@ -623,7 +623,7 @@ mod traced_database;
 
 #[cfg(test)]
 pub(crate) use self::traced_database::Trace;
-#[cfg(test)]
+#[cfg(any(test, rocksdb_test_utils))]
 pub(crate) use self::traced_database::TracedDatabase;
 
 #[cfg(test)]
