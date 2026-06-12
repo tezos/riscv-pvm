@@ -30,7 +30,6 @@ use tokio::runtime::Handle;
 
 use crate::commit::CommitId;
 use crate::database::Database;
-#[cfg(any(test, rocksdb_test_utils))]
 use crate::database::DatabaseMode;
 #[cfg(test)]
 use crate::database::Trace;
@@ -40,7 +39,6 @@ use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
-#[cfg(any(test, rocksdb_test_utils))]
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::registry::Registry;
@@ -484,7 +482,7 @@ pub(crate) fn update_value(value: &mut Bytes, offset: usize, bytes: Bytes) {
 /// Abstracts the interface of [`Database`] so [`apply_database_operation`]
 /// can be used in both [`Registry`] (via [`Database`] references) and
 /// the `Database` tests which use [`TracedDatabase`] to capture a trace.
-pub(crate) trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>: Sized {
+pub(crate) trait DatabaseValueOps {
     fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error>;
 
     fn write(&mut self, key: Key, offset: usize, data: Bytes) -> Result<usize, Error>;
@@ -498,7 +496,12 @@ pub(crate) trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>: Sized {
     fn value_length(&self, key: &Key) -> Result<usize, Error>;
 
     fn hash(&self) -> Result<Hash, OperationalError>;
+}
 
+/// Extends [`DatabaseValueOps`] with persistence operations.
+pub(crate) trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>:
+    DatabaseValueOps + Sized
+{
     fn commit(&self, repo: &KV::Repo) -> Result<CommitId, OperationalError>;
 
     fn checkout(handle: &Handle, repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error>;
@@ -513,7 +516,7 @@ pub(crate) trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>: Sized {
     ) -> Result<CommitId, OperationalError>;
 }
 
-impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Normal> {
+impl<KV: BackgroundKeyValueStore, M: DatabaseMode> DatabaseValueOps for Database<KV, M> {
     fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
         Database::set(self, key, data)
     }
@@ -541,7 +544,9 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Nor
     fn hash(&self) -> Result<Hash, OperationalError> {
         Database::hash(self)
     }
+}
 
+impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Normal> {
     fn commit(&self, repo: &KV::Repo) -> Result<CommitId, OperationalError> {
         Database::commit(self, repo)
     }
@@ -568,7 +573,7 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Nor
 }
 
 #[cfg(any(test, rocksdb_test_utils))]
-impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<KV, Normal> {
+impl<KV: BackgroundKeyValueStore, M: DatabaseMode> DatabaseValueOps for TracedDatabase<KV, M> {
     fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
         TracedDatabase::set(self, key, data)
     }
@@ -596,7 +601,10 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<K
     fn hash(&self) -> Result<Hash, OperationalError> {
         TracedDatabase::hash(self)
     }
+}
 
+#[cfg(any(test, rocksdb_test_utils))]
+impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<KV, Normal> {
     fn commit(&self, repo: &KV::Repo) -> Result<CommitId, OperationalError> {
         TracedDatabase::commit(self, repo)
     }
