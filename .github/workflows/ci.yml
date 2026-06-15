@@ -61,83 +61,15 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
 
     steps:
-      - name: Aggressive cleanup
-        run: |
-          # Remove Java (JDKs)
-          sudo rm -rf /usr/lib/jvm
-
-          # Remove .NET SDKs
-          sudo rm -rf /usr/share/dotnet
-
-          # Remove Swift toolchain
-          sudo rm -rf /usr/share/swift
-
-          # Remove Haskell (GHC)
-          sudo rm -rf /usr/local/.ghcup
-
-          # Remove Android SDKs
-          sudo rm -rf /usr/local/lib/android
-
-          # Remove Azure CLI
-          sudo rm -rf /opt/az
-
-          # Remove PowerShell
-          sudo rm -rf /usr/local/share/powershell
-
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Nix setup
-        uses: nixbuild/nix-quick-install-action@v34
+      - name: Set up build environment
+        id: setup
+        uses: ./.github/actions/setup
         with:
-          nix_conf: |
-            keep-env-derivations = true
-            keep-derivations = true
-            keep-outputs = true
-            experimental-features = nix-command flakes
-
-      - name: Nix cache
-        id: nix-cache
-        uses: nix-community/cache-nix-action@v7
-        with:
-          primary-key: nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-v2
-          restore-prefixes-first-match: |
-            nix-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/*.nix', '**/flake.lock') }}-
-            nix-${{ runner.os }}-${{ runner.arch }}-
-          save: ${{ github.ref_name == 'main' }}
-
-      - name: Restore Rustup and Cargo cache
-        id: rust-cache
-        uses: actions/cache/restore@v5.0.5
-        with:
-          key: rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/rust-toolchain*') }}-v2
-          restore-keys: |
-            rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Cargo.lock', '**/rust-toolchain*') }}-
-            rust-${{ runner.os }}-${{ runner.arch }}-
-          path: |
-            ~/.rustup
-            ~/.cargo/bin
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-
-      - name: Rust compilation cache
-        uses: Mozilla-Actions/sccache-action@v0.0.10
-
-      - name: Pre-build Nix development shell
-        run: |
-          # Subsequent steps will have their environment configured using the $GITHUB_ENV variable.
-          nix run .#direnv -- allow .
-          nix run .#direnv -- export gha > "$GITHUB_ENV"
-
-      # All downloads should be cached. If there is a cache miss, we should ensure that the cache
-      # contains all downloads.
-      - name: Prefetch Cargo downloads
-        if: steps.rust-cache.outputs.cache-hit != 'true' && github.ref_name == 'main'
-        run: find . -iname Cargo.lock -execdir cargo fetch \;
-
-      - name: Build dependencies
-        run: make build-deps-slim
+          save-nix-cache: ${{ github.ref_name == 'main' }}
+          prefetch-cargo: ${{ github.ref_name == 'main' }}
 
       - name: Run 'make ${{ matrix.make-target }}'
         run: make ${{ matrix.make-target }}
@@ -154,7 +86,7 @@ jobs:
         if: github.ref_name == 'main'
         uses: actions/cache/save@v5.0.5
         with:
-          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
+          key: ${{ steps.setup.outputs.rust-cache-primary-key }}
           path: |
             ~/.rustup
             ~/.cargo/bin
@@ -165,5 +97,5 @@ jobs:
       # Only when the primary-key cache was not found do we actually produce a cache. In that case
       # we need to clean up the Nix store a little to save space.
       - name: Clean up Nix store
-        if: steps.nix-cache.outputs.hit-primary-key != 'true' && github.ref_name == 'main'
+        if: steps.setup.outputs.nix-cache-hit-primary-key != 'true' && github.ref_name == 'main'
         run: nix store gc
