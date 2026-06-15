@@ -634,6 +634,10 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use octez_riscv_data::merkle_proof::FromProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
@@ -2228,6 +2232,35 @@ pub(crate) mod tests {
         assert_eq!(before, reverted);
 
         database.into_trace()
+    });
+
+    kv_test!(test_empty_db_noop_proof_readable_and_writeable, KV: BackgroundKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+
+        let (_keepalive, repo) = KV::setup_repo();
+        let database = new_database::<KV>(handle, &repo);
+
+        let prove = database.try_start_proof().expect("starting a proof should succeed");
+        let proof = MerkleProof::from_foldable(&prove);
+
+        assert!(
+            matches!(proof, octez_riscv_data::tree::Tree::Leaf(MerkleProofLeaf::Blind(_))),
+            "database should be fully blinded");
+
+        let mut verify = Database::<KV, Verify>::from_proof(ProofPart::Present(&proof))
+            .expect("Can convert blinded leaf proof into blinded verify database")
+            .into_result();
+
+        let key = Key::new(b"abc").unwrap();
+        let data = vec![1, 2, 3];
+
+        assert!(matches!(verify.exists(&key), Ok(false)), "can inspect empty blinded db");
+        assert!(matches!(verify.set(key.clone(), Bytes::from(data)), Ok(())), "can modify an empty blinded db");
+        assert!(matches!(verify.exists(&key), Ok(true)), "can inspect modified db from empty blinded db");
     });
 
     #[cfg(rocksdb)]

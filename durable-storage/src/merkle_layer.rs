@@ -51,7 +51,6 @@ use crate::avl::resolver::LazyTreeId;
 use crate::avl::resolver::ProveNodeId;
 use crate::avl::resolver::ProveResolver;
 use crate::avl::resolver::Resolver;
-use crate::avl::resolver::VerifyNodeId;
 use crate::avl::resolver::VerifyResolver;
 use crate::avl::resolver::VerifyTreeId;
 use crate::avl::tree::Tree;
@@ -111,11 +110,7 @@ impl<KV> MerkleLayer<KV, Normal> {
     /// [`MerkleProofFold`]: octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold
     pub fn start_proof(&self) -> MerkleLayer<KV, Prove<'static>> {
         let initial_tree = self.inner.tree.clone();
-        let root_tree_hash = initial_tree.hash();
-        let resolver = ProveResolver::start(
-            LazyResolver::new(self.inner.persistence.clone()),
-            Some(root_tree_hash),
-        );
+        let resolver = ProveResolver::start(LazyResolver::new(self.inner.persistence.clone()));
         let working_tree = initial_tree.clone().into_proof();
         let initial_tree_id = LazyTreeId::from(initial_tree);
 
@@ -139,7 +134,7 @@ impl<KV> MerkleLayer<KV, Prove<'static>> {
             inner: ProveImpl {
                 initial_tree: LazyTreeId::default(),
                 working_tree: Tree::default(),
-                resolver: ProveResolver::start(LazyResolver::new(persistence), None),
+                resolver: ProveResolver::start(LazyResolver::new(persistence)),
             },
         }
     }
@@ -175,7 +170,7 @@ impl<KV> MerkleLayer<KV, Verify> {
     pub(crate) fn empty() -> Self {
         MerkleLayer {
             inner: VerifyImpl {
-                tree: Tree::default(),
+                tree: VerifyTreeId::default(),
                 resolver: VerifyResolver,
                 original_proof: Some(Arc::new(MerkleProof::leaf_blind(Hash::hash_bytes(&[])))),
             },
@@ -196,7 +191,7 @@ impl<KV> FromProof for MerkleLayer<KV, Verify> {
         // TODO TZX-161: StreamDeserialiser should allow capturing owned proof
         let original_proof = proof.capture_owned_proof().map(Arc::new);
 
-        let suspended = Tree::<VerifyNodeId>::from_proof(proof)?;
+        let suspended = VerifyTreeId::from_proof(proof)?;
         Ok(suspended.map(move |tree| MerkleLayer {
             inner: VerifyImpl {
                 tree,
@@ -350,7 +345,7 @@ impl MerkleLayerMode for Prove<'static> {
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
         // TODO RV-985: This requires work for supporting under multi-step proofs.
-        let resolver = ProveResolver::start(LazyResolver::new(persistence), None);
+        let resolver = ProveResolver::start(LazyResolver::new(persistence));
         MerkleLayer {
             inner: ProveImpl {
                 initial_tree: this.inner.initial_tree.clone(),
@@ -424,15 +419,12 @@ impl MerkleLayerMode for Verify {
     }
 
     fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash {
-        let tree_id = VerifyTreeId::Present {
-            tree: this.inner.tree.clone(),
-        };
         let original_proof = this
             .inner
             .original_proof
             .as_ref()
             .map(|proof| proof.as_ref().clone());
-        PartialHash::from_foldable(original_proof, &tree_id)
+        PartialHash::from_foldable(original_proof, &this.inner.tree)
             .to_hash()
             // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
             .unwrap_or_else(|| unsafe { not_found() })
@@ -442,7 +434,8 @@ impl MerkleLayerMode for Verify {
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError> {
-        this.inner.tree.delete(key, &mut this.inner.resolver)?;
+        let tree = this.inner.resolver.resolve_mut(&mut this.inner.tree)?;
+        tree.delete(key, &mut this.inner.resolver)?;
         Ok(())
     }
 
@@ -451,7 +444,8 @@ impl MerkleLayerMode for Verify {
         key: &Key,
         data: &[u8],
     ) -> Result<(), OperationalError> {
-        this.inner.tree.set(key, data, &mut this.inner.resolver)?;
+        let tree = this.inner.resolver.resolve_mut(&mut this.inner.tree)?;
+        tree.set(key, data, &mut this.inner.resolver)?;
         Ok(())
     }
 
@@ -461,9 +455,8 @@ impl MerkleLayerMode for Verify {
         offset: usize,
         data: &[u8],
     ) -> Result<(), Error> {
-        this.inner
-            .tree
-            .write(key, offset, data, &mut this.inner.resolver)?;
+        let tree = this.inner.resolver.resolve_mut(&mut this.inner.tree)?;
+        tree.write(key, offset, data, &mut this.inner.resolver)?;
         Ok(())
     }
 
@@ -471,7 +464,8 @@ impl MerkleLayerMode for Verify {
         this: &'a MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<Option<&'a Bytes<Self>>, OperationalError> {
-        let Some(node_id) = this.inner.tree.get(key, &this.inner.resolver)? else {
+        let tree = this.inner.resolver.resolve(&this.inner.tree)?;
+        let Some(node_id) = tree.get(key, &this.inner.resolver)? else {
             return Ok(None);
         };
         let resolved_node = this.inner.resolver.resolve(node_id)?;
@@ -574,7 +568,7 @@ impl<KV> NormalImpl<KV> {
 
 #[derive(Clone, Debug)]
 struct VerifyImpl {
-    tree: Tree<VerifyNodeId>,
+    tree: VerifyTreeId,
     resolver: VerifyResolver,
     /// Original proof the verify-mode tree was deserialised from. Required by [`MerkleLayer::hash`]
     /// to resolve `prev_hash` substitutions in [`PartialHashFold::previous`] for blinded subtrees.
@@ -624,15 +618,25 @@ impl<KV: KeyValueStore> Foldable<HashFold> for MerkleLayer<KV, Prove<'_>> {
 
 impl<KV: KeyValueStore> Foldable<MerkleProofFold> for MerkleLayer<KV, Prove<'_>> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let wrapper = InitialTreeFold {
-            tree_id: &self.inner.initial_tree,
-            prove_impl: &self.inner,
-        };
-        wrapper.fold(builder)
+        // If the database was not touched at all, then it is safely
+        // blindable.
+        //
+        // *NB* inserting into an empty tree works, as the deserialiser
+        // correctly recognises the special `EMPTY_TREE_HASH`.
+        if !self.inner.resolver.was_any_accessed() {
+            let root_hash = Hash::from_foldable(&self.inner.initial_tree);
+            return builder.into_blind(root_hash);
+        }
+
+        // The database was touched.
+        // Unlike a child subtree, the root tree is never resolved via `resolve_and_track_tree` -
+        // using `InitialTreeFold` would incorrectly blind the root tree.
+        fold_resolved_tree(&self.inner.initial_tree, &self.inner, builder)
     }
 }
 
-/// Wrapper that folds an initial-tree [`Tree<LazyNodeId>`] into a [`MerkleProofFold`].
+/// Wrapper that folds a *child* initial subtree [`Tree<LazyNodeId>`] into a [`MerkleProofFold`],
+/// blinding it when the step never resolved it.
 struct InitialTreeFold<'a, KV> {
     tree_id: &'a LazyTreeId,
     prove_impl: &'a ProveImpl<KV>,
@@ -640,39 +644,15 @@ struct InitialTreeFold<'a, KV> {
 
 impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialTreeFold<'_, KV> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let tree_hash = Hash::from_foldable(self.tree_id);
+        let root_hash = Hash::from_foldable(self.tree_id);
 
-        if !self.prove_impl.resolver.was_tree_accessed(&tree_hash) {
+        if !self.prove_impl.resolver.was_tree_accessed(&root_hash) {
             // TODO: RV-968 - replace `into_blind` with a non-`CompressibleMerkleProof`-constructing
             // API once it is available.
-            return builder.into_blind(tree_hash);
+            return builder.into_blind(root_hash);
         }
 
-        // If accessed, we can resolve the tree, which should exist in the resolver's cache.
-        let tree = self
-            .prove_impl
-            .resolver
-            .inner()
-            .resolve(self.tree_id)
-            .expect("Accessed tree should be cached in LazyResolver");
-
-        let mut node_fold = builder.into_node_fold();
-
-        // Bool leaf: true if the initial tree is occupied.
-        let present = tree.root().is_some();
-        let bool_data = serialise(present).expect("Serialising a bool should not fail");
-        let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
-        node_fold.add(&bool_leaf);
-
-        if let Some(lazy_node_id) = tree.root() {
-            let child = InitialNodeFold {
-                node_id: lazy_node_id,
-                prove_impl: self.prove_impl,
-            };
-            node_fold.add(&child);
-        }
-
-        node_fold.done()
+        fold_resolved_tree(self.tree_id, self.prove_impl, builder)
     }
 }
 
@@ -750,6 +730,42 @@ impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
 
         node_fold.done()
     }
+}
+
+/// [MerkleProofFold] for a subtree that is known to have been resolved.
+///
+/// # Panics
+///
+/// Panics if the subtree was not, in fact, resolved during the prove operations.
+fn fold_resolved_tree<KV: KeyValueStore>(
+    tree_id: &LazyTreeId,
+    prove_impl: &ProveImpl<KV>,
+    builder: MerkleProofFold,
+) -> <MerkleProofFold as Fold>::Folded {
+    // The tree was accessed, so it should exist in the resolver's cache.
+    let tree = prove_impl
+        .resolver
+        .inner()
+        .resolve(tree_id)
+        .expect("Accessed tree should be cached in LazyResolver");
+
+    let mut node_fold = builder.into_node_fold();
+
+    // Bool leaf: true if the initial tree is occupied.
+    let present = tree.root().is_some();
+    let bool_data = serialise(present).expect("Serialising a bool should not fail");
+    let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
+    node_fold.add(&bool_leaf);
+
+    if let Some(lazy_node_id) = tree.root() {
+        let child = InitialNodeFold {
+            node_id: lazy_node_id,
+            prove_impl,
+        };
+        node_fold.add(&child);
+    }
+
+    node_fold.done()
 }
 
 /// Construct a verify-mode [`MerkleLayer`] for an empty initial state. Used in tests that exercise
@@ -833,7 +849,7 @@ mod tests {
                 inner: ProveImpl {
                     initial_tree: LazyTreeId::default(),
                     working_tree: tree,
-                    resolver: ProveResolver::start(LazyResolver::new(persistence), None),
+                    resolver: ProveResolver::start(LazyResolver::new(persistence)),
                 },
             }
         }
@@ -1958,7 +1974,7 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let resolver = ProveResolver::start(LazyResolver::new(persistence), None);
+        let resolver = ProveResolver::start(LazyResolver::new(persistence));
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 initial_tree: LazyTreeId::default(),
@@ -1988,7 +2004,7 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let resolver = ProveResolver::start(LazyResolver::new(persistence), None);
+        let resolver = ProveResolver::start(LazyResolver::new(persistence));
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 initial_tree: LazyTreeId::default(),
@@ -2016,7 +2032,7 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let resolver = ProveResolver::start(LazyResolver::new(persistence), None);
+        let resolver = ProveResolver::start(LazyResolver::new(persistence));
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 initial_tree: LazyTreeId::default(),
@@ -2060,7 +2076,7 @@ mod tests {
         let persistence: Arc<KV> = KV::new(&repo)
             .expect("Creating a persistence layer should succeed")
             .into();
-        let resolver = ProveResolver::start(LazyResolver::new(persistence), None);
+        let resolver = ProveResolver::start(LazyResolver::new(persistence));
         let mut ml: MerkleLayer<KV, Prove<'static>> = MerkleLayer {
             inner: ProveImpl {
                 initial_tree: LazyTreeId::default(),
