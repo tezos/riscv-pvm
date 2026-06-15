@@ -818,15 +818,10 @@ pub(crate) struct ProveResolver<R> {
 
 impl<R> ProveResolver<R> {
     /// Start the prove resolution process.
-    pub(crate) fn start(inner: R, root_tree_hash: Option<Hash>) -> Self {
-        let mut accessed_items = AccessedItems::default();
-        if let Some(root_hash) = root_tree_hash {
-            accessed_items.trees.insert(root_hash);
-        }
-
+    pub(crate) fn start(inner: R) -> Self {
         Self {
             inner,
-            accessed_items: RefCell::new(accessed_items),
+            accessed_items: RefCell::new(AccessedItems::default()),
             deleted_nodes: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
@@ -837,6 +832,17 @@ impl<R> ProveResolver<R> {
     /// methods.
     pub(crate) fn inner(&self) -> &R {
         &self.inner
+    }
+
+    /// Whether any node or tree of the initial tree was accessed during the step.
+    ///
+    /// The [`MerkleLayer`] fold uses this to decide whether or not to blind the tree
+    /// wholesale.
+    ///
+    /// [`MerkleLayer`]: crate::merkle_layer::MerkleLayer
+    pub(crate) fn was_any_accessed(&self) -> bool {
+        let accessed = self.accessed_items.borrow();
+        !accessed.nodes.is_empty() || !accessed.trees.is_empty()
     }
 
     /// Whether a node with the given hash was accessed during the proof step.
@@ -1698,7 +1704,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let prove_resolver = ProveResolver::start(lazy_resolver, None);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let lazy_node_id = lazy_tree.root().expect("tree should have a root");
 
         let prove_id = lazy_node_id.clone().into_proof();
@@ -1717,7 +1723,7 @@ mod tests {
 
         let expected_hash = Hash::from_foldable(lazy_root);
 
-        let prove_resolver = ProveResolver::start(lazy_resolver, None);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_id = lazy_root.clone().into_proof();
 
         // Hash before resolve (delegates to lazy path).
@@ -1745,7 +1751,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let prove_resolver = ProveResolver::start(lazy_resolver, None);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_root_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1782,7 +1788,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer.clone());
 
-        let prove_resolver = ProveResolver::start(lazy_resolver, None);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1810,7 +1816,7 @@ mod tests {
         let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
-        let mut prove_resolver = ProveResolver::start(lazy_resolver, None);
+        let mut prove_resolver = ProveResolver::start(lazy_resolver);
         let mut prove_id = lazy_tree
             .root()
             .expect("tree should have a root")
@@ -1847,7 +1853,7 @@ mod tests {
         let lazy_left_node_hash = Hash::from_foldable(lazy_left_id);
 
         // Now get the same hash via the prove resolver path.
-        let prove_resolver = ProveResolver::start(lazy_resolver, None);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_root_id = lazy_root.clone().into_proof();
         let prove_node = prove_resolver
             .resolve(&prove_root_id)
@@ -1877,7 +1883,7 @@ mod tests {
         let empty_lazy_tree: LazyTreeId = LazyTreeId::default();
         let prove_tree_id = empty_lazy_tree.clone().into_proof();
 
-        let prove_resolver = ProveResolver::start(lazy_resolver, None);
+        let prove_resolver = ProveResolver::start(lazy_resolver);
         let tree = prove_resolver
             .resolve(&prove_tree_id)
             .expect("resolving empty prove tree should succeed");

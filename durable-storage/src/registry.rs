@@ -610,6 +610,7 @@ pub(super) mod tests {
     use octez_riscv_data::merkle_proof::proof::deserialise_proof;
     use octez_riscv_data::merkle_proof::proof::serialise_proof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
+    use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
     use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
@@ -1762,6 +1763,130 @@ pub(super) mod tests {
             registry_root_hash_small(&verify_registry),
             proof.final_state_hash(),
             "Replaying the step in verify mode must reach the proof's final state hash"
+        );
+    });
+
+    /// Count how many of a 16-database registry's databases are *present* (revealed as a node)
+    /// in the proof, as opposed to blinded or absorbed into a blinded ancestor.
+    ///
+    /// Assumes the arity-4, depth-2 contents layout of a 16-element vector: root `[length, contents]`, contents
+    /// node has 4 group children, each group node has 4 database children.
+    fn count_present_databases_of_16(tree: &MerkleProof) -> usize {
+        let MerkleProof::Node(root) = tree else {
+            return 0; // whole registry blinded
+        };
+        let contents = &root.children[1];
+        let MerkleProof::Node(contents) = contents else {
+            return 0; // all databases absorbed into a blinded contents subtree
+        };
+        contents
+            .children
+            .iter()
+            .map(|group| match group {
+                MerkleProof::Node(group) => group
+                    .children
+                    .iter()
+                    .filter(|db| matches!(db, MerkleProof::Node(_)))
+                    .count(),
+                _ => 0, // blinded group
+            })
+            .sum()
+    }
+
+    // Touching a single database of a 16-database registry must yield the *minimal* proof: only the
+    // touched database is present, its merkle-tree siblings are blinded, and every other database
+    // is absent (absorbed into a blinded ancestor). The proof must still round-trip and let the
+    // verifier replay the touched read.
+    kv_test!(test_touch_one_database_yields_minimal_proof, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_registry::<KV>(repo);
+        for n in 1..=16 {
+            registry.resize_tick(n).expect("resize should succeed");
+        }
+        for i in 0..16 {
+            populate_database_with_key_value::<KV>(&mut registry, i, &[i as u8], b"val");
+        }
+
+        let root_hash = Hash::from_foldable(&registry);
+
+        for db_n in 0..16 {
+            let key_n = Key::new(&[db_n]).unwrap();
+            let prove = registry
+                .try_start_proof()
+                .expect("Converting to prove mode should succeed");
+            // Touch only database 'db_n'.
+            prove
+                .database(db_n as usize)
+                .expect("Database should exist.")
+                .assert_database_value(&key_n, b"val");
+
+            let proof = prove.produce_proof();
+
+            // Only database 'db_n' is present in the proof.
+            assert_eq!(
+                count_present_databases_of_16(proof.tree()),
+                1,
+                "touching one database must reveal only that database, got proof:\n{:#?}",
+                proof.tree()
+            );
+
+            // The proof round-trips and the verifier can replay the touched read.
+            let (_stream, verify) = deserialise_proof_via_bytes::<KV>(&proof);
+
+            let hash = PartialHash::from_foldable(None, &verify).to_hash();
+            assert_eq!(None, hash, "hashing minimal proof requires proof arg");
+
+            let hash = PartialHash::from_foldable(Some(proof.into_tree()), &verify)
+                .to_hash()
+                .expect("partial hash of registry with proof succeeds");
+
+            assert_eq!(root_hash, hash, "Verify root hash matches normal mode");
+
+            verify
+                .database(db_n as usize)
+                .expect("Database should exist.")
+                .assert_database_value(&key_n, b"val");
+        }
+    });
+
+    // A step that touches no database must still produce a usable proof of a non-empty registry.
+    // Such a proof is fully blinded — the whole registry collapses to a single blind leaf carrying
+    // its root hash — rather than exposing each database (which would yield a present contents
+    // subtree with no length node, rejected by the deserialiser).
+    kv_test!(test_untouched_nonempty_registry_proof_is_fully_blinded, KV: BackgroundKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let mut registry = setup_size_2_registry::<KV>(repo);
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
+
+        let initial_root = Hash::from_foldable(&registry);
+
+        // The step touches nothing.
+        let prove_registry = registry
+            .try_start_proof()
+            .expect("Converting to prove mode should succeed");
+        let proof = prove_registry.produce_proof();
+
+        // The whole registry is a single blind leaf of its root hash.
+        assert!(
+            matches!(
+                proof.tree(),
+                MerkleProof::Leaf(MerkleProofLeaf::Blind(hash)) if *hash == initial_root
+            ),
+            "an untouched registry proof must be a single blind leaf of its root hash, got {:?}",
+            proof.tree()
+        );
+
+        // It round-trips through bytes (previously rejected with `LengthAbsentButItemsPresent`) and
+        // the resulting verify-mode registry still hashes to the initial root.
+        let (_stream_registry, verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
+        let verify_root = PartialHash::from_foldable(Some(proof.tree().clone()), &verify_registry)
+            .to_hash()
+            .expect("a fully blinded registry must still hash to its root");
+        assert_eq!(
+            verify_root, initial_root,
+            "verify-mode root hash of a fully blinded registry must match the initial root"
         );
     });
 
