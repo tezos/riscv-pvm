@@ -1,0 +1,56 @@
+name: Nightly
+
+on:
+  # Run every day at ~01:16 UTC
+  # Avoids the start of the hour (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
+  schedule:
+    - cron: "16 1 * * *"
+
+  # Allow manual runs from the Actions tab
+  workflow_dispatch:
+
+env:
+  # Make Cargo output pretty
+  CARGO_TERM_COLOR: "always"
+
+  # Enable Sccache
+  RUSTC_WRAPPER: "sccache"
+
+  # Make sure Sccache automatically uses the GitHub Actions cache
+  SCCACHE_GHA_ENABLED: "true"
+
+jobs:
+  long-test:
+    name: ${{ matrix.title }}
+    runs-on: ubuntu-latest
+
+    # Up to 6h including setup time
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - title: Durable Storage Database Long Test
+            make-target: durable/database-long-test-nightly
+            artifact-name: durable-storage-database-long-test
+            out-dir: ${{ github.workspace }}/database-long-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup
+
+      - name: Run ${{ matrix.title }}
+        run: make ${{ matrix.make-target }} OUT_DIR='${{ matrix.out-dir }}'
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}-${{ github.run_id }}
+          path: ${{ matrix.out-dir }}/failure
+          if-no-files-found: warn
+          retention-days: 90
