@@ -20,10 +20,10 @@ use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 use crate::key::Key;
 use crate::long_test::model::KeyPools;
-use crate::test_helpers::DatabaseOperation;
-use crate::test_helpers::VALUE_MAX_SIZE;
-use crate::test_helpers::key_strategy;
-use crate::test_helpers::value_strategy;
+use crate::test_helpers::database::DatabaseOperation;
+use crate::test_helpers::database::VALUE_MAX_SIZE;
+use crate::test_helpers::database::key_strategy;
+use crate::test_helpers::database::value_strategy;
 
 /// A key strategy that blends fresh random keys with samples drawn from the
 /// model's hot, existing, and recently-deleted pools.
@@ -45,7 +45,7 @@ fn pooled_key_strategy(pools: &KeyPools) -> BoxedStrategy<Key> {
     Union::new_weighted(arms).boxed()
 }
 
-// Distribution is based on that of `test_helpers::database_operation_view_strategy`
+// Distribution is based on that of `test_helpers::database::database_operation_view_strategy`
 fn database_op_strategy(pools: &KeyPools) -> BoxedStrategy<DatabaseOperation> {
     let set = (pooled_key_strategy(pools), value_strategy())
         .prop_map(|(k, v)| DatabaseOperation::Set(k, v));

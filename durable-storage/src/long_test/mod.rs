@@ -51,7 +51,7 @@ use crate::repo::DirectoryManager;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::in_memory::InMemoryKeyValueStore;
 use crate::storage::in_memory::InMemoryRepo;
-use crate::test_helpers::DatabaseOperation;
+use crate::test_helpers::database::DatabaseOperation;
 
 const IN_MEMORY_BASE: &str = "in-memory-base";
 const PERSISTENT_BASE: &str = "persistent-base";

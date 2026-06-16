@@ -2289,9 +2289,9 @@ pub(crate) mod tests {
     kv_test!(test_database_regression, KV: BackgroundPersistentKeyValueStore, {
         use goldenfile::Mint;
 
-        use crate::test_helpers::DatabaseOperation;
-        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
-        use crate::test_helpers::REGRESSION_INPUTS_DIR;
+        use crate::test_helpers::database::DatabaseOperation;
+        use crate::test_helpers::database::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::database::REGRESSION_INPUTS_DIR;
 
         let mut inputs: Vec<_> = std::fs::read_dir(REGRESSION_INPUTS_DIR)
             .unwrap_or_else(|e| panic!("reading {REGRESSION_INPUTS_DIR} should succeed: {e}"))
@@ -2325,7 +2325,10 @@ pub(crate) mod tests {
                 serde_json::from_reader(file).expect("decoding JSON input should succeed");
 
             let (_keepalive, repo) = KV::setup_repo();
-            let trace = crate::test_helpers::run_database_operations::<KV>(&repo, ops);
+            let trace =
+                crate::test_helpers::database::run_database_operations::<KV>(
+                    &repo, ops,
+                );
 
             let mut golden = mint
                 .new_goldenfile(format!("{stem}.trace"))
@@ -2344,9 +2347,9 @@ pub(crate) mod tests {
     kv_test!(test_database_proof_regression, KV: BackgroundPersistentKeyValueStore, {
         use goldenfile::Mint;
 
-        use crate::test_helpers::DatabaseOperation;
-        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
-        use crate::test_helpers::REGRESSION_INPUTS_DIR;
+        use crate::test_helpers::database::DatabaseOperation;
+        use crate::test_helpers::database::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::database::REGRESSION_INPUTS_DIR;
 
         let path = std::path::Path::new(REGRESSION_INPUTS_DIR).join("database_00.input");
         let file = std::fs::File::open(&path).expect("opening input file should succeed");
@@ -2354,7 +2357,9 @@ pub(crate) mod tests {
             serde_json::from_reader(file).expect("decoding JSON input should succeed");
 
         let (_keepalive, repo) = KV::setup_repo();
-        let trace = crate::test_helpers::run_and_prove_database_operations::<KV>(&repo, ops);
+        let trace = crate::test_helpers::database::run_and_prove_database_operations::<
+            KV,
+        >(&repo, ops);
 
         let mut mint = Mint::new(REGRESSION_EXPECTED_DIR);
         let mut golden = mint
@@ -2368,7 +2373,7 @@ pub(crate) mod tests {
 
     kv_test!(test_database_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
-        generated in crate::test_helpers::database_operations_commit_checkout_strategy(1usize..100, 0.1)
+        generated in crate::test_helpers::database::database_operations_commit_checkout_strategy(1usize..100, 0.1)
     ],
     {
         // Every test iteration expects an empty repo, so not setting it in a `setup` block.
@@ -2384,10 +2389,13 @@ pub(crate) mod tests {
             crate::storage::Backend::Persistent => ops_a,
             crate::storage::Backend::InMemory => ops_b,
         };
-        let operations = crate::test_helpers::make_database_operations(keys, values, ops);
+        let operations =
+            crate::test_helpers::database::make_database_operations(keys, values, ops);
 
         // A proof is generated for vvery supported operation, which is then verified
         // and recorded in the trace.
-        crate::test_helpers::run_and_prove_database_operations::<KV>(&repo, operations)
+        crate::test_helpers::database::run_and_prove_database_operations::<KV>(
+            &repo, operations,
+        )
     });
 }
