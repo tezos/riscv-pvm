@@ -23,6 +23,7 @@ use std::collections::VecDeque;
 use std::fs;
 use std::num::NonZeroUsize;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -72,6 +73,8 @@ pub struct LongTestConfig {
     pub time_budget: Option<Duration>,
     /// Number of most recent epoch snapshots to keep. `None` keeps everything.
     pub keep_epochs: Option<NonZeroUsize>,
+    /// Directory for run state and failure artifacts. `None` uses a tempdir.
+    pub out_dir: Option<PathBuf>,
 }
 
 /// Metadata persisted alongside a failure which enables replaying it.
@@ -102,10 +105,17 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
     let ops_per_epoch = config.ops_per_epoch;
     let cases_per_epoch = config.cases_per_epoch;
     let keep_epochs = config.keep_epochs;
-    let out_dir = tempfile::Builder::new()
-        .prefix("database_long_test-")
-        .tempdir()?
-        .keep();
+    let out_dir = match config.out_dir {
+        Some(dir) => {
+            fs::create_dir_all(&dir)
+                .with_context(|| format!("creating directory {}", dir.display()))?;
+            dir
+        }
+        None => tempfile::Builder::new()
+            .prefix("database_long_test-")
+            .tempdir()?
+            .keep(),
+    };
 
     let mut rerun = format!(
         "cargo run --release --features rocksdb,unstable-test-utils --bin database_long_test -- \
@@ -474,6 +484,7 @@ mod tests {
             seed: None,
             time_budget: None,
             keep_epochs: Some(NonZeroUsize::new(2).expect("non-zero")),
+            out_dir: None,
         })
         .expect("the short long test run should succeed");
     }

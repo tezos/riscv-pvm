@@ -57,6 +57,10 @@ enum Commands {
         /// commits are cleared after each successful epoch (default: keep everything).
         #[arg(long)]
         keep_epochs: Option<NonZeroUsize>,
+
+        /// Directory for run state and failure artifacts (default: a fresh tempdir).
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
     },
     /// Replay the failing epoch described by `<DIR>/meta.json`.
     Replay {
@@ -74,6 +78,7 @@ fn main() -> Result<()> {
             max_minutes,
             epochs,
             keep_epochs,
+            out_dir,
         } => {
             let seed = match seed {
                 Some(seed) => {
@@ -94,6 +99,7 @@ fn main() -> Result<()> {
                 time_budget: max_minutes.map(|m| Duration::from_secs(m * 60)),
                 epochs,
                 keep_epochs,
+                out_dir,
             };
 
             run_long_test(config)
