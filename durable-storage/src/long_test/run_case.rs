@@ -30,7 +30,7 @@ use crate::storage::in_memory::InMemoryRepo;
 use crate::test_helpers::database::DatabaseOperation;
 use crate::test_helpers::database::DatabaseReferenceModel;
 use crate::test_helpers::database::check_and_apply_value_operation;
-use crate::test_helpers::prove_and_verify_operation;
+use crate::test_helpers::database::prove_and_verify_database_operation;
 
 /// The committed starting state shared by every case in an epoch.
 #[derive(Clone)]
@@ -83,7 +83,7 @@ fn apply_sequence(targets: &mut Targets, ops: &[DatabaseOperation], prove: bool)
     for op in ops {
         // Proofs are taken over the pre-operation state, so prove first.
         if prove {
-            prove_and_verify_operation(&targets.persistent_db, op);
+            prove_and_verify_database_operation(&targets.persistent_db, op);
         }
 
         check_and_apply_value_operation(&mut targets.in_memory_db, &targets.model, op);

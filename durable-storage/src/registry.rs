@@ -2188,7 +2188,9 @@ pub(super) mod tests {
         let (keys, values, ops) = generated;
         let operations =
             crate::test_helpers::registry::make_registry_operations(keys, values, ops);
-        crate::test_helpers::run_operations::<KV>(repo, operations)
+        crate::test_helpers::registry::run_and_prove_registry_operations::<KV>(
+            repo, operations,
+        )
     });
 }
 

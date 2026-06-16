@@ -626,7 +626,7 @@ where
     None
 }
 
-pub(crate) fn apply_database_operation<KV, D>(
+pub(crate) fn apply_database_operation_with_model<KV, D>(
     database: &mut D,
     model: &mut DatabaseModel,
     op: &DatabaseOperation,
@@ -704,7 +704,7 @@ where
     operations.push(DatabaseOperation::Hash);
 
     for op in operations {
-        apply_database_operation::<KV, _>(
+        apply_database_operation_with_model::<KV, _>(
             &mut database,
             &mut model,
             &op,
@@ -717,12 +717,13 @@ where
     database.into_trace()
 }
 
-/// Apply `operation` to a traced `database`, recording its [`TraceEntry`].
+/// Apply a value `operation` to `database`, propagating operational errors and
+/// ignoring invalid-argument failures.
 ///
-/// Returns `true` if the operation was a provable step.
-#[cfg(any(test, rocksdb_test_utils))]
-fn apply_database_step<KV: BackgroundKeyValueStore, M: DatabaseMode>(
-    database: &mut TracedDatabase<KV, M>,
+/// Returns `true` if the operation was a provable step (everything except the
+/// persistence operations).
+pub(crate) fn apply_database_step<D: DatabaseValueOps>(
+    database: &mut D,
     operation: &DatabaseOperation,
 ) -> Result<bool, OperationalError> {
     fn result_operational<T>(result: Result<T, Error>) -> Result<(), OperationalError> {
@@ -740,7 +741,18 @@ fn apply_database_step<KV: BackgroundKeyValueStore, M: DatabaseMode>(
             result_operational(database.write(key.clone(), *offset, data.clone()))?;
         }
         DatabaseOperation::Read(key, offset, len) => {
-            result_operational(database.read_bytes(key, *offset, *len))?;
+            let mut buffer = vec![0; *len];
+            let mut cursor = 0;
+            loop {
+                match database.read(key, offset + cursor, &mut buffer[cursor..]) {
+                    Ok(0) => break,
+                    Ok(read) => cursor += read,
+                    Err(e) => {
+                        result_operational::<()>(Err(e))?;
+                        break;
+                    }
+                }
+            }
         }
         DatabaseOperation::Delete(key) => {
             database.delete(key.clone())?;
@@ -767,7 +779,7 @@ fn apply_database_step<KV: BackgroundKeyValueStore, M: DatabaseMode>(
 /// Generate and verify a proof for a single [`DatabaseOperation`] applied to `database`.
 /// Returns the serialised proof or `None` if `operation` is not a provable step.
 #[cfg(any(test, rocksdb_test_utils))]
-pub(crate) fn prove_and_verify_operation<KV: BackgroundKeyValueStore>(
+pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
     database: &TracedDatabase<KV, Normal>,
     operation: &DatabaseOperation,
 ) -> Option<Vec<u8>> {
@@ -850,11 +862,11 @@ where
     for operation in operations {
         // Provable operations are proven over their pre-operation state, so prove before applying,
         // recording the serialised proof in the database's trace.
-        if let Some(proof_bytes) = prove_and_verify_operation(&database, &operation) {
+        if let Some(proof_bytes) = prove_and_verify_database_operation(&database, &operation) {
             database.record_proof(operation.clone(), proof_bytes)
         }
 
-        apply_database_operation::<KV, _>(
+        apply_database_operation_with_model::<KV, _>(
             &mut database,
             &mut model,
             &operation,
