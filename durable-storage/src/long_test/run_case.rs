@@ -27,9 +27,9 @@ use crate::persistence_layer::PersistenceLayer;
 use crate::repo::DirectoryManager;
 use crate::storage::in_memory::InMemoryKeyValueStore;
 use crate::storage::in_memory::InMemoryRepo;
-use crate::test_helpers::DatabaseOperation;
-use crate::test_helpers::DatabaseReferenceModel;
-use crate::test_helpers::check_and_apply_value_operation;
+use crate::test_helpers::database::DatabaseOperation;
+use crate::test_helpers::database::DatabaseReferenceModel;
+use crate::test_helpers::database::check_and_apply_value_operation;
 use crate::test_helpers::prove_and_verify_operation;
 
 /// The committed starting state shared by every case in an epoch.

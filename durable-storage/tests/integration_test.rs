@@ -2,10 +2,10 @@
 
 use bytes::Bytes;
 use octez_riscv_durable_storage::key::Key;
-use octez_riscv_durable_storage::test_helpers::DatabaseOperation;
-use octez_riscv_durable_storage::test_helpers::Operation;
-use octez_riscv_durable_storage::test_helpers::make_registry_operations;
-use octez_riscv_durable_storage::test_helpers::registry_operations_strategy;
+use octez_riscv_durable_storage::test_helpers::database::DatabaseOperation;
+use octez_riscv_durable_storage::test_helpers::registry::Operation;
+use octez_riscv_durable_storage::test_helpers::registry::make_registry_operations;
+use octez_riscv_durable_storage::test_helpers::registry::registry_operations_strategy;
 use octez_riscv_durable_storage::test_helpers::run_operations;
 use proptest::proptest;
 

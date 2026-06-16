@@ -44,7 +44,7 @@ use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 #[cfg(test)]
 use crate::storage::TestKeyValueStoreSetup;
-use crate::test_helpers::DatabaseOperation;
+use crate::test_helpers::database::DatabaseOperation;
 
 /// A sequence of recorded [`Database`] operations
 pub(crate) type Trace = Vec<TraceEntry>;

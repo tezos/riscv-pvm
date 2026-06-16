@@ -13,8 +13,8 @@ use bytes::Bytes;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 use crate::key::Key;
-use crate::test_helpers::DatabaseOperation;
-use crate::test_helpers::DatabaseReferenceModel;
+use crate::test_helpers::database::DatabaseOperation;
+use crate::test_helpers::database::DatabaseReferenceModel;
 
 /// Maximum number of keys retained in the hot / recently-deleted pools.
 const POOL_CAP: usize = 64;
