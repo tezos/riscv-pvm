@@ -224,6 +224,7 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> TracedDatabase<KV, M> {
     }
 
     /// Equivalent to [`Database::read_bytes`] which also records a [`TraceEntry`].
+    #[cfg(test)]
     pub(crate) fn read_bytes(
         &self,
         key: &Key,

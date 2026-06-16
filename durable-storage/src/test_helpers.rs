@@ -16,9 +16,3 @@
 
 pub mod database;
 pub mod registry;
-
-// Cross-cutting entry points used directly via `test_helpers::…`; everything
-// else is reached through its owning submodule.
-#[cfg(any(test, rocksdb_test_utils))]
-pub(crate) use database::prove_and_verify_operation;
-pub use registry::run_operations;

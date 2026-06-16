@@ -14,21 +14,32 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::proof::deserialise_proof;
+use octez_riscv_data::merkle_proof::proof::serialise_proof;
+use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::ProvableExt;
+use octez_riscv_data::mode::Verify;
 use proptest::prelude::*;
 
 use super::database::DatabaseModel;
 use super::database::DatabaseOperation;
 use super::database::DatabaseOperationView;
-use super::database::apply_database_operation;
+use super::database::apply_database_operation_with_model;
+use super::database::apply_database_step;
 use super::database::database_operation_view_strategy;
 use super::database::key_strategy;
 use super::database::make_database_operation;
 use super::database::value_strategy;
 use crate::commit::CommitId;
+use crate::database::DatabaseMode;
 use crate::key::Key;
+use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::registry::Registry;
+use crate::registry::RegistryMode;
 use crate::repo::RegistryRepo;
 
 /// Operations on a [`Registry`]
@@ -98,10 +109,10 @@ pub fn registry_operations_strategy(
     })
 }
 
-fn grow_registry<KV>(registry: &mut Registry<KV, Normal>, registry_model: &mut Vec<DatabaseModel>)
+fn grow_registry<KV, M>(registry: &mut Registry<KV, M>)
 where
-    KV: BackgroundPersistentKeyValueStore,
-    KV::Repo: RegistryRepo,
+    KV: BackgroundKeyValueStore,
+    M: RegistryMode,
 {
     let new = registry.len();
 
@@ -114,6 +125,16 @@ where
             .copy_database(previous, new)
             .expect("Copying the database should succeed");
     }
+}
+
+fn grow_registry_with_model<KV>(
+    registry: &mut Registry<KV, Normal>,
+    registry_model: &mut Vec<DatabaseModel>,
+) where
+    KV: BackgroundPersistentKeyValueStore,
+    KV::Repo: RegistryRepo,
+{
+    grow_registry(registry);
 
     if registry_model.is_empty() {
         registry_model.resize(1, Default::default());
@@ -123,7 +144,7 @@ where
 }
 
 /// Get the index of the current database, growing the registry until it has a valid index.
-fn get_index<KV>(
+fn get_registry_index_with_model<KV>(
     registry: &mut Registry<KV, Normal>,
     registry_model: &mut Vec<DatabaseModel>,
 ) -> usize
@@ -134,12 +155,139 @@ where
     if let Some(index) = registry.len().checked_sub(1) {
         index
     } else {
-        grow_registry(registry, registry_model);
-        get_index(registry, registry_model)
+        grow_registry_with_model(registry, registry_model);
+        get_registry_index_with_model(registry, registry_model)
     }
 }
 
-pub fn run_operations<KV>(repo: KV::Repo, operations: Vec<Operation>)
+/// Mode-generic counterpart to [`get_registry_index_with_model`] which does not
+/// update a Registry model.
+fn get_registry_index<KV, M>(registry: &mut Registry<KV, M>) -> usize
+where
+    KV: BackgroundKeyValueStore,
+    M: RegistryMode,
+{
+    match registry.len().checked_sub(1) {
+        Some(index) => index,
+        None => {
+            grow_registry(registry);
+            registry.len() - 1
+        }
+    }
+}
+
+/// Apply a single [`Operation`] to `registry`.
+///
+/// Returns `true` if the step was provable.
+fn apply_registry_step<KV, M>(registry: &mut Registry<KV, M>, op: &Operation) -> bool
+where
+    KV: BackgroundKeyValueStore,
+    M: RegistryMode + DatabaseMode,
+{
+    match op {
+        Operation::Database(
+            DatabaseOperation::Commit
+            | DatabaseOperation::Checkout
+            | DatabaseOperation::CommitCheckoutRoundtrip,
+        ) => return false,
+        Operation::Database(db_op) => {
+            let index = get_registry_index(registry);
+            let database = registry
+                .database_mut(index)
+                .expect("The index is in bounds");
+            return apply_database_step(database, db_op).expect("applying a step should succeed");
+        }
+        Operation::GrowRegistry => grow_registry(registry),
+        Operation::ShrinkRegistry => {
+            if registry.is_empty() {
+                grow_registry(registry);
+            }
+            let new_size = registry.len().saturating_sub(1);
+            registry
+                .resize_tick(new_size)
+                .expect("Resizing the registry should succeed");
+        }
+        Operation::ClearDatabase => {
+            let index = get_registry_index(registry);
+            registry
+                .clear_database(index)
+                .expect("Clearing the database should be successful");
+        }
+        Operation::CopyDatabase => {
+            while registry.len() < 2 {
+                grow_registry(registry);
+            }
+            let (src, dst) = (registry.len() - 2, registry.len() - 1);
+            registry
+                .copy_database(src, dst)
+                .expect("Copying the database should be successful");
+        }
+        Operation::MoveDatabase => {
+            while registry.len() < 2 {
+                grow_registry(registry);
+            }
+            let (src, dst) = (registry.len() - 2, registry.len() - 1);
+            registry
+                .move_database(src, dst)
+                .expect("Moving the database should be successful");
+        }
+    }
+
+    true
+}
+
+/// Generate and verify a proof for a single provable [`Operation`] applied to `registry`.
+fn prove_and_verify_registry_operation<KV>(registry: &Registry<KV, Normal>, op: &Operation)
+where
+    KV: BackgroundKeyValueStore,
+    KV::Repo: Clone,
+{
+    let pre_root = Hash::from_foldable(registry);
+
+    let mut prover = registry
+        .try_start_proof()
+        .expect("Starting a proof should succeed");
+    if !apply_registry_step(&mut prover, op) {
+        return;
+    }
+    let proof = prover.produce_proof();
+    assert_eq!(
+        proof.initial_state_hash(),
+        pre_root,
+        "The proof must encode the registry's pre-operation state"
+    );
+
+    let bytes = serialise_proof(&proof);
+    let (reconstructed, _stream) = deserialise_proof::<Registry<KV, Verify>, _>(bytes.into_iter())
+        .expect("Stream deserialisation of the proof bytes should succeed");
+    assert_eq!(
+        reconstructed, proof,
+        "The proof reconstructed from bytes should match the original"
+    );
+    let mut verify = Registry::<KV, Verify>::from_proof(ProofPart::Present(reconstructed.tree()))
+        .expect("from_proof should succeed")
+        .into_result();
+
+    let verify_pre = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
+        .to_hash()
+        .expect("Hashing the Verify registry should succeed");
+    assert_eq!(
+        verify_pre, pre_root,
+        "The Verify-mode registry must start from the pre-operation state hash"
+    );
+
+    apply_registry_step(&mut verify, op);
+    let verify_post = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
+        .to_hash()
+        .expect("Hashing the Verify registry should succeed");
+    assert_eq!(
+        verify_post,
+        proof.final_state_hash(),
+        "Replaying the step in Verify mode must reach the proof's final state hash"
+    )
+}
+
+pub fn run_and_prove_registry_operations<KV>(repo: KV::Repo, operations: Vec<Operation>)
 where
     KV: BackgroundPersistentKeyValueStore,
     KV::Repo: RegistryRepo,
@@ -153,9 +301,11 @@ where
     let mut registry_model: Vec<DatabaseModel> = vec![];
 
     for operation in operations {
+        prove_and_verify_registry_operation(&registry, &operation);
+
         match operation {
             Operation::Database(DatabaseOperation::Hash) => {
-                let index = get_index(&mut registry, &mut registry_model);
+                let index = get_registry_index_with_model(&mut registry, &mut registry_model);
 
                 let new_digest = registry
                     .database(index)
@@ -193,9 +343,9 @@ where
                 }
             }
             Operation::Database(op) => {
-                let index = get_index(&mut registry, &mut registry_model);
+                let index = get_registry_index_with_model(&mut registry, &mut registry_model);
                 let handle = registry.handle().clone();
-                apply_database_operation::<KV, _>(
+                apply_database_operation_with_model::<KV, _>(
                     registry
                         .database_mut(index)
                         .expect("The index is in bounds"),
@@ -206,11 +356,10 @@ where
                     &mut checkout_candidates,
                 );
             }
-            Operation::GrowRegistry => grow_registry(&mut registry, &mut registry_model),
+            Operation::GrowRegistry => grow_registry_with_model(&mut registry, &mut registry_model),
             Operation::ShrinkRegistry => {
-                // Make sure there's a database to drop
                 if registry.is_empty() {
-                    grow_registry(&mut registry, &mut registry_model);
+                    grow_registry_with_model(&mut registry, &mut registry_model);
                 };
 
                 let new_size = registry.len().saturating_sub(1);
@@ -221,7 +370,7 @@ where
                 registry_model.truncate(new_size);
             }
             Operation::ClearDatabase => {
-                let index = get_index(&mut registry, &mut registry_model);
+                let index = get_registry_index_with_model(&mut registry, &mut registry_model);
 
                 registry
                     .clear_database(index)
@@ -234,7 +383,7 @@ where
             Operation::CopyDatabase => {
                 let (src, dst) = {
                     while registry.len() < 2 {
-                        grow_registry(&mut registry, &mut registry_model);
+                        grow_registry_with_model(&mut registry, &mut registry_model);
                     }
                     (registry.len() - 2, registry.len() - 1)
                 };
@@ -248,7 +397,7 @@ where
             Operation::MoveDatabase => {
                 let (src, dst) = {
                     while registry.len() < 2 {
-                        grow_registry(&mut registry, &mut registry_model);
+                        grow_registry_with_model(&mut registry, &mut registry_model);
                     }
                     (registry.len() - 2, registry.len() - 1)
                 };

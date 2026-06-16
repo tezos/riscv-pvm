@@ -6,7 +6,7 @@ use octez_riscv_durable_storage::test_helpers::database::DatabaseOperation;
 use octez_riscv_durable_storage::test_helpers::registry::Operation;
 use octez_riscv_durable_storage::test_helpers::registry::make_registry_operations;
 use octez_riscv_durable_storage::test_helpers::registry::registry_operations_strategy;
-use octez_riscv_durable_storage::test_helpers::run_operations;
+use octez_riscv_durable_storage::test_helpers::registry::run_and_prove_registry_operations;
 use proptest::proptest;
 
 cfg_if::cfg_if! {
@@ -71,7 +71,7 @@ fn test_durable_storage_manual() {
     ];
 
     let (_keepalive, repo) = setup_repo();
-    run_operations::<TestKv>(repo, operations);
+    run_and_prove_registry_operations::<TestKv>(repo, operations);
 }
 
 proptest! {
@@ -80,6 +80,6 @@ proptest! {
     fn test_durable_storage_prop((keys, values, ops) in registry_operations_strategy(1usize..100)) {
         let (_keepalive, repo) = setup_repo();
         let operations = make_registry_operations(keys, values, ops);
-        run_operations::<TestKv>(repo, operations);
+        run_and_prove_registry_operations::<TestKv>(repo, operations);
     }
 }
