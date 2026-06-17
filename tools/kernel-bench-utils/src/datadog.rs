@@ -50,9 +50,12 @@ pub async fn submit_kernel_tps_benchmark(
     let configuration = datadog::Configuration::new();
     let api = MetricsAPI::with_config(configuration);
 
+    // Use GZIP. We don't pull in the zstd feature, but by default datadog-api-client still
+    // sets the header as ZSTD1, but silently doesn't compress it. Instead, we can use
+    // gzip, which is available.
     api.submit_metrics(
         payload,
-        SubmitMetricsOptionalParams::default().content_encoding(MetricContentEncoding::ZSTD1),
+        SubmitMetricsOptionalParams::default().content_encoding(MetricContentEncoding::GZIP),
     )
     .await?;
 
