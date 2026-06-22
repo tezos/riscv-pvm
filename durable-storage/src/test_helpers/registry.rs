@@ -143,43 +143,21 @@ fn grow_registry_with_model<KV>(
     }
 }
 
-/// Get the index of the current database, growing the registry until it has a valid index.
-fn get_registry_index_with_model<KV>(
-    registry: &mut Registry<KV, Normal>,
-    registry_model: &mut Vec<DatabaseModel>,
-) -> usize
-where
-    KV: BackgroundPersistentKeyValueStore,
-    KV::Repo: RegistryRepo,
-{
-    if let Some(index) = registry.len().checked_sub(1) {
-        index
-    } else {
-        grow_registry_with_model(registry, registry_model);
-        get_registry_index_with_model(registry, registry_model)
-    }
-}
-
-/// Mode-generic counterpart to [`get_registry_index_with_model`] which does not
-/// update a Registry model.
-fn get_registry_index<KV, M>(registry: &mut Registry<KV, M>) -> usize
+/// Get the index of the current database, or [`None`] if the registry is empty.
+fn get_registry_index<KV, M>(registry: &Registry<KV, M>) -> Option<usize>
 where
     KV: BackgroundKeyValueStore,
     M: RegistryMode,
 {
-    match registry.len().checked_sub(1) {
-        Some(index) => index,
-        None => {
-            grow_registry(registry);
-            registry.len() - 1
-        }
-    }
+    registry.len().checked_sub(1)
 }
 
 /// Apply a single [`Operation`] to `registry`.
 ///
-/// Returns `true` if the step was provable.
-fn apply_registry_step<KV, M>(registry: &mut Registry<KV, M>, op: &Operation) -> bool
+/// Returns `true` if the step was provable. A no-op (e.g., a `ShrinkRegistry` when
+/// `registry` has size 1) is a provable step: a proof which fully blinds the registry
+/// is expected to be produced for it.
+fn apply_registry_step<KV, M>(registry: &mut Registry<KV, M>, op: &Operation, len: usize) -> bool
 where
     KV: BackgroundKeyValueStore,
     M: RegistryMode + DatabaseMode,
@@ -191,7 +169,9 @@ where
             | DatabaseOperation::CommitCheckoutRoundtrip,
         ) => return false,
         Operation::Database(db_op) => {
-            let index = get_registry_index(registry);
+            let Some(index) = len.checked_sub(1) else {
+                return true;
+            };
             let database = registry
                 .database_mut(index)
                 .expect("The index is in bounds");
@@ -199,36 +179,35 @@ where
         }
         Operation::GrowRegistry => grow_registry(registry),
         Operation::ShrinkRegistry => {
-            if registry.is_empty() {
-                grow_registry(registry);
+            if len <= 1 {
+                return true;
             }
-            let new_size = registry.len().saturating_sub(1);
             registry
-                .resize_tick(new_size)
+                .resize_tick(len - 1)
                 .expect("Resizing the registry should succeed");
         }
         Operation::ClearDatabase => {
-            let index = get_registry_index(registry);
+            let Some(index) = len.checked_sub(1) else {
+                return true;
+            };
             registry
                 .clear_database(index)
                 .expect("Clearing the database should be successful");
         }
         Operation::CopyDatabase => {
-            while registry.len() < 2 {
-                grow_registry(registry);
+            if len < 2 {
+                return true;
             }
-            let (src, dst) = (registry.len() - 2, registry.len() - 1);
             registry
-                .copy_database(src, dst)
+                .copy_database(len - 2, len - 1)
                 .expect("Copying the database should be successful");
         }
         Operation::MoveDatabase => {
-            while registry.len() < 2 {
-                grow_registry(registry);
+            if len < 2 {
+                return true;
             }
-            let (src, dst) = (registry.len() - 2, registry.len() - 1);
             registry
-                .move_database(src, dst)
+                .move_database(len - 2, len - 1)
                 .expect("Moving the database should be successful");
         }
     }
@@ -244,10 +223,14 @@ where
 {
     let pre_root = Hash::from_foldable(registry);
 
+    // Pre-operation length, read from the original registry (not the Prove-mode registry)
+    // to avoid touching the registry when deciding if an operation should be a no-op.
+    let len = registry.len();
+
     let mut prover = registry
         .try_start_proof()
         .expect("Starting a proof should succeed");
-    if !apply_registry_step(&mut prover, op) {
+    if !apply_registry_step(&mut prover, op, len) {
         return;
     }
     let proof = prover.produce_proof();
@@ -276,7 +259,7 @@ where
         "The Verify-mode registry must start from the pre-operation state hash"
     );
 
-    apply_registry_step(&mut verify, op);
+    apply_registry_step(&mut verify, op, len);
     let verify_post = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
         .to_hash()
         .expect("Hashing the Verify registry should succeed");
@@ -300,12 +283,17 @@ where
 
     let mut registry_model: Vec<DatabaseModel> = vec![];
 
+    // Start with a size 1 registry
+    grow_registry_with_model(&mut registry, &mut registry_model);
+
     for operation in operations {
         prove_and_verify_registry_operation(&registry, &operation);
 
         match operation {
             Operation::Database(DatabaseOperation::Hash) => {
-                let index = get_registry_index_with_model(&mut registry, &mut registry_model);
+                let Some(index) = get_registry_index(&registry) else {
+                    continue;
+                };
 
                 let new_digest = registry
                     .database(index)
@@ -343,7 +331,9 @@ where
                 }
             }
             Operation::Database(op) => {
-                let index = get_registry_index_with_model(&mut registry, &mut registry_model);
+                let Some(index) = get_registry_index(&registry) else {
+                    continue;
+                };
                 let handle = registry.handle().clone();
                 apply_database_operation_with_model::<KV, _>(
                     registry
@@ -358,11 +348,12 @@ where
             }
             Operation::GrowRegistry => grow_registry_with_model(&mut registry, &mut registry_model),
             Operation::ShrinkRegistry => {
-                if registry.is_empty() {
-                    grow_registry_with_model(&mut registry, &mut registry_model);
-                };
+                // Never shrink to an empty registry. This case becomes a no-op.
+                if registry.len() <= 1 {
+                    continue;
+                }
 
-                let new_size = registry.len().saturating_sub(1);
+                let new_size = registry.len() - 1;
                 registry
                     .resize_tick(new_size)
                     .expect("Resizing the registry should succeed");
@@ -370,7 +361,9 @@ where
                 registry_model.truncate(new_size);
             }
             Operation::ClearDatabase => {
-                let index = get_registry_index_with_model(&mut registry, &mut registry_model);
+                let Some(index) = get_registry_index(&registry) else {
+                    continue;
+                };
 
                 registry
                     .clear_database(index)
@@ -381,12 +374,10 @@ where
                 registry_model[index].last = None;
             }
             Operation::CopyDatabase => {
-                let (src, dst) = {
-                    while registry.len() < 2 {
-                        grow_registry_with_model(&mut registry, &mut registry_model);
-                    }
-                    (registry.len() - 2, registry.len() - 1)
-                };
+                if registry.len() < 2 {
+                    continue;
+                }
+                let (src, dst) = (registry.len() - 2, registry.len() - 1);
 
                 registry
                     .copy_database(src, dst)
@@ -395,12 +386,10 @@ where
                 registry_model[dst] = registry_model[src].clone();
             }
             Operation::MoveDatabase => {
-                let (src, dst) = {
-                    while registry.len() < 2 {
-                        grow_registry_with_model(&mut registry, &mut registry_model);
-                    }
-                    (registry.len() - 2, registry.len() - 1)
-                };
+                if registry.len() < 2 {
+                    continue;
+                }
+                let (src, dst) = (registry.len() - 2, registry.len() - 1);
 
                 registry
                     .move_database(src, dst)
