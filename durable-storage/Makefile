@@ -20,14 +20,11 @@ reset-regressions:
 	@cargo run -p xtask -- gen-database-regression-inputs
 	@UPDATE_GOLDENFILES=1 cargo nextest run test_database_regression
 
-database-long-test:
+build-database-long-test:
+	@cargo build --release --features rocksdb,unstable-test-utils --bin database_long_test
+
+run-database-long-test:
 	@cargo run --release --features rocksdb,unstable-test-utils \
 		--bin database_long_test -- test --max-minutes 10 --keep-epochs 1
 
-database-long-test-nightly:
-	@cargo run --release --features rocksdb,unstable-test-utils \
-		--bin database_long_test -- test \
-		--ops-per-epoch 2000 --cases-per-epoch 256 --keep-epochs 1 \
-		--max-minutes 300 $(if $(OUT_DIR),--out-dir "$(OUT_DIR)")
-
-.PHONY: all check test gen-regression-inputs database-long-test database-long-test-nightly
+.PHONY: all check test gen-regression-inputs run-database-long-test build-database-long-test

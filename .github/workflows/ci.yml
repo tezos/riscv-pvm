@@ -54,7 +54,7 @@ jobs:
             make-target: check
             title: MacOS Checks
           - runs-on: ubuntu-latest
-            make-target: durable/database-long-test
+            make-target: durable/run-database-long-test
             title: Durable Storage Long Tests
 
     name: ${{ matrix.title }}
