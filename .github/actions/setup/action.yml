@@ -11,6 +11,12 @@ inputs:
   prefetch-cargo:
     description: Whether to prefetch Cargo downloads on a cache miss.
     default: "false"
+  build-deps:
+    description: >
+      Whether to build workspace dependencies (make build-deps-slim). Set to
+      "false" when the environment is only needed to run a prebuilt binary,
+      like in the case of the nightly tests.
+    default: "true"
 
 outputs:
   rust-cache-primary-key:
@@ -99,5 +105,6 @@ runs:
       run: find . -iname Cargo.lock -execdir cargo fetch \;
 
     - name: Build dependencies
+      if: inputs.build-deps == 'true'
       shell: bash
       run: make build-deps-slim

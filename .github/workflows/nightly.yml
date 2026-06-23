@@ -19,38 +19,84 @@ env:
   # Make sure Sccache automatically uses the GitHub Actions cache
   SCCACHE_GHA_ENABLED: "true"
 
+  # Time budget (minutes) shared by every nightly run
+  MAX_MINUTES: "330"
+
 jobs:
-  long-test:
-    name: ${{ matrix.title }}
+  # Build the long-test binary once and share it with every matrix job below.
+  build:
+    name: "Build database long test binary"
     runs-on: ubuntu-latest
-
-    # Up to 6h including setup time
-    timeout-minutes: 360
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - title: Durable Storage Database Long Test
-            make-target: durable/database-long-test-nightly
-            artifact-name: durable-storage-database-long-test
-            out-dir: database-long-test
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
+      # Save the Nix cache so the test jobs restore this job's dev shell on a
+      # cache miss, instead of each rebuilding the Nix store independently.
       - name: Set up build environment
         uses: ./.github/actions/setup
+        with:
+          save-nix-cache: true
 
-      - name: Run ${{ matrix.title }}
-        run: make ${{ matrix.make-target }} OUT_DIR='${{ github.workspace }}/${{ matrix.out-dir }}'
+      - name: Build database_long_test
+        run: make durable/build-database-long-test
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: database_long_test
+          path: target/release/database_long_test
+          if-no-files-found: error
+          retention-days: 1
+
+  long-test:
+    name: "Database long test ops=${{ matrix.config.ops }} cases=${{ matrix.config.cases }} #${{ matrix.replica }}"
+    needs: build
+    runs-on: ubuntu-latest
+
+    # Up to 6h
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { ops: 2000,  cases: 256 }
+          - { ops: 4000,  cases: 128 }
+          - { ops: 8000,  cases: 64 }
+          - { ops: 16000, cases: 32 }
+        replica: [1, 2, 3, 4, 5]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up build environment
+        uses: ./.github/actions/setup
+        with:
+          build-deps: "false"
+
+      - name: Download binary
+        uses: actions/download-artifact@v7
+        with:
+          name: database_long_test
+
+      - name: Run long test
+        run: |
+          chmod +x ./database_long_test # upload-artifact strips the executable bit
+          ./database_long_test test \
+            --ops-per-epoch ${{ matrix.config.ops }} \
+            --cases-per-epoch ${{ matrix.config.cases }} \
+            --keep-epochs 1 \
+            --max-minutes ${{ env.MAX_MINUTES }} \
+            --out-dir '${{ github.workspace }}/run-${{ matrix.config.ops }}-${{ matrix.config.cases }}-${{ matrix.replica }}'
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact-name }}-${{ github.run_id }}
-          path: ${{ github.workspace }}/${{ matrix.out-dir }}/failure
+          name: dursto-long-test-${{ matrix.config.ops }}-${{ matrix.config.cases }}-r${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/run-${{ matrix.config.ops }}-${{ matrix.config.cases }}-${{ matrix.replica }}/failure
           if-no-files-found: warn
           retention-days: 90
