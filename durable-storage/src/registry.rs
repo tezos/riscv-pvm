@@ -2177,7 +2177,7 @@ pub(super) mod tests {
 
     kv_test!(test_durable_storage_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
-        generated in <crate::test_helpers::registry::RegistryOperationView as crate::test_helpers::OperationView>::operations_strategy(1usize..100)
+        generated in <crate::test_helpers::registry::RegistryOperationView as crate::test_helpers::OperationView>::operations_commit_checkout_strategy(1usize..100, 0.1)
     ],
     {
         // Every test iteration expects an empty repo, so not setting it in a `setup` block.
@@ -2185,13 +2185,21 @@ pub(super) mod tests {
         // in test failures when checking out a commit which isn't expected to exist succeeds.
         let (_keepalive, repo) = KV::setup_repo();
 
-        let (keys, values, ops) = generated;
+        let (keys, values, ops_a, ops_b) = generated;
+
+        // Pick an operations vector so each backend exercises a different
+        // `CommitCheckoutRoundtrip` placement against the same base operations.
+        let ops = match KV::BACKEND {
+            crate::storage::Backend::Persistent => ops_a,
+            crate::storage::Backend::InMemory => ops_b,
+        };
         let operations = crate::test_helpers::registry::make_registry_operations(
             std::num::NonZeroUsize::new(1).expect("1 > 0"),
             keys,
             values,
             ops,
         );
+
         crate::test_helpers::registry::run_and_prove_registry_operations::<KV>(
             repo, operations,
         )
