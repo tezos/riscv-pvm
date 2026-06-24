@@ -2177,7 +2177,7 @@ pub(super) mod tests {
 
     kv_test!(test_durable_storage_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
-        generated in crate::test_helpers::registry::registry_operations_strategy(1usize..100)
+        generated in <crate::test_helpers::registry::RegistryOperationView as crate::test_helpers::OperationView>::operations_strategy(1usize..100)
     ],
     {
         // Every test iteration expects an empty repo, so not setting it in a `setup` block.

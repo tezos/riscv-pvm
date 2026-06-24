@@ -2373,7 +2373,7 @@ pub(crate) mod tests {
 
     kv_test!(test_database_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
-        generated in crate::test_helpers::database::database_operations_commit_checkout_strategy(1usize..100, 0.1)
+        generated in <crate::test_helpers::database::DatabaseOperationView as crate::test_helpers::OperationView>::operations_commit_checkout_strategy(1usize..100, 0.1)
     ],
     {
         // Every test iteration expects an empty repo, so not setting it in a `setup` block.

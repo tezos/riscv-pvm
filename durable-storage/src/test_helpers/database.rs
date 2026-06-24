@@ -40,6 +40,7 @@ use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+use crate::test_helpers::OperationView;
 
 /// Maximum size for the value argument of a sampled operation
 pub(crate) const VALUE_MAX_SIZE: usize = 10_000;
@@ -146,127 +147,61 @@ pub(crate) fn value_strategy() -> impl Strategy<Value = Bytes> {
     .prop_map(Bytes::from)
 }
 
-pub(crate) fn database_operation_view_strategy() -> impl Strategy<Value = DatabaseOperationView> {
-    let set = (any::<Index>(), any::<Index>()).prop_map(|(k, v)| DatabaseOperationView::Set(k, v));
+impl OperationView for DatabaseOperationView {
+    fn strategy() -> impl Strategy<Value = Self> {
+        let set =
+            (any::<Index>(), any::<Index>()).prop_map(|(k, v)| DatabaseOperationView::Set(k, v));
 
-    // Bias length and offset towards having most sampled operations
-    // exercise the success path, while also producing some which are out of bounds.
-    let read = (
-        any::<Index>(),
-        prop_oneof![
-            5 => Just(0),
-            4 => 1..=MAX_FILE_CHUNK_SIZE,
-            1 => (MAX_FILE_CHUNK_SIZE + 1)..=VALUE_MAX_SIZE,
-        ],
-        prop_oneof![
-            9 => 0..=MAX_FILE_CHUNK_SIZE,
-            1 => (MAX_FILE_CHUNK_SIZE + 1)..=VALUE_MAX_SIZE,
-        ],
-    )
-        .prop_map(|(k, off, len)| DatabaseOperationView::Read(k, off, len));
-
-    // Writes biased towards valid offsets
-    let write_valid = (
-        any::<Index>(),
-        prop_oneof![
-            2 => Just(0),
-            1 => 1..=VALUE_MAX_SIZE,
-        ],
-        any::<Index>(),
-    )
-        .prop_map(|(k, off, v)| DatabaseOperationView::Write(k, off, v));
-
-    // Writes biased towards out-of-bounds offsets
-    let write_invalid = (any::<Index>(), VALUE_MAX_SIZE..=usize::MAX, any::<Index>())
-        .prop_map(|(k, off, v)| DatabaseOperationView::Write(k, off, v));
-
-    // The chosen frequencies emulate real workloads
-    prop_oneof![
-        20 => set,
-        20 => read,
-        4 => write_valid,
-        1 => write_invalid,
-
-        10 => any::<Index>().prop_map(DatabaseOperationView::Delete),
-        10 => any::<Index>().prop_map(DatabaseOperationView::Exists),
-        5 => any::<Index>().prop_map(DatabaseOperationView::ValueLength),
-        10 => Just(DatabaseOperationView::Hash),
-        3 => Just(DatabaseOperationView::Commit),
-        3 => Just(DatabaseOperationView::Checkout),
-    ]
-}
-
-pub fn database_operations_strategy(
-    length: impl Strategy<Value = usize>,
-) -> impl Strategy<Value = (Vec<Key>, Vec<Bytes>, Vec<DatabaseOperationView>)> {
-    length.prop_flat_map(|length| {
-        let count = length.div_ceil(10);
-        (
-            proptest::collection::vec(key_strategy(), count),
-            proptest::collection::vec(value_strategy(), count),
-            proptest::collection::vec(database_operation_view_strategy(), length),
+        // Bias length and offset towards having most sampled operations
+        // exercise the success path, while also producing some which are out of bounds.
+        let read = (
+            any::<Index>(),
+            prop_oneof![
+                5 => Just(0),
+                4 => 1..=MAX_FILE_CHUNK_SIZE,
+                1 => (MAX_FILE_CHUNK_SIZE + 1)..=VALUE_MAX_SIZE,
+            ],
+            prop_oneof![
+                9 => 0..=MAX_FILE_CHUNK_SIZE,
+                1 => (MAX_FILE_CHUNK_SIZE + 1)..=VALUE_MAX_SIZE,
+            ],
         )
-    })
-}
+            .prop_map(|(k, off, len)| DatabaseOperationView::Read(k, off, len));
 
-/// Produces `Some(CommitCheckoutRoundtrip)` with the given probability, `None` otherwise.
-fn maybe_roundtrip_strategy(prob: f32) -> impl Strategy<Value = Option<DatabaseOperationView>> {
-    assert!(
-        (0.0..=1.0).contains(&prob),
-        "expected a probability, got {prob}"
-    );
-    let (yes, no) = proptest::strategy::float_to_weight(prob.into());
-    prop_oneof![
-        yes => Just(Some(DatabaseOperationView::CommitCheckoutRoundtrip)),
-        no => Just(None),
-    ]
-}
-
-/// Like [`database_operations_strategy`] but produces two operation vectors sharing
-/// identical base operations, with independently sampled
-/// [`DatabaseOperationView::CommitCheckoutRoundtrip`]. Intended to check that 2 test runs
-/// with differently-placed commit - checkout roundtrips are observationally equivalent.
-pub fn database_operations_commit_checkout_strategy(
-    length: impl Strategy<Value = usize>,
-    roundtrip_probability: f32,
-) -> impl Strategy<
-    Value = (
-        Vec<Key>,
-        Vec<Bytes>,
-        Vec<DatabaseOperationView>,
-        Vec<DatabaseOperationView>,
-    ),
-> {
-    length.prop_flat_map(move |length| {
-        let count = length.div_ceil(10);
-        (
-            proptest::collection::vec(key_strategy(), count),
-            proptest::collection::vec(value_strategy(), count),
-            proptest::collection::vec(
-                (
-                    maybe_roundtrip_strategy(roundtrip_probability),
-                    maybe_roundtrip_strategy(roundtrip_probability),
-                    database_operation_view_strategy(),
-                ),
-                length,
-            ),
+        // Writes biased towards valid offsets
+        let write_valid = (
+            any::<Index>(),
+            prop_oneof![
+                2 => Just(0),
+                1 => 1..=VALUE_MAX_SIZE,
+            ],
+            any::<Index>(),
         )
-            .prop_map(|(keys, values, ops)| {
-                let mut ops_a = Vec::with_capacity(ops.len() * 2);
-                let mut ops_b = Vec::with_capacity(ops.len() * 2);
-                for (pre_a, pre_b, op) in ops {
-                    if let Some(r) = pre_a {
-                        ops_a.push(r);
-                    }
-                    if let Some(r) = pre_b {
-                        ops_b.push(r);
-                    }
-                    ops_a.push(op.clone());
-                    ops_b.push(op);
-                }
-                (keys, values, ops_a, ops_b)
-            })
-    })
+            .prop_map(|(k, off, v)| DatabaseOperationView::Write(k, off, v));
+
+        // Writes biased towards out-of-bounds offsets
+        let write_invalid = (any::<Index>(), VALUE_MAX_SIZE..=usize::MAX, any::<Index>())
+            .prop_map(|(k, off, v)| DatabaseOperationView::Write(k, off, v));
+
+        // The chosen frequencies emulate real workloads
+        prop_oneof![
+            20 => set,
+            20 => read,
+            4 => write_valid,
+            1 => write_invalid,
+
+            10 => any::<Index>().prop_map(DatabaseOperationView::Delete),
+            10 => any::<Index>().prop_map(DatabaseOperationView::Exists),
+            5 => any::<Index>().prop_map(DatabaseOperationView::ValueLength),
+            10 => Just(DatabaseOperationView::Hash),
+            3 => Just(DatabaseOperationView::Commit),
+            3 => Just(DatabaseOperationView::Checkout),
+        ]
+    }
+
+    fn roundtrip() -> Self {
+        DatabaseOperationView::CommitCheckoutRoundtrip
+    }
 }
 
 /// A reference model of the key-value store of a [`Database`]

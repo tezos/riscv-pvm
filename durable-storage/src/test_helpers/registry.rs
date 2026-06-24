@@ -31,10 +31,7 @@ use super::database::DatabaseOperation;
 use super::database::DatabaseOperationView;
 use super::database::apply_database_operation_with_model;
 use super::database::apply_database_step;
-use super::database::database_operation_view_strategy;
-use super::database::key_strategy;
 use super::database::make_database_operation;
-use super::database::value_strategy;
 use crate::commit::CommitId;
 use crate::database::DatabaseMode;
 use crate::key::Key;
@@ -43,6 +40,7 @@ use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::registry::Registry;
 use crate::registry::RegistryMode;
 use crate::repo::RegistryRepo;
+use crate::test_helpers::OperationView;
 
 /// Operations on a [`Registry`]
 #[derive(Debug, Clone)]
@@ -108,32 +106,25 @@ pub fn make_registry_operations(
         .collect()
 }
 
-pub fn registry_operations_strategy(
-    length: impl Strategy<Value = usize>,
-) -> impl Strategy<Value = (Vec<Key>, Vec<Bytes>, Vec<RegistryOperationView>)> {
-    length.prop_flat_map(|length| {
-        let count = length.div_ceil(10);
+impl OperationView for RegistryOperationView {
+    fn strategy() -> impl Strategy<Value = Self> {
+        // The chosen frequencies emulate real workloads
+        prop_oneof![
+            88 => (any::<Index>(), DatabaseOperationView::strategy())
+                .prop_map(|(i, v)| RegistryOperationView::Database(i, v)),
+            4 => Just(RegistryOperationView::GrowRegistry),
+            2 => Just(RegistryOperationView::ShrinkRegistry),
+            3 => (any::<Index>(), any::<Index>())
+                .prop_map(|(src, dst)| RegistryOperationView::CopyDatabase(src, dst)),
+            2 => (any::<Index>(), any::<Index>())
+                .prop_map(|(src, dst)| RegistryOperationView::MoveDatabase(src, dst)),
+            1 => any::<Index>().prop_map(RegistryOperationView::ClearDatabase),
+        ]
+    }
 
-        (
-            proptest::collection::vec(key_strategy(), count),
-            proptest::collection::vec(value_strategy(), count),
-            proptest::collection::vec(
-                // The chosen frequencies emulate real workloads
-                prop_oneof![
-                    88 => (any::<Index>(), database_operation_view_strategy())
-                        .prop_map(|(i, v)| OperationView::Database(i, v)),
-                    4 => Just(OperationView::GrowRegistry),
-                    2 => Just(OperationView::ShrinkRegistry),
-                    3 => (any::<Index>(), any::<Index>())
-                        .prop_map(|(src, dst)| OperationView::CopyDatabase(src, dst)),
-                    2 => (any::<Index>(), any::<Index>())
-                        .prop_map(|(src, dst)| OperationView::MoveDatabase(src, dst)),
-                    1 => any::<Index>().prop_map(OperationView::ClearDatabase),
-                ],
-                length,
-            ),
-        )
-    })
+    fn roundtrip() -> Self {
+        unimplemented!("commit-checkout roundtrips added in next commit")
+    }
 }
 
 fn grow_registry<KV, M>(registry: &mut Registry<KV, M>)
