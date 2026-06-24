@@ -2186,8 +2186,12 @@ pub(super) mod tests {
         let (_keepalive, repo) = KV::setup_repo();
 
         let (keys, values, ops) = generated;
-        let operations =
-            crate::test_helpers::registry::make_registry_operations(keys, values, ops);
+        let operations = crate::test_helpers::registry::make_registry_operations(
+            std::num::NonZeroUsize::new(1).expect("1 > 0"),
+            keys,
+            values,
+            ops,
+        );
         crate::test_helpers::registry::run_and_prove_registry_operations::<KV>(
             repo, operations,
         )
