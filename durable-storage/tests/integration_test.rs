@@ -3,7 +3,7 @@
 use bytes::Bytes;
 use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::test_helpers::database::DatabaseOperation;
-use octez_riscv_durable_storage::test_helpers::registry::Operation;
+use octez_riscv_durable_storage::test_helpers::registry::RegistryOperation;
 use octez_riscv_durable_storage::test_helpers::registry::make_registry_operations;
 use octez_riscv_durable_storage::test_helpers::registry::registry_operations_strategy;
 use octez_riscv_durable_storage::test_helpers::registry::run_and_prove_registry_operations;
@@ -40,33 +40,33 @@ cfg_if::cfg_if! {
 #[test]
 fn test_durable_storage_manual() {
     let operations = vec![
-        Operation::GrowRegistry,
-        Operation::Database(
+        RegistryOperation::GrowRegistry,
+        RegistryOperation::Database(
             0,
             DatabaseOperation::Set(Key::new(&[0]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
         ),
-        Operation::Database(0, DatabaseOperation::Exists(Key::new(&[0]).unwrap())),
-        Operation::Database(
+        RegistryOperation::Database(0, DatabaseOperation::Exists(Key::new(&[0]).unwrap())),
+        RegistryOperation::Database(
             0,
             DatabaseOperation::Write(Key::new(&[0]).unwrap(), 5, Bytes::copy_from_slice(&[0; 4])),
         ),
-        Operation::GrowRegistry,
-        Operation::Database(
+        RegistryOperation::GrowRegistry,
+        RegistryOperation::Database(
             1,
             DatabaseOperation::Set(Key::new(&[1]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
         ),
-        Operation::Database(0, DatabaseOperation::Commit),
-        Operation::Database(0, DatabaseOperation::Checkout),
-        Operation::ShrinkRegistry,
-        Operation::Database(
+        RegistryOperation::Database(0, DatabaseOperation::Commit),
+        RegistryOperation::Database(0, DatabaseOperation::Checkout),
+        RegistryOperation::ShrinkRegistry,
+        RegistryOperation::Database(
             0,
             DatabaseOperation::Set(Key::new(&[2]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
         ),
-        Operation::Database(0, DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
-        Operation::Database(0, DatabaseOperation::Delete(Key::new(&[1]).unwrap())),
-        Operation::Database(0, DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
-        Operation::ShrinkRegistry,
-        Operation::ShrinkRegistry,
+        RegistryOperation::Database(0, DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
+        RegistryOperation::Database(0, DatabaseOperation::Delete(Key::new(&[1]).unwrap())),
+        RegistryOperation::Database(0, DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
+        RegistryOperation::ShrinkRegistry,
+        RegistryOperation::ShrinkRegistry,
     ];
 
     let (_keepalive, repo) = setup_repo();
