@@ -14,8 +14,9 @@ use anyhow::Result;
 use anyhow::bail;
 use clap::Parser;
 use clap::Subcommand;
+use octez_riscv_durable_storage::test_helpers::OperationView;
 use octez_riscv_durable_storage::test_helpers::database::DatabaseOperation;
-use octez_riscv_durable_storage::test_helpers::database::database_operations_strategy;
+use octez_riscv_durable_storage::test_helpers::database::DatabaseOperationView;
 use octez_riscv_durable_storage::test_helpers::database::make_database_operations;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
@@ -66,7 +67,7 @@ fn gen_database_regression_inputs(count: usize, out_dir: &Path) -> Result<()> {
     let mut runner = TestRunner::default();
 
     for i in 0..count {
-        let tree = database_operations_strategy(OPS_RANGE)
+        let tree = DatabaseOperationView::operations_strategy(OPS_RANGE)
             .new_tree(&mut runner)
             .map_err(|e| anyhow::anyhow!("{e}"))
             .with_context(|| format!("drawing input #{i}"))?;

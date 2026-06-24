@@ -2,10 +2,11 @@
 
 use bytes::Bytes;
 use octez_riscv_durable_storage::key::Key;
+use octez_riscv_durable_storage::test_helpers::OperationView;
 use octez_riscv_durable_storage::test_helpers::database::DatabaseOperation;
 use octez_riscv_durable_storage::test_helpers::registry::RegistryOperation;
+use octez_riscv_durable_storage::test_helpers::registry::RegistryOperationView;
 use octez_riscv_durable_storage::test_helpers::registry::make_registry_operations;
-use octez_riscv_durable_storage::test_helpers::registry::registry_operations_strategy;
 use octez_riscv_durable_storage::test_helpers::registry::run_and_prove_registry_operations;
 use proptest::proptest;
 
@@ -76,7 +77,7 @@ fn test_durable_storage_manual() {
 proptest! {
     #![proptest_config(proptest::test_runner::Config::with_cases(PROPTEST_CASES))]
     #[test]
-    fn test_durable_storage_prop((keys, values, ops) in registry_operations_strategy(1usize..100)) {
+    fn test_durable_storage_prop((keys, values, ops) in RegistryOperationView::operations_strategy(1usize..100)) {
         let (_keepalive, repo) = setup_repo();
         let operations = make_registry_operations(
             std::num::NonZeroUsize::new(1).expect("1 > 0"),

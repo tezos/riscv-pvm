@@ -45,7 +45,7 @@ fn pooled_key_strategy(pools: &KeyPools) -> BoxedStrategy<Key> {
     Union::new_weighted(arms).boxed()
 }
 
-// Distribution is based on that of `test_helpers::database::database_operation_view_strategy`
+// Distribution is based on that of `<DatabaseOperationView as OperationView>::view_strategy`
 fn database_op_strategy(pools: &KeyPools) -> BoxedStrategy<DatabaseOperation> {
     let set = (pooled_key_strategy(pools), value_strategy())
         .prop_map(|(k, v)| DatabaseOperation::Set(k, v));
