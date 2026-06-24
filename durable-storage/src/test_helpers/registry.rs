@@ -11,6 +11,7 @@
 //! [`super::database`].
 
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 use bytes::Bytes;
 use octez_riscv_data::hash::Hash;
@@ -23,6 +24,7 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Verify;
 use proptest::prelude::*;
+use proptest::sample::Index;
 
 use super::database::DatabaseModel;
 use super::database::DatabaseOperation;
@@ -45,41 +47,61 @@ use crate::repo::RegistryRepo;
 /// Operations on a [`Registry`]
 #[derive(Debug, Clone)]
 pub enum Operation {
-    Database(DatabaseOperation),
+    Database(usize, DatabaseOperation),
     GrowRegistry,
     ShrinkRegistry,
-    CopyDatabase,
-    MoveDatabase,
-    ClearDatabase,
+    CopyDatabase(usize, usize),
+    MoveDatabase(usize, usize),
+    ClearDatabase(usize),
 }
 
 #[derive(Debug, Clone)]
 pub enum OperationView {
-    Database(DatabaseOperationView),
+    Database(Index, DatabaseOperationView),
     GrowRegistry,
     ShrinkRegistry,
-    CopyDatabase,
-    MoveDatabase,
-    ClearDatabase,
+    CopyDatabase(Index, Index),
+    MoveDatabase(Index, Index),
+    ClearDatabase(Index),
 }
 
 /// Turn a set of [`OperationView`]s into [`Operation`]s on the given keys
-/// and values, where applicable
+/// and values, where applicable.
+///
+/// Registry indices are resolved against the registry length computed
+/// at every point in the sequence of operations. For them to be valid,
+/// `initial_registry_len` must match the length of the registry on which
+/// the operations will be applied.
 pub fn make_registry_operations(
+    initial_registry_len: NonZeroUsize,
     keys: Vec<Key>,
     values: Vec<Bytes>,
     ops: Vec<OperationView>,
 ) -> Vec<Operation> {
+    let mut len = initial_registry_len.get();
     ops.into_iter()
         .map(|op| match op {
-            OperationView::Database(view) => {
-                Operation::Database(make_database_operation(&keys, &values, view))
+            OperationView::Database(idx, view) => Operation::Database(
+                idx.index(len),
+                make_database_operation(&keys, &values, view),
+            ),
+            OperationView::GrowRegistry => {
+                len += 1;
+                Operation::GrowRegistry
             }
-            OperationView::GrowRegistry => Operation::GrowRegistry,
-            OperationView::ShrinkRegistry => Operation::ShrinkRegistry,
-            OperationView::CopyDatabase => Operation::CopyDatabase,
-            OperationView::MoveDatabase => Operation::MoveDatabase,
-            OperationView::ClearDatabase => Operation::ClearDatabase,
+            OperationView::ShrinkRegistry => {
+                if len > 1 {
+                    len -= 1;
+                }
+                Operation::ShrinkRegistry
+            }
+            OperationView::CopyDatabase(src, dst) => {
+                Operation::CopyDatabase(src.index(len), dst.index(len))
+            }
+            OperationView::MoveDatabase(src, dst) => {
+                Operation::MoveDatabase(src.index(len), dst.index(len))
+            }
+            OperationView::ClearDatabase(idx) => Operation::ClearDatabase(idx.index(len)),
         })
         .collect()
 }
@@ -96,12 +118,15 @@ pub fn registry_operations_strategy(
             proptest::collection::vec(
                 // The chosen frequencies emulate real workloads
                 prop_oneof![
-                    86 => database_operation_view_strategy().prop_map(OperationView::Database),
-                    3 => Just(OperationView::GrowRegistry),
+                    88 => (any::<Index>(), database_operation_view_strategy())
+                        .prop_map(|(i, v)| OperationView::Database(i, v)),
+                    4 => Just(OperationView::GrowRegistry),
                     2 => Just(OperationView::ShrinkRegistry),
-                    2 => Just(OperationView::CopyDatabase),
-                    1 => Just(OperationView::MoveDatabase),
-                    2 => Just(OperationView::ClearDatabase),
+                    3 => (any::<Index>(), any::<Index>())
+                        .prop_map(|(src, dst)| OperationView::CopyDatabase(src, dst)),
+                    2 => (any::<Index>(), any::<Index>())
+                        .prop_map(|(src, dst)| OperationView::MoveDatabase(src, dst)),
+                    1 => any::<Index>().prop_map(OperationView::ClearDatabase),
                 ],
                 length,
             ),
@@ -143,15 +168,6 @@ fn grow_registry_with_model<KV>(
     }
 }
 
-/// Get the index of the current database, or [`None`] if the registry is empty.
-fn get_registry_index<KV, M>(registry: &Registry<KV, M>) -> Option<usize>
-where
-    KV: BackgroundKeyValueStore,
-    M: RegistryMode,
-{
-    registry.len().checked_sub(1)
-}
-
 /// Apply a single [`Operation`] to `registry`.
 ///
 /// Returns `true` if the step was provable. A no-op (e.g., a `ShrinkRegistry` when
@@ -164,16 +180,14 @@ where
 {
     match op {
         Operation::Database(
+            _,
             DatabaseOperation::Commit
             | DatabaseOperation::Checkout
             | DatabaseOperation::CommitCheckoutRoundtrip,
         ) => return false,
-        Operation::Database(db_op) => {
-            let Some(index) = len.checked_sub(1) else {
-                return true;
-            };
+        Operation::Database(index, db_op) => {
             let database = registry
-                .database_mut(index)
+                .database_mut(*index)
                 .expect("The index is in bounds");
             return apply_database_step(database, db_op).expect("applying a step should succeed");
         }
@@ -186,28 +200,19 @@ where
                 .resize_tick(len - 1)
                 .expect("Resizing the registry should succeed");
         }
-        Operation::ClearDatabase => {
-            let Some(index) = len.checked_sub(1) else {
-                return true;
-            };
+        Operation::ClearDatabase(index) => {
             registry
-                .clear_database(index)
+                .clear_database(*index)
                 .expect("Clearing the database should be successful");
         }
-        Operation::CopyDatabase => {
-            if len < 2 {
-                return true;
-            }
+        Operation::CopyDatabase(src, dst) => {
             registry
-                .copy_database(len - 2, len - 1)
+                .copy_database(*src, *dst)
                 .expect("Copying the database should be successful");
         }
-        Operation::MoveDatabase => {
-            if len < 2 {
-                return true;
-            }
+        Operation::MoveDatabase(src, dst) => {
             registry
-                .move_database(len - 2, len - 1)
+                .move_database(*src, *dst)
                 .expect("Moving the database should be successful");
         }
     }
@@ -290,11 +295,7 @@ where
         prove_and_verify_registry_operation(&registry, &operation);
 
         match operation {
-            Operation::Database(DatabaseOperation::Hash) => {
-                let Some(index) = get_registry_index(&registry) else {
-                    continue;
-                };
-
+            Operation::Database(index, DatabaseOperation::Hash) => {
                 let new_digest = registry
                     .database(index)
                     .expect("The index is in bounds")
@@ -307,11 +308,11 @@ where
                     .entry(Hash::from_foldable(&registry))
                     .or_insert(false);
             }
-            Operation::Database(DatabaseOperation::Commit) => {
+            Operation::Database(_, DatabaseOperation::Commit) => {
                 let commit_id = registry.commit().expect("Committing should succeed");
                 checkout_candidates.insert(*commit_id.as_hash(), true);
             }
-            Operation::Database(DatabaseOperation::Checkout) => {
+            Operation::Database(_, DatabaseOperation::Checkout) => {
                 if !checkout_candidates.is_empty() {
                     let index = rand::random_range(0..checkout_candidates.len());
                     let (&commit_hash, &committed) = checkout_candidates
@@ -330,10 +331,7 @@ where
                     );
                 }
             }
-            Operation::Database(op) => {
-                let Some(index) = get_registry_index(&registry) else {
-                    continue;
-                };
+            Operation::Database(index, op) => {
                 let handle = registry.handle().clone();
                 apply_database_operation_with_model::<KV, _>(
                     registry
@@ -360,11 +358,7 @@ where
 
                 registry_model.truncate(new_size);
             }
-            Operation::ClearDatabase => {
-                let Some(index) = get_registry_index(&registry) else {
-                    continue;
-                };
-
+            Operation::ClearDatabase(index) => {
                 registry
                     .clear_database(index)
                     .expect("Clearing the database should be successful");
@@ -373,31 +367,23 @@ where
                 registry_model[index].ambiguous_hash = false;
                 registry_model[index].last = None;
             }
-            Operation::CopyDatabase => {
-                if registry.len() < 2 {
-                    continue;
-                }
-                let (src, dst) = (registry.len() - 2, registry.len() - 1);
-
+            Operation::CopyDatabase(src, dst) => {
                 registry
                     .copy_database(src, dst)
                     .expect("Copying the database should be successful");
 
-                registry_model[dst] = registry_model[src].clone();
-            }
-            Operation::MoveDatabase => {
-                if registry.len() < 2 {
-                    continue;
+                if src != dst {
+                    registry_model[dst] = registry_model[src].clone();
                 }
-                let (src, dst) = (registry.len() - 2, registry.len() - 1);
-
+            }
+            Operation::MoveDatabase(src, dst) => {
                 registry
                     .move_database(src, dst)
                     .expect("Moving the database should be successful");
 
-                let empty = Default::default();
-                let new_dst = std::mem::replace(&mut registry_model[src], empty);
-                registry_model[dst] = new_dst;
+                if src != dst {
+                    registry_model[dst] = std::mem::take(&mut registry_model[src]);
+                }
             }
         }
     }
