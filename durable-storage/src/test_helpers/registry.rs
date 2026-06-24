@@ -51,6 +51,7 @@ pub enum RegistryOperation {
     CopyDatabase(usize, usize),
     MoveDatabase(usize, usize),
     ClearDatabase(usize),
+    CommitCheckoutRoundtrip,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +62,7 @@ pub enum RegistryOperationView {
     CopyDatabase(Index, Index),
     MoveDatabase(Index, Index),
     ClearDatabase(Index),
+    CommitCheckoutRoundtrip,
 }
 
 /// Turn a set of [`RegistryOperationView`]s into [`RegistryOperation`]s on the given keys
@@ -102,6 +104,9 @@ pub fn make_registry_operations(
             RegistryOperationView::ClearDatabase(idx) => {
                 RegistryOperation::ClearDatabase(idx.index(len))
             }
+            RegistryOperationView::CommitCheckoutRoundtrip => {
+                RegistryOperation::CommitCheckoutRoundtrip
+            }
         })
         .collect()
 }
@@ -123,7 +128,7 @@ impl OperationView for RegistryOperationView {
     }
 
     fn roundtrip() -> Self {
-        unimplemented!("commit-checkout roundtrips added in next commit")
+        RegistryOperationView::CommitCheckoutRoundtrip
     }
 }
 
@@ -182,6 +187,7 @@ where
             | DatabaseOperation::Checkout
             | DatabaseOperation::CommitCheckoutRoundtrip,
         ) => return false,
+        RegistryOperation::CommitCheckoutRoundtrip => return false,
         RegistryOperation::Database(index, db_op) => {
             let database = registry
                 .database_mut(*index)
@@ -272,7 +278,18 @@ where
     )
 }
 
-pub fn run_and_prove_registry_operations<KV>(repo: KV::Repo, operations: Vec<RegistryOperation>)
+/// Initialises a Normal-mode [`Registry`] in the given `repo` and applies
+/// `operations` one by one. On each operation:
+/// - checks the result agrees with a reference model
+/// - proves and verifies a proof
+///
+/// Returns the final hash of the registry, which can be used to check that
+/// applying the same operations over registries configured with different
+/// backends results in the same final state.
+pub fn run_and_prove_registry_operations<KV>(
+    repo: KV::Repo,
+    operations: Vec<RegistryOperation>,
+) -> Hash
 where
     KV: BackgroundPersistentKeyValueStore,
     KV::Repo: RegistryRepo,
@@ -384,6 +401,15 @@ where
                     registry_model[dst] = std::mem::take(&mut registry_model[src]);
                 }
             }
+            RegistryOperation::CommitCheckoutRoundtrip => {
+                let commit_id = registry.commit().expect("Committing should succeed");
+                registry = Registry::checkout(checkout_repo.clone(), commit_id)
+                    .expect("Checking out the just-committed registry should succeed");
+                // State is preserved, so `registry_model` is left unchanged.
+                checkout_candidates.insert(*commit_id.as_hash(), true);
+            }
         }
     }
+
+    Hash::from_foldable(&registry)
 }
