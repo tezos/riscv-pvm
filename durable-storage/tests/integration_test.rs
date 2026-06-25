@@ -41,31 +41,30 @@ cfg_if::cfg_if! {
 fn test_durable_storage_manual() {
     let operations = vec![
         Operation::GrowRegistry,
-        Operation::Database(DatabaseOperation::Set(
-            Key::new(&[0]).unwrap(),
-            Bytes::copy_from_slice(&[0; 10]),
-        )),
-        Operation::Database(DatabaseOperation::Exists(Key::new(&[0]).unwrap())),
-        Operation::Database(DatabaseOperation::Write(
-            Key::new(&[0]).unwrap(),
-            5,
-            Bytes::copy_from_slice(&[0; 4]),
-        )),
+        Operation::Database(
+            0,
+            DatabaseOperation::Set(Key::new(&[0]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
+        ),
+        Operation::Database(0, DatabaseOperation::Exists(Key::new(&[0]).unwrap())),
+        Operation::Database(
+            0,
+            DatabaseOperation::Write(Key::new(&[0]).unwrap(), 5, Bytes::copy_from_slice(&[0; 4])),
+        ),
         Operation::GrowRegistry,
-        Operation::Database(DatabaseOperation::Set(
-            Key::new(&[1]).unwrap(),
-            Bytes::copy_from_slice(&[0; 10]),
-        )),
-        Operation::Database(DatabaseOperation::Commit),
-        Operation::Database(DatabaseOperation::Checkout),
+        Operation::Database(
+            1,
+            DatabaseOperation::Set(Key::new(&[1]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
+        ),
+        Operation::Database(0, DatabaseOperation::Commit),
+        Operation::Database(0, DatabaseOperation::Checkout),
         Operation::ShrinkRegistry,
-        Operation::Database(DatabaseOperation::Set(
-            Key::new(&[2]).unwrap(),
-            Bytes::copy_from_slice(&[0; 10]),
-        )),
-        Operation::Database(DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
-        Operation::Database(DatabaseOperation::Delete(Key::new(&[1]).unwrap())),
-        Operation::Database(DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
+        Operation::Database(
+            0,
+            DatabaseOperation::Set(Key::new(&[2]).unwrap(), Bytes::copy_from_slice(&[0; 10])),
+        ),
+        Operation::Database(0, DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
+        Operation::Database(0, DatabaseOperation::Delete(Key::new(&[1]).unwrap())),
+        Operation::Database(0, DatabaseOperation::Exists(Key::new(&[1]).unwrap())),
         Operation::ShrinkRegistry,
         Operation::ShrinkRegistry,
     ];
@@ -79,7 +78,12 @@ proptest! {
     #[test]
     fn test_durable_storage_prop((keys, values, ops) in registry_operations_strategy(1usize..100)) {
         let (_keepalive, repo) = setup_repo();
-        let operations = make_registry_operations(keys, values, ops);
+        let operations = make_registry_operations(
+            std::num::NonZeroUsize::new(1).expect("1 > 0"),
+            keys,
+            values,
+            ops,
+        );
         run_and_prove_registry_operations::<TestKv>(repo, operations);
     }
 }
