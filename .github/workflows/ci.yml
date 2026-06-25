@@ -28,6 +28,9 @@ env:
   # Make sure Sccache automatically uses the GitHub Actions cache
   SCCACHE_GHA_ENABLED: "true"
 
+  # Only write Sccache on the main branch
+  SCCACHE_GHA_RW_MODE: ${{ github.ref_name == 'main' && 'READ_WRITE' || 'READ_ONLY' }}
+
   # Ensure the Nix formatter fails on changes
   TREEFMT_CI: "true"
 
