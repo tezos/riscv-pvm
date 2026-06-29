@@ -29,7 +29,8 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Aggressive cleanup
+    - name: Aggressive cleanup (Linux)
+      if: runner.os == 'Linux'
       shell: bash
       run: |
         # Remove Java (JDKs)
@@ -52,6 +53,13 @@ runs:
 
         # Remove PowerShell
         sudo rm -rf /usr/local/share/powershell
+
+    - name: Aggressive cleanup (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Remove Swift toolchain if possible
+        sudo rm -rf /usr/share/swift || true
 
     - name: Nix setup
       uses: nixbuild/nix-quick-install-action@v34
