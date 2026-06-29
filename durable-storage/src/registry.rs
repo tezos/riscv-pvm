@@ -2204,6 +2204,55 @@ pub(super) mod tests {
             repo, operations,
         )
     });
+
+    kv_test!(test_registry_proof_regression, KV: BackgroundPersistentKeyValueStore, {
+        use goldenfile::Mint;
+
+        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::REGRESSION_INPUTS_DIR;
+        use crate::test_helpers::registry::RegistryOperation;
+        use crate::test_helpers::registry::run_and_prove_registry_operations;
+
+        let mut inputs: Vec<_> = std::fs::read_dir(REGRESSION_INPUTS_DIR)
+            .unwrap_or_else(|e| panic!("reading {REGRESSION_INPUTS_DIR} should succeed: {e}"))
+            .map(|e| {
+                e.unwrap_or_else(|e| {
+                    panic!("reading {REGRESSION_INPUTS_DIR} entry should succeed: {e}")
+                })
+            })
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("registry_") && name.ends_with(".input"))
+            })
+            .collect();
+        inputs.sort_by_key(|e| e.path());
+
+        let mut mint = Mint::new(REGRESSION_EXPECTED_DIR);
+
+        for input in inputs {
+            let path = input.path();
+            let stem = path
+                .file_stem()
+                .expect("input path must have a file stem")
+                .to_str()
+                .expect("input path must be UTF-8")
+                .to_string();
+
+            let file = std::fs::File::open(&path).expect("opening input file should succeed");
+            let ops: Vec<RegistryOperation> =
+                serde_json::from_reader(file).expect("decoding JSON input should succeed");
+
+            let (_keepalive, repo) = KV::setup_repo();
+            let steps = run_and_prove_registry_operations::<KV>(repo, ops);
+
+            let mut golden = mint
+                .new_goldenfile(format!("{stem}.proof-trace"))
+                .expect("opening goldenfile should succeed");
+            serde_json::to_writer_pretty(&mut golden, &steps)
+                .expect("writing goldenfile should succeed");
+        }
+    });
 }
 
 #[cfg(rocksdb)]

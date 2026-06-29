@@ -15,10 +15,19 @@ check:
 test:
 	@cargo nextest run --no-default-features
 
-# Regenerate the checked-in inputs and refresh the matching goldenfiles
-reset-regressions:
+# Regenerate the checked-in inputs and refresh the matching goldenfiles for
+# Database regression tests
+reset-database-regressions:
 	@cargo run -p xtask -- gen-database-regression-inputs
 	@UPDATE_GOLDENFILES=1 cargo nextest run test_database_regression
+
+# Regenerate the checked-in inputs and refresh the matching goldenfiles for
+# Registry regression tests
+reset-registry-regressions:
+	@cargo run -p xtask -- gen-registry-regression-inputs
+	@UPDATE_GOLDENFILES=1 cargo nextest run test_registry_proof_regression
+
+reset-regressions: reset-database-regressions reset-registry-regressions
 
 build-database-long-test:
 	@cargo build --release --features rocksdb,unstable-test-utils --bin database_long_test
@@ -27,4 +36,4 @@ run-database-long-test:
 	@cargo run --release --features rocksdb,unstable-test-utils \
 		--bin database_long_test -- test --max-minutes 10 --keep-epochs 1
 
-.PHONY: all check test gen-regression-inputs run-database-long-test build-database-long-test
+.PHONY: all check test gen-regression-inputs run-database-long-test build-database-long-test reset-database-regressions reset-registry-regressions
