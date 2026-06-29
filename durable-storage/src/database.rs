@@ -2289,9 +2289,9 @@ pub(crate) mod tests {
     kv_test!(test_database_regression, KV: BackgroundPersistentKeyValueStore, {
         use goldenfile::Mint;
 
+        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::REGRESSION_INPUTS_DIR;
         use crate::test_helpers::database::DatabaseOperation;
-        use crate::test_helpers::database::REGRESSION_EXPECTED_DIR;
-        use crate::test_helpers::database::REGRESSION_INPUTS_DIR;
 
         let mut inputs: Vec<_> = std::fs::read_dir(REGRESSION_INPUTS_DIR)
             .unwrap_or_else(|e| panic!("reading {REGRESSION_INPUTS_DIR} should succeed: {e}"))
@@ -2347,9 +2347,9 @@ pub(crate) mod tests {
     kv_test!(test_database_proof_regression, KV: BackgroundPersistentKeyValueStore, {
         use goldenfile::Mint;
 
+        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::REGRESSION_INPUTS_DIR;
         use crate::test_helpers::database::DatabaseOperation;
-        use crate::test_helpers::database::REGRESSION_EXPECTED_DIR;
-        use crate::test_helpers::database::REGRESSION_INPUTS_DIR;
 
         let path = std::path::Path::new(REGRESSION_INPUTS_DIR).join("database_00.input");
         let file = std::fs::File::open(&path).expect("opening input file should succeed");
