@@ -43,7 +43,7 @@ use crate::repo::RegistryRepo;
 use crate::test_helpers::OperationView;
 
 /// Operations on a [`Registry`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum RegistryOperation {
     Database(usize, DatabaseOperation),
     GrowRegistry,
@@ -52,6 +52,15 @@ pub enum RegistryOperation {
     MoveDatabase(usize, usize),
     ClearDatabase(usize),
     CommitCheckoutRoundtrip,
+}
+
+/// A proof recorded for a single provable [`RegistryOperation`]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RegistryProofStep {
+    step: RegistryOperation,
+    #[serde_as(as = "serde_with::hex::Hex")]
+    proof: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,12 +151,6 @@ where
     registry
         .resize_tick(new.saturating_add(1))
         .expect("Resizing the registry should succeed");
-
-    if let Some(previous) = new.checked_sub(1) {
-        registry
-            .copy_database(previous, new)
-            .expect("Copying the database should succeed");
-    }
 }
 
 fn grow_registry_with_model<KV>(
@@ -159,11 +162,7 @@ fn grow_registry_with_model<KV>(
 {
     grow_registry(registry);
 
-    if registry_model.is_empty() {
-        registry_model.resize(1, Default::default());
-    } else {
-        registry_model.push(registry_model[registry_model.len() - 1].clone());
-    }
+    registry_model.push(Default::default());
 }
 
 /// Apply a single [`RegistryOperation`] to `registry`.
@@ -223,8 +222,12 @@ where
     true
 }
 
-/// Generate and verify a proof for a single provable [`RegistryOperation`] applied to `registry`.
-fn prove_and_verify_registry_operation<KV>(registry: &Registry<KV, Normal>, op: &RegistryOperation)
+/// Generate and verify a proof for a single [`RegistryOperation`] applied to `registry`.
+/// Returns the serialised proof, or `None` if `op` is not a provable step.
+fn prove_and_verify_registry_operation<KV>(
+    registry: &Registry<KV, Normal>,
+    op: &RegistryOperation,
+) -> Option<Vec<u8>>
 where
     KV: BackgroundKeyValueStore,
     KV::Repo: Clone,
@@ -239,7 +242,7 @@ where
         .try_start_proof()
         .expect("Starting a proof should succeed");
     if !apply_registry_step(&mut prover, op, len) {
-        return;
+        return None;
     }
     let proof = prover.produce_proof();
     assert_eq!(
@@ -249,8 +252,9 @@ where
     );
 
     let bytes = serialise_proof(&proof);
-    let (reconstructed, _stream) = deserialise_proof::<Registry<KV, Verify>, _>(bytes.into_iter())
-        .expect("Stream deserialisation of the proof bytes should succeed");
+    let (reconstructed, _stream) =
+        deserialise_proof::<Registry<KV, Verify>, _>(bytes.clone().into_iter())
+            .expect("Stream deserialisation of the proof bytes should succeed");
     assert_eq!(
         reconstructed, proof,
         "The proof reconstructed from bytes should match the original"
@@ -275,21 +279,24 @@ where
         verify_post,
         proof.final_state_hash(),
         "Replaying the step in Verify mode must reach the proof's final state hash"
-    )
+    );
+
+    Some(bytes)
 }
 
 /// Initialises a Normal-mode [`Registry`] in the given `repo` and applies
 /// `operations` one by one. On each operation:
 /// - checks the result agrees with a reference model
-/// - proves and verifies a proof
+/// - proves and verifies a proof if the operation is provable, then
+///   records the proof and the operation as a [`RegistryProofStep`]
 ///
-/// Returns the final hash of the registry, which can be used to check that
-/// applying the same operations over registries configured with different
-/// backends results in the same final state.
+/// Returns the vector of [`RegistryProofStep`]s, which can be used
+/// to check that applying the same operations over registries
+/// configured with different backends does not result in a state divergence.
 pub fn run_and_prove_registry_operations<KV>(
     repo: KV::Repo,
     operations: Vec<RegistryOperation>,
-) -> Hash
+) -> Vec<RegistryProofStep>
 where
     KV: BackgroundPersistentKeyValueStore,
     KV::Repo: RegistryRepo,
@@ -301,12 +308,18 @@ where
         Registry::new(repo).expect("Creating the registry should succeed");
 
     let mut registry_model: Vec<DatabaseModel> = vec![];
+    let mut proof_steps: Vec<RegistryProofStep> = Vec::new();
 
     // Start with a size 1 registry
     grow_registry_with_model(&mut registry, &mut registry_model);
 
     for operation in operations {
-        prove_and_verify_registry_operation(&registry, &operation);
+        if let Some(proof) = prove_and_verify_registry_operation(&registry, &operation) {
+            proof_steps.push(RegistryProofStep {
+                step: operation.clone(),
+                proof,
+            });
+        }
 
         match operation {
             RegistryOperation::Database(index, DatabaseOperation::Hash) => {
@@ -411,5 +424,5 @@ where
         }
     }
 
-    Hash::from_foldable(&registry)
+    proof_steps
 }

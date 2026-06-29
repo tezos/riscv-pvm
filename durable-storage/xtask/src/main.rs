@@ -6,6 +6,7 @@
 
 use std::env;
 use std::fs;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -18,6 +19,9 @@ use octez_riscv_durable_storage::test_helpers::OperationView;
 use octez_riscv_durable_storage::test_helpers::database::DatabaseOperation;
 use octez_riscv_durable_storage::test_helpers::database::DatabaseOperationView;
 use octez_riscv_durable_storage::test_helpers::database::make_database_operations;
+use octez_riscv_durable_storage::test_helpers::registry::RegistryOperation;
+use octez_riscv_durable_storage::test_helpers::registry::RegistryOperationView;
+use octez_riscv_durable_storage::test_helpers::registry::make_registry_operations;
 use proptest::prelude::Strategy;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
@@ -47,6 +51,15 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_OUT_DIR)]
         out_dir: PathBuf,
     },
+    /// Regenerate the inputs used by `Registry` regression tests
+    GenRegistryRegressionInputs {
+        /// Number of regression inputs to generate
+        #[arg(long, default_value_t = DEFAULT_COUNT)]
+        count: usize,
+        /// Destination directory, relative to the workspace root.
+        #[arg(long, default_value = DEFAULT_OUT_DIR)]
+        out_dir: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -54,6 +67,9 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::GenDatabaseRegressionInputs { count, out_dir } => {
             gen_database_regression_inputs(count, &out_dir)
+        }
+        Commands::GenRegistryRegressionInputs { count, out_dir } => {
+            gen_registry_regression_inputs(count, &out_dir)
         }
     }
 }
@@ -75,6 +91,37 @@ fn gen_database_regression_inputs(count: usize, out_dir: &Path) -> Result<()> {
         let ops: Vec<DatabaseOperation> = make_database_operations(keys, values, ops_view);
 
         let path = out_dir.join(format!("database_{i:02}.input"));
+        let file =
+            fs::File::create(&path).with_context(|| format!("creating {}", path.display()))?;
+        serde_json::to_writer_pretty(file, &ops)
+            .with_context(|| format!("serialising input #{i}"))?;
+        println!("wrote {}", path.display());
+    }
+
+    Ok(())
+}
+
+fn gen_registry_regression_inputs(count: usize, out_dir: &Path) -> Result<()> {
+    let out_dir = find_repo_root()?.join(out_dir);
+    if !out_dir.exists() || out_dir.metadata()?.is_file() {
+        bail!("output directory {} does not exist", out_dir.display());
+    }
+
+    let mut runner = TestRunner::default();
+
+    for i in 0..count {
+        let tree = RegistryOperationView::operations_strategy(OPS_RANGE)
+            .new_tree(&mut runner)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .with_context(|| format!("drawing input #{i}"))?;
+        let (keys, values, ops_view) = tree.current();
+
+        // The size-1 start matches `run_and_prove_registry_operations`.
+        let initial_len = NonZeroUsize::new(1).expect("1 > 0");
+        let ops: Vec<RegistryOperation> =
+            make_registry_operations(initial_len, keys, values, ops_view);
+
+        let path = out_dir.join(format!("registry_{i:02}.input"));
         let file =
             fs::File::create(&path).with_context(|| format!("creating {}", path.display()))?;
         serde_json::to_writer_pretty(file, &ops)
