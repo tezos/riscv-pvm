@@ -24,6 +24,14 @@ use proptest::prelude::*;
 
 use crate::key::Key;
 
+/// Path to regression test inputs relative to the crate root
+#[cfg(test)]
+pub(crate) const REGRESSION_INPUTS_DIR: &str = "tests/inputs";
+
+/// Path to regression test expected outputs relative to the crate root
+#[cfg(test)]
+pub(crate) const REGRESSION_EXPECTED_DIR: &str = "tests/expected";
+
 /// A proptest-sampleable view of an operation which can be applied to an NDS component
 pub trait OperationView: Clone + std::fmt::Debug + 'static {
     /// Strategy for a single operation, excluding the commit/checkout-roundtrip variant.
