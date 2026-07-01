@@ -19,8 +19,8 @@ use clap::Parser;
 use clap::Subcommand;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_durable_storage::long_test::LongTestConfig;
-use octez_riscv_durable_storage::long_test::replay_failure;
-use octez_riscv_durable_storage::long_test::run_long_test;
+use octez_riscv_durable_storage::long_test::database::replay_failure;
+use octez_riscv_durable_storage::long_test::database::run_long_test;
 
 #[derive(Debug, Parser)]
 #[command(version, long_about = None)]

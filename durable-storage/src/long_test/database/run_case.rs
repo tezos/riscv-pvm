@@ -19,10 +19,10 @@ use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
 use tokio::runtime::Handle;
 
-use crate::commit::CommitId;
+use super::model::LongTestModel;
 use crate::database::Database;
 use crate::database::TracedDatabase;
-use crate::long_test::model::LongTestModel;
+use crate::long_test::harness::Base;
 use crate::persistence_layer::PersistenceLayer;
 use crate::repo::DirectoryManager;
 use crate::storage::in_memory::InMemoryKeyValueStore;
@@ -31,15 +31,6 @@ use crate::test_helpers::database::DatabaseOperation;
 use crate::test_helpers::database::DatabaseReferenceModel;
 use crate::test_helpers::database::check_and_apply_value_operation;
 use crate::test_helpers::database::prove_and_verify_database_operation;
-
-/// The committed starting state shared by every case in an epoch.
-#[derive(Clone)]
-pub struct Base {
-    /// The commit identifying the starting state (identical across backends).
-    pub commit: CommitId,
-    /// The reference model corresponding to `commit`.
-    pub model: LongTestModel,
-}
 
 /// State carried while applying a sequence of operations to all targets.
 struct Targets {
@@ -54,7 +45,7 @@ fn checkout_targets(
     handle: &Handle,
     in_memory_repo: &InMemoryRepo,
     persistent_repo: &DirectoryManager,
-    base: &Base,
+    base: &Base<LongTestModel>,
 ) -> Targets {
     let in_memory_db = TracedDatabase::<InMemoryKeyValueStore, Normal>::checkout(
         handle,
@@ -132,7 +123,7 @@ pub fn run_case(
     handle: &Handle,
     in_memory_repo: &InMemoryRepo,
     persistent_repo: &DirectoryManager,
-    base: &Base,
+    base: &Base<LongTestModel>,
     ops: &[DatabaseOperation],
 ) {
     let mut targets = checkout_targets(handle, in_memory_repo, persistent_repo, base);
@@ -146,9 +137,9 @@ pub fn advance_base(
     handle: &Handle,
     in_memory_repo: &InMemoryRepo,
     persistent_repo: &DirectoryManager,
-    base: &Base,
+    base: &Base<LongTestModel>,
     ops: &[DatabaseOperation],
-) -> Base {
+) -> Base<LongTestModel> {
     let mut targets = checkout_targets(handle, in_memory_repo, persistent_repo, base);
     apply_sequence(&mut targets, ops, false);
 
@@ -184,7 +175,7 @@ pub fn initial_base(
     handle: &Handle,
     in_memory_repo: &InMemoryRepo,
     persistent_repo: &DirectoryManager,
-) -> Base {
+) -> Base<LongTestModel> {
     let in_memory_db = Database::<InMemoryKeyValueStore, Normal>::try_new(handle, in_memory_repo)
         .expect("creating the in-memory database should succeed");
     let persistent_db = Database::<PersistenceLayer, Normal>::try_new(handle, persistent_repo)
