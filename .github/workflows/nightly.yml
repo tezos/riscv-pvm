@@ -85,7 +85,7 @@ jobs:
       - name: Run long test
         run: |
           chmod +x ./database_long_test # upload-artifact strips the executable bit
-          ./database_long_test test \
+          ./database_long_test database test \
             --ops-per-epoch ${{ matrix.config.ops }} \
             --cases-per-epoch ${{ matrix.config.cases }} \
             --keep-epochs 1 \
