@@ -141,7 +141,7 @@ impl OperationView for RegistryOperationView {
     }
 }
 
-fn grow_registry<KV, M>(registry: &mut Registry<KV, M>)
+pub(crate) fn grow_registry<KV, M>(registry: &mut Registry<KV, M>)
 where
     KV: BackgroundKeyValueStore,
     M: RegistryMode,
@@ -224,7 +224,7 @@ where
 
 /// Generate and verify a proof for a single [`RegistryOperation`] applied to `registry`.
 /// Returns the serialised proof, or `None` if `op` is not a provable step.
-fn prove_and_verify_registry_operation<KV>(
+pub(crate) fn prove_and_verify_registry_operation<KV>(
     registry: &Registry<KV, Normal>,
     op: &RegistryOperation,
 ) -> Option<Vec<u8>>

@@ -4,12 +4,15 @@
 
 //! Long-running property-based tests for durable storage.
 //!
-//! [`database`] exercises a single [`Database`]. The subject-agnostic building
-//! blocks live in [`harness`].
+//! [`database`] exercises a single [`Database`]; [`registry`] exercises a
+//! [`Registry`] of several databases. Both drivers share the building blocks
+//! in [`harness`].
 //!
 //! [`Database`]: crate::database::Database
+//! [`Registry`]: crate::registry::Registry
 
 pub mod database;
 mod harness;
+pub mod registry;
 
 pub use harness::LongTestConfig;

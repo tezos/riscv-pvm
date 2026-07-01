@@ -160,6 +160,15 @@ where
         deserialise(&commit_bytes).map_err(OperationalError::from)
     }
 
+    /// The database commit ids referenced by the registry committed at `commit_id`.
+    #[cfg(rocksdb_test_utils)]
+    pub(crate) fn database_commits(
+        repo: &KV::Repo,
+        commit_id: &CommitId,
+    ) -> Result<Vec<CommitId>, OperationalError> {
+        Ok(Self::read_checkout_manifest(repo, commit_id)?.database_hashes)
+    }
+
     fn checkout_databases(
         runtime: &Arc<Runtime>,
         repo: &KV::Repo,
