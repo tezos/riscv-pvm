@@ -13,40 +13,80 @@
 //! [`Database`]: crate::database::Database
 
 use proptest::prelude::*;
-use proptest::sample::select;
 use proptest::strategy::BoxedStrategy;
-use proptest::strategy::Union;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
+use super::model::KeyPools;
 use crate::key::Key;
-use crate::long_test::model::KeyPools;
 use crate::test_helpers::database::DatabaseOperation;
 use crate::test_helpers::database::VALUE_MAX_SIZE;
 use crate::test_helpers::database::key_strategy;
 use crate::test_helpers::database::value_strategy;
 
+/// Which of the model's key pools a sampled key should be drawn from.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum KeyPoolSelector {
+    /// A fresh random key.
+    Fresh,
+    /// A recently written or read key.
+    Hot,
+    /// A currently present key.
+    Existing,
+    /// A recently deleted key.
+    Deleted,
+}
+
+/// Blend weights matching the original pooled key strategy: mostly fresh keys,
+/// with occasional draws from the hot, existing, and recently-deleted pools.
+pub(crate) fn pool_selector_strategy() -> impl Strategy<Value = KeyPoolSelector> {
+    prop_oneof![
+        90 => Just(KeyPoolSelector::Fresh),
+        5 => Just(KeyPoolSelector::Hot),
+        3 => Just(KeyPoolSelector::Existing),
+        2 => Just(KeyPoolSelector::Deleted),
+    ]
+}
+
+/// Resolve a sampled `(fresh, selector, index)` triple against `pools`.
+///
+/// Falls back to `fresh` when the selected pool is empty, so an empty pool
+/// simply behaves like a fresh key.
+pub(crate) fn resolve_pooled_key(
+    pools: &KeyPools,
+    selector: KeyPoolSelector,
+    index: proptest::sample::Index,
+    fresh: Key,
+) -> Key {
+    let pool = match selector {
+        KeyPoolSelector::Fresh => return fresh,
+        KeyPoolSelector::Hot => &pools.hot,
+        KeyPoolSelector::Existing => &pools.existing,
+        KeyPoolSelector::Deleted => &pools.deleted,
+    };
+    if pool.is_empty() {
+        fresh
+    } else {
+        pool[index.index(pool.len())].clone()
+    }
+}
+
 /// A key strategy that blends fresh random keys with samples drawn from the
 /// model's hot, existing, and recently-deleted pools.
 fn pooled_key_strategy(pools: &KeyPools) -> BoxedStrategy<Key> {
-    let mut arms: Vec<(u32, BoxedStrategy<Key>)> = Vec::new();
-
-    arms.push((90, key_strategy().boxed()));
-
-    if !pools.hot.is_empty() {
-        arms.push((5, select(pools.hot.clone()).boxed()));
-    }
-    if !pools.deleted.is_empty() {
-        arms.push((2, select(pools.deleted.clone()).boxed()));
-    }
-    if !pools.existing.is_empty() {
-        arms.push((3, select(pools.existing.clone()).boxed()));
-    }
-
-    Union::new_weighted(arms).boxed()
+    let pools = pools.clone();
+    (
+        key_strategy(),
+        pool_selector_strategy(),
+        any::<proptest::sample::Index>(),
+    )
+        .prop_map(move |(fresh, selector, index)| {
+            resolve_pooled_key(&pools, selector, index, fresh)
+        })
+        .boxed()
 }
 
 // Distribution is based on that of `<DatabaseOperationView as OperationView>::view_strategy`
-fn database_op_strategy(pools: &KeyPools) -> BoxedStrategy<DatabaseOperation> {
+pub(crate) fn database_op_strategy(pools: &KeyPools) -> BoxedStrategy<DatabaseOperation> {
     let set = (pooled_key_strategy(pools), value_strategy())
         .prop_map(|(k, v)| DatabaseOperation::Set(k, v));
 
@@ -94,7 +134,7 @@ fn database_op_strategy(pools: &KeyPools) -> BoxedStrategy<DatabaseOperation> {
     .boxed()
 }
 
-pub fn long_test_ops_strategy(
+pub(super) fn ops_strategy(
     pools: &KeyPools,
     length: usize,
 ) -> impl Strategy<Value = Vec<DatabaseOperation>> + use<> {
