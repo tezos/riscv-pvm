@@ -38,6 +38,6 @@ run-database-long-test:
 
 run-registry-long-test:
 	@cargo run --release --features rocksdb,unstable-test-utils \
-		--bin database_long_test -- registry test --max-minutes 10
+		--bin database_long_test -- registry test --max-minutes 10 --keep-epochs 1
 
 .PHONY: all check test gen-regression-inputs run-database-long-test build-database-long-test reset-database-regressions reset-registry-regressions run-registry-long-test

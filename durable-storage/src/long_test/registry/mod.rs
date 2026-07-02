@@ -18,10 +18,12 @@
 //!
 //! [`Registry`]: crate::registry::Registry
 
+mod gc;
 mod model;
 mod run_case;
 mod strategy;
 
+use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
@@ -73,6 +75,7 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
     let max_epochs = config.epochs;
     let ops_per_epoch = config.ops_per_epoch;
     let cases_per_epoch = config.cases_per_epoch;
+    let keep_epochs = config.keep_epochs;
     let out_dir = match config.out_dir {
         Some(dir) => {
             fs::create_dir_all(&dir)
@@ -96,6 +99,9 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
     if let Some(budget) = config.time_budget {
         rerun.push_str(&format!(" --max-minutes {}", budget.as_secs() / 60));
     }
+    if let Some(keep_epochs) = keep_epochs {
+        rerun.push_str(&format!(" --keep-epochs {keep_epochs}"));
+    }
     eprintln!(
         "test directory: {} | ops/epoch: {ops_per_epoch} | cases/epoch: {cases_per_epoch} | \
          permanent: {permanent}\nrerun with:\n{rerun}",
@@ -111,6 +117,7 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
 
     let mut base = initial_base(&in_memory_repo, &persistent_repo, permanent);
     let mut epoch = 0u64;
+    let mut recent_commits = VecDeque::from([base.commit]);
 
     let start = Instant::now();
     loop {
@@ -135,6 +142,7 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
             .context("drawing the epoch advance sequence")?
             .current();
         base = advance_base(&in_memory_repo, &persistent_repo, &base, &advance_ops);
+        recent_commits.push_back(base.commit);
 
         // Run the property test on this base.
         let strategy = ops_strategy(&base.model.pools(), permanent, ops_per_epoch);
@@ -145,6 +153,7 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
 
         match result {
             Ok(()) => {
+                // Size reporting only via the binary, not the crate test.
                 #[cfg(not(test))]
                 {
                     let repo_size = super::harness::dir_size(&repo_dir)
@@ -162,6 +171,16 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
                     base.model.len(),
                     base.model.total_entries()
                 );
+
+                // Garbage-collect snapshots older than the retention window.
+                if let Some(keep_epochs) = keep_epochs {
+                    gc::prune(
+                        &persistent_repo,
+                        &in_memory_repo,
+                        &mut recent_commits,
+                        keep_epochs,
+                    )?;
+                }
             }
             Err(TestError::Fail(reason, ops)) => {
                 let meta = FailureMeta {
