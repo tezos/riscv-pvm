@@ -97,6 +97,11 @@ enum RegistryCommand {
         /// get overwritten.
         #[arg(long, default_value_t = 5)]
         permanent_databases: usize,
+
+        /// Sample Shrink:Grow at (permanent+1):permanent so the registry size
+        /// tends to 2 * permanent instead of monotonically growing over the run.
+        #[arg(long)]
+        keep_stable_size: bool,
     },
     /// Replay the failing epoch described by `<DIR>/meta.json`.
     Replay {
@@ -139,7 +144,8 @@ fn main() -> Result<()> {
             RegistryCommand::Test {
                 test,
                 permanent_databases,
-            } => registry::run_long_test(config(test)?, permanent_databases),
+                keep_stable_size,
+            } => registry::run_long_test(config(test)?, permanent_databases, keep_stable_size),
             RegistryCommand::Replay { dir } => registry::replay_failure(&dir),
         },
     }

@@ -44,14 +44,36 @@ enum Draw {
     },
 }
 
-/// A single skeleton draw. Weights mirror
-/// `<RegistryOperationView as OperationView>::strategy`.
-fn draw_strategy() -> impl Strategy<Value = Draw> {
+/// A single skeleton draw. Weights mirror `<RegistryOperationView as OperationView>::strategy`.
+///
+/// With `keep_stable_size`, the Grow and Shrink weights are set to `permanent : (permanent + 1)`.
+/// The remaining weights are scaled by `2 * permanent + 1` so their relative frequencies match the
+/// default strategy and only the Grow/Shrink split changes.
+///
+/// This means that the number of databases follows a biased random walk with `permanent` as a
+/// lower bound (we won't allow the registry to shrink below that). The stationary distribution for
+/// this random walk is geometric with parameter `permanent / permanent + 1`. Therefore in the long
+/// run, the mean number of databases is `2 * permanent`, while the run will typically spend rather
+/// more than half its time with fewer than that---the distribution is skewed towards lower values.
+fn draw_strategy(permanent: usize, keep_stable_size: bool) -> impl Strategy<Value = Draw> {
+    let (p_database, p_grow, p_shrink, p_copy, p_move, p_clear) = if keep_stable_size {
+        let permanent = permanent as u32;
+        let scale = 2 * permanent + 1;
+        (
+            88 * scale,
+            6 * permanent,
+            6 * (permanent + 1),
+            3 * scale,
+            2 * scale,
+            scale,
+        )
+    } else {
+        (88, 4, 2, 3, 2, 1)
+    };
+
     prop_oneof![
-        88 => (
+        p_database => (
             any::<Index>(),
-            // Fresh keys; the resolver redraws the key from the target
-            // database's pool when the selector picks a non-empty pool.
             database_op_strategy(&KeyPools::default()),
             pool_selector_strategy(),
             any::<Index>(),
@@ -62,11 +84,11 @@ fn draw_strategy() -> impl Strategy<Value = Draw> {
                 selector,
                 key_index,
             }),
-        4 => Just(Draw::Grow),
-        2 => Just(Draw::Shrink),
-        3 => (any::<Index>(), any::<Index>()).prop_map(|(src, dst)| Draw::Copy { src, dst }),
-        2 => (any::<Index>(), any::<Index>()).prop_map(|(src, dst)| Draw::Move { src, dst }),
-        1 => any::<Index>().prop_map(|index| Draw::Clear { index }),
+        p_grow => Just(Draw::Grow),
+        p_shrink => Just(Draw::Shrink),
+        p_copy => (any::<Index>(), any::<Index>()).prop_map(|(src, dst)| Draw::Copy { src, dst }),
+        p_move => (any::<Index>(), any::<Index>()).prop_map(|(src, dst)| Draw::Move { src, dst }),
+        p_clear => any::<Index>().prop_map(|index| Draw::Clear { index }),
     ]
 }
 
@@ -164,10 +186,11 @@ fn resolve(pools: &[KeyPools], permanent: usize, draws: Vec<Draw>) -> Vec<Regist
 pub(super) fn ops_strategy(
     pools: &[KeyPools],
     permanent: usize,
+    keep_stable_size: bool,
     length: usize,
 ) -> impl Strategy<Value = Vec<RegistryOperation>> + use<> {
     let length = length.max(1);
     let pools = pools.to_vec();
-    proptest::collection::vec(draw_strategy(), 1..=length)
+    proptest::collection::vec(draw_strategy(permanent, keep_stable_size), 1..=length)
         .prop_map(move |draws| resolve(&pools, permanent, draws))
 }
