@@ -183,6 +183,7 @@ mod tests {
                 out_dir: Some(out_dir.clone()),
             },
             2,
+            false,
         )
         .expect("the bounded run should succeed");
 

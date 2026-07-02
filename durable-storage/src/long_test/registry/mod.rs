@@ -67,8 +67,15 @@ const PERSISTENT_DBS: &str = "persistent-databases";
 /// Subdirectory holding the in-memory per-database base snapshots.
 const IN_MEMORY_DBS: &str = "in-memory-databases";
 
-/// Run the long-running registry test starting with a registry with  `permanent` databases.
-pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
+/// Run the long-running registry test starting with a registry of `permanent` databases.
+///
+/// With `keep_stable_size`, Grow/Shrink are sampled so the registry size
+/// tends to `2 * permanent` rather than monotonically growing over the run.
+pub fn run_long_test(
+    config: LongTestConfig,
+    permanent: usize,
+    keep_stable_size: bool,
+) -> Result<()> {
     let seed = config
         .seed
         .unwrap_or_else(|| rand::random::<[u8; 32]>().into());
@@ -101,6 +108,9 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
     }
     if let Some(keep_epochs) = keep_epochs {
         rerun.push_str(&format!(" --keep-epochs {keep_epochs}"));
+    }
+    if keep_stable_size {
+        rerun.push_str(" --keep-stable-size");
     }
     eprintln!(
         "test directory: {} | ops/epoch: {ops_per_epoch} | cases/epoch: {cases_per_epoch} | \
@@ -136,16 +146,26 @@ pub fn run_long_test(config: LongTestConfig, permanent: usize) -> Result<()> {
         let mut runner = epoch_runner(seed, epoch, cases_per_epoch);
 
         // Advance and commit the base by a generated sequence (no proofs).
-        let advance_ops = ops_strategy(&base.model.pools(), permanent, ops_per_epoch)
-            .new_tree(&mut runner)
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .context("drawing the epoch advance sequence")?
-            .current();
+        let advance_ops = ops_strategy(
+            &base.model.pools(),
+            permanent,
+            keep_stable_size,
+            ops_per_epoch,
+        )
+        .new_tree(&mut runner)
+        .map_err(|e| anyhow::anyhow!("{e}"))
+        .context("drawing the epoch advance sequence")?
+        .current();
         base = advance_base(&in_memory_repo, &persistent_repo, &base, &advance_ops);
         recent_commits.push_back(base.commit);
 
         // Run the property test on this base.
-        let strategy = ops_strategy(&base.model.pools(), permanent, ops_per_epoch);
+        let strategy = ops_strategy(
+            &base.model.pools(),
+            permanent,
+            keep_stable_size,
+            ops_per_epoch,
+        );
         let result = runner.run(&strategy, |ops| {
             run_case(&in_memory_repo, &persistent_repo, &base, &ops);
             Ok(())
@@ -407,22 +427,30 @@ mod tests {
     use crate::key::Key;
     use crate::test_helpers::database::DatabaseOperation;
 
-    // A short run of the registry long test.
+    fn restricted_config() -> LongTestConfig {
+        LongTestConfig {
+            epochs: Some(3),
+            ops_per_epoch: 200,
+            cases_per_epoch: 32,
+            seed: None,
+            time_budget: None,
+            keep_epochs: Some(NonZeroUsize::new(2).expect("non-zero")),
+            out_dir: None,
+        }
+    }
+
+    // A short run of the registry long test, with the default growing size.
     #[test]
     fn registry_long_test_restricted() {
-        run_long_test(
-            LongTestConfig {
-                epochs: Some(3),
-                ops_per_epoch: 200,
-                cases_per_epoch: 32,
-                seed: None,
-                time_budget: None,
-                keep_epochs: Some(NonZeroUsize::new(2).expect("non-zero")),
-                out_dir: None,
-            },
-            5,
-        )
-        .expect("the short registry long test run should succeed");
+        run_long_test(restricted_config(), 5, false)
+            .expect("the short registry long test run should succeed");
+    }
+
+    // A short run with a stable registry size (around `2 * permanent`).
+    #[test]
+    fn registry_long_test_restricted_keep_stable_size() {
+        run_long_test(restricted_config(), 5, true)
+            .expect("the short keep-stable-size registry long test run should succeed");
     }
 
     const PERMANENT: usize = 2;
