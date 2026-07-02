@@ -42,6 +42,19 @@ impl InMemoryRepo {
             .remove(id);
         Ok(())
     }
+
+    /// Remove the registry manifest stored for `id` if it exists
+    #[cfg(rocksdb_test_utils)]
+    pub(crate) fn remove_registry_commit(
+        &self,
+        id: &crate::commit::CommitId,
+    ) -> Result<(), OperationalError> {
+        self.registry_commits
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .remove(id);
+        Ok(())
+    }
 }
 
 /// In-memory key-value store
