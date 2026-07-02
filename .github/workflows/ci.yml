@@ -58,7 +58,10 @@ jobs:
             title: MacOS Checks
           - runs-on: ubuntu-latest
             make-target: durable/run-database-long-test
-            title: Durable Storage Long Tests
+            title: Durable Storage Database Long Test
+          - runs-on: ubuntu-latest
+            make-target: durable/run-registry-long-test
+            title: Durable Storage Registry Long Test
 
     name: ${{ matrix.title }}
     runs-on: ${{ matrix.runs-on }}
