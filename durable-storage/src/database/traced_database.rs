@@ -7,7 +7,7 @@
 //! [`Database`] wrapper which can record execution traces.
 //!
 //! Available to unit tests and, under the `unstable-test-utils` feature, to the
-//! long-running test binary (`src/bin/database_long_test.rs`).
+//! long-running test binary (`src/bin/long_test.rs`).
 
 use std::cell::RefCell;
 #[cfg(test)]

@@ -78,8 +78,8 @@ serde.workspace = true
 serde_json.workspace = true
 
 [[bin]]
-name = "database_long_test"
-path = "src/bin/database_long_test.rs"
+name = "long_test"
+path = "src/bin/long_test.rs"
 required-features = ["rocksdb", "unstable-test-utils"]
 
 [[bench]]
