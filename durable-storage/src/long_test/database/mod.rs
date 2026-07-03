@@ -77,7 +77,7 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
     };
 
     let mut rerun = format!(
-        "cargo run --release --features rocksdb,unstable-test-utils --bin database_long_test -- \
+        "cargo run --release --features rocksdb,unstable-test-utils --bin long_test -- \
          database test --seed {seed} --ops-per-epoch {ops_per_epoch} \
          --cases-per-epoch {cases_per_epoch}"
     );
@@ -283,7 +283,7 @@ fn write_failure(
         "failure artifacts written to {failure}\n\
          replay with:\n\
          cargo run --release \
-         --features rocksdb,unstable-test-utils --bin database_long_test -- database replay {failure}",
+         --features rocksdb,unstable-test-utils --bin long_test -- database replay {failure}",
         failure = failure_dir.display(),
     );
     Ok(())

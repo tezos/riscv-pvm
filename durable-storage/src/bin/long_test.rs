@@ -33,7 +33,7 @@ enum Commands {
     /// Operate on the single-`Database` long test.
     Database {
         #[command(subcommand)]
-        command: SubjectCommand,
+        command: DatabaseCommand,
     },
     /// Operate on the `Registry` long test.
     Registry {
@@ -76,7 +76,7 @@ struct TestArgs {
 }
 
 #[derive(Debug, Subcommand)]
-enum SubjectCommand {
+enum DatabaseCommand {
     /// Run the long test.
     Test(TestArgs),
     /// Replay the failing epoch described by `<DIR>/meta.json`.
@@ -137,8 +137,8 @@ fn config(args: TestArgs) -> Result<LongTestConfig> {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Commands::Database { command } => match command {
-            SubjectCommand::Test(args) => database::run_long_test(config(args)?),
-            SubjectCommand::Replay { dir } => database::replay_failure(&dir),
+            DatabaseCommand::Test(args) => database::run_long_test(config(args)?),
+            DatabaseCommand::Replay { dir } => database::replay_failure(&dir),
         },
         Commands::Registry { command } => match command {
             RegistryCommand::Test {

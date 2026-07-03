@@ -8,7 +8,7 @@ all: check test
 check:
 	@cargo clippy --all-targets --no-default-features -- --deny warnings
 	@cargo clippy -p xtask --all-targets -- --deny warnings
-	@cargo clippy --features unstable-test-utils --bin database_long_test -- --deny warnings
+	@cargo clippy --features unstable-test-utils --bin long_test -- --deny warnings
 
 # distinct from the workspace-level test in that it actually turns off
 # rocksdb: using the in-memory implementation instead
@@ -29,20 +29,20 @@ reset-registry-regressions:
 
 reset-regressions: reset-database-regressions reset-registry-regressions
 
-build-database-long-test:
-	@cargo build --release --features rocksdb,unstable-test-utils --bin database_long_test
+build-long-test:
+	@cargo build --release --features rocksdb,unstable-test-utils --bin long_test
 
 run-database-long-test:
 	@cargo run --release --features rocksdb,unstable-test-utils \
-		--bin database_long_test -- database test --max-minutes 10 --keep-epochs 1
+		--bin long_test -- database test --max-minutes 10 --keep-epochs 1
 
 run-registry-long-test:
 	@cargo run --release --features rocksdb,unstable-test-utils \
-		--bin database_long_test -- registry test --max-minutes 10 --keep-epochs 1
+		--bin long_test -- registry test --max-minutes 10 --keep-epochs 1
 
 run-registry-long-test-stable:
 	@cargo run --release --features rocksdb,unstable-test-utils \
-		--bin database_long_test -- registry test --max-minutes 10  --keep-epochs 1 \
+		--bin long_test -- registry test --max-minutes 10 --keep-epochs 1 \
 		--keep-stable-size
 
-.PHONY: all check test gen-regression-inputs run-database-long-test build-database-long-test reset-database-regressions reset-registry-regressions run-registry-long-test run-registry-long-test-stable
+.PHONY: all check test gen-regression-inputs run-database-long-test reset-database-regressions reset-registry-regressions build-long-test run-registry-long-test run-registry-long-test-stable

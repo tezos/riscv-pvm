@@ -40,14 +40,14 @@ jobs:
         with:
           save-nix-cache: true
 
-      - name: Build database_long_test
-        run: make durable/build-database-long-test
+      - name: Build long_test
+        run: make durable/build-long-test
 
       - name: Upload binary
         uses: actions/upload-artifact@v7
         with:
-          name: database_long_test
-          path: target/release/database_long_test
+          name: long_test
+          path: target/release/long_test
           if-no-files-found: error
           retention-days: 1
 
@@ -80,12 +80,12 @@ jobs:
       - name: Download binary
         uses: actions/download-artifact@v8
         with:
-          name: database_long_test
+          name: long_test
 
       - name: Run long test
         run: |
-          chmod +x ./database_long_test # upload-artifact strips the executable bit
-          ./database_long_test database test \
+          chmod +x ./long_test # upload-artifact strips the executable bit
+          ./long_test database test \
             --ops-per-epoch ${{ matrix.config.ops }} \
             --cases-per-epoch ${{ matrix.config.cases }} \
             --keep-epochs 1 \
