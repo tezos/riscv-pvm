@@ -12,9 +12,12 @@ pub mod tag;
 
 use std::error;
 
-use bincode::Decode;
 use bincode::error::DecodeError;
 
+use crate::codec::Bincode;
+use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
+use crate::codec::LeafDecodeError;
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::Many;
 use crate::foldable::seq_tree::tree_depth;
@@ -68,8 +71,8 @@ impl<T> Partial<T> {
     }
 }
 
-impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Partial<T> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+impl<C: LeafCodec, T: Foldable<PartialHashFold<C>>> Foldable<PartialHashFold<C>> for Partial<T> {
+    fn fold(&self, builder: PartialHashFold<C>) -> PartialHash {
         match self {
             Partial::Absent => builder.previous(),
             Partial::Blinded(hash) => builder.present(*hash),
@@ -89,6 +92,9 @@ pub trait DeserialiserError: error::Error {
 pub enum ProofError {
     #[error("Error during deserialisation: {0}")]
     Deserialise(#[from] DecodeError),
+
+    #[error("Error during leaf deserialisation: {0}")]
+    LeafDecode(#[from] LeafDecodeError),
 
     #[error("Deserialising as a stream and not all bytes were consumed")]
     RemainingBytes,
@@ -141,6 +147,9 @@ pub trait Deserialiser {
     /// Error type
     type Error: DeserialiserError;
 
+    /// The codec used to decode leaf values from the proof.
+    type Codec: LeafCodec;
+
     /// After deserialising a proof, a [`Suspended<R>`] computation is obtained.
     type Suspended<R>: Suspended<Output = R, Parent = Self>;
 
@@ -151,7 +160,7 @@ pub trait Deserialiser {
     fn into_leaf_raw<const LEN: usize>(self) -> SuspendedResult<Self, Partial<Box<[u8; LEN]>>>;
 
     /// It is expected for the proof to be a leaf. Parse the raw bytes of that leaf into a type `T`.
-    fn into_leaf<T: Decode<()>>(self) -> SuspendedResult<Self, Partial<T>>;
+    fn into_leaf<T: LeafDecode<Self::Codec>>(self) -> SuspendedResult<Self, Partial<T>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode, Self::Error>;
@@ -191,7 +200,9 @@ pub trait DeserialiserNode: Sized {
 
     /// The next branch of the current node is deserialised using the [`FromProof`] implementation
     /// of type `T`.
-    fn next_branch<T: FromProof>(self) -> Result<(Self, T), <Self::Parent as Deserialiser>::Error> {
+    fn next_branch<T: FromProof<<Self::Parent as Deserialiser>::Codec>>(
+        self,
+    ) -> Result<(Self, T), <Self::Parent as Deserialiser>::Error> {
         self.next_branch_with(|deser| T::from_proof(deser))
     }
 
@@ -214,14 +225,17 @@ pub trait Suspended {
     ) -> <Self::Parent as Deserialiser>::Suspended<T>;
 }
 
-/// Trait for types that can be constructed from a Merkle proof
-pub trait FromProof: Sized {
+/// Trait for types that can be constructed from a Merkle proof whose leaves use codec `C`.
+///
+/// Parameterised by the leaf [`LeafCodec`]; defaults to [`Bincode`] so existing `FromProof`
+/// references keep the historical (bincode) proof format.
+pub trait FromProof<C: LeafCodec = Bincode>: Sized {
     /// Parse the given proof to construct an instance of `Self`.
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self>;
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self>;
 }
 
-impl<A: FromProof, B: FromProof> FromProof for (A, B) {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl<C: LeafCodec, A: FromProof<C>, B: FromProof<C>> FromProof<C> for (A, B) {
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let proof = proof.into_node()?;
 
         let (proof, a) = proof.next_branch()?;
@@ -231,8 +245,8 @@ impl<A: FromProof, B: FromProof> FromProof for (A, B) {
     }
 }
 
-impl<Item: FromProof, const LEN: usize> FromProof for [Item; LEN] {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl<C: LeafCodec, Item: FromProof<C>, const LEN: usize> FromProof<C> for [Item; LEN] {
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let proof = proof.into_node()?;
 
         let mut items: [Option<Item>; LEN] = std::array::from_fn(|_| None);
@@ -247,8 +261,10 @@ impl<Item: FromProof, const LEN: usize> FromProof for [Item; LEN] {
     }
 }
 
-impl<Item: FromProof, const ARITY: usize, const LEN: usize> FromProof for Many<Item, ARITY, LEN> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl<C: LeafCodec, Item: FromProof<C>, const ARITY: usize, const LEN: usize> FromProof<C>
+    for Many<Item, ARITY, LEN>
+{
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let mut leaves = Vec::with_capacity(LEN);
 
         let result = descend_tree(proof, ARITY, LEN, &mut |_idx, proof| {
@@ -383,7 +399,7 @@ pub fn sequence_as_tree_from_proof<Length, State, Proof>(
     mut with_item: impl FnMut(&mut State, usize, Proof) -> SuspendedResult<Proof, ()>,
 ) -> SuspendedResult<Proof, State>
 where
-    Length: Decode<()>,
+    Length: LeafDecode<Proof::Codec>,
     Proof: Deserialiser,
 {
     let proof = proof.into_node()?;

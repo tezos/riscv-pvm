@@ -36,6 +36,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::foldable::Fold;
@@ -1114,7 +1115,9 @@ impl Foldable<PartialHashFold> for VerifyNodeId {
 }
 
 impl FromProof for VerifyNodeId {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         // Capture the sub-proof BEFORE consuming `proof`; `into_node` moves it.
         let original_proof = proof.capture_owned_proof().map(Arc::new);
         let ctx = proof.into_node()?;
@@ -1155,7 +1158,9 @@ impl Foldable<PartialHashFold> for VerifyTreeId {
 }
 
 impl FromProof for VerifyTreeId {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let ctx = proof.into_node()?;
         let (ctx, partial) = Tree::from_branches(ctx)?;
         let tree_id = match partial {

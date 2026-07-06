@@ -11,6 +11,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -173,7 +174,7 @@ where
 }
 
 impl FromProof for PagePermissions<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = codec::Bincode>>(proof: D) -> SuspendedResult<D, Self> {
         Vector::from_proof(proof).map(|result| result.map(|pages| Self { pages }))
     }
 }

@@ -41,6 +41,8 @@ impl<BS: BlobStore> Fold for BlobStoreFold<BS> {
 
     type NodeFold = BlobStoreNodeFold<BS>;
 
+    type Codec = crate::codec::Bincode;
+
     fn into_node_fold(self) -> BlobStoreNodeFold<BS> {
         BlobStoreNodeFold {
             store: self.store,

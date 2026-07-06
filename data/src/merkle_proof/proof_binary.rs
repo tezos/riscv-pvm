@@ -5,10 +5,14 @@
 //! Binary Merkle tree proof format
 
 use std::io::Read;
+use std::marker::PhantomData;
 
 use bincode::Decode;
 use bincode::error::DecodeError;
 
+use crate::codec::Bincode;
+use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
 use crate::hash::Hash;
 use crate::merkle_proof::Deserialiser;
 use crate::merkle_proof::DeserialiserNode;
@@ -37,14 +41,16 @@ impl<'t> StreamInput<'t> {
         Ok(deserialise_from(&mut self.data)?)
     }
 
-    /// Like [`Self::deserialise`] but also returns the raw bytes that were used to deserialise `T`.
-    fn capture_deserialise<T: Decode<()>>(&mut self) -> Result<(T, &'t [u8]), ProofError> {
+    /// Like [`Self::deserialise`] but decodes a leaf value with codec `C` and also returns the raw
+    /// bytes that were consumed.
+    fn capture_deserialise<C: LeafCodec, T: LeafDecode<C>>(
+        &mut self,
+    ) -> Result<(T, &'t [u8]), ProofError> {
         let start_pos = self.data;
-        let data = self.deserialise::<T>()?;
-        let end_pos = self.data;
+        let (data, consumed) = <T as LeafDecode<C>>::leaf_decode_stream(self.data)?;
+        self.data = &self.data[consumed..];
 
-        let data_len = start_pos.len() - end_pos.len();
-        let raw_bytes = &start_pos[..data_len];
+        let raw_bytes = &start_pos[..consumed];
 
         Ok((data, raw_bytes))
     }
@@ -56,7 +62,10 @@ impl<'t> StreamInput<'t> {
 }
 
 /// Deserialiser for [`Deserialiser`] based on a stream of bytes.
-pub struct StreamDeserialiser<'t> {
+///
+/// Parameterised by the leaf codec; defaults to [`Bincode`]. Only leaf decoding depends on
+/// the codec — the tag/blind-hash structure is always bincode-encoded.
+pub struct StreamDeserialiser<'t, C = Bincode> {
     /// Context layers with regard to presence
     ///
     /// The last element describes the current node context. The first element describes the root
@@ -73,9 +82,11 @@ pub struct StreamDeserialiser<'t> {
     /// is because we require the ability to recover the tag source from a combinator for an
     /// absent node.
     input: StreamInput<'t>,
+
+    _codec: PhantomData<C>,
 }
 
-impl<'t> StreamDeserialiser<'t> {
+impl<'t, C: LeafCodec> StreamDeserialiser<'t, C> {
     /// Create a new deserialiser for a present context with the given tags.
     pub fn new_present(input: StreamInput<'t>) -> Self {
         Self::new(input, Partial::Present(()))
@@ -91,6 +102,7 @@ impl<'t> StreamDeserialiser<'t> {
         StreamDeserialiser {
             context: vec![context],
             input,
+            _codec: PhantomData,
         }
     }
 
@@ -125,12 +137,14 @@ impl<'t> StreamDeserialiser<'t> {
     }
 }
 
-impl<'t> Deserialiser for StreamDeserialiser<'t> {
+impl<'t, C: LeafCodec> Deserialiser for StreamDeserialiser<'t, C> {
     type Error = ProofError;
 
-    type Suspended<R> = StreamParserComb<'t, R>;
+    type Codec = C;
 
-    type DeserialiserNode = StreamBranchComb<'t>;
+    type Suspended<R> = StreamParserComb<'t, C, R>;
+
+    type DeserialiserNode = StreamBranchComb<'t, C>;
 
     fn into_leaf_raw<const LEN: usize>(
         mut self,
@@ -180,7 +194,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         })
     }
 
-    fn into_leaf<T: Decode<()>>(mut self) -> Result<Self::Suspended<Partial<T>>, ProofError> {
+    fn into_leaf<T: LeafDecode<C>>(mut self) -> Result<Self::Suspended<Partial<T>>, ProofError> {
         if self.is_absent_or_blinded() {
             let this = StreamParserComb {
                 result: Partial::Absent,
@@ -202,7 +216,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
                     (result, proof)
                 }
                 LeafTag::Read => {
-                    let (data, raw_bytes) = self.input.capture_deserialise::<T>()?;
+                    let (data, raw_bytes) = self.input.capture_deserialise::<C, T>()?;
                     let result = Partial::Present(data);
                     let proof = Partial::Present(raw_bytes.to_vec());
                     (result, proof)
@@ -254,7 +268,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
 }
 
 /// Parser combinator for [`StreamDeserialiser`] deserialiser.
-pub struct StreamParserComb<'t, R> {
+pub struct StreamParserComb<'t, C, R> {
     /// Parser result
     result: R,
 
@@ -262,10 +276,10 @@ pub struct StreamParserComb<'t, R> {
     proof: OwnedProofTree,
 
     /// Parent deserialiser
-    deser: StreamDeserialiser<'t>,
+    deser: StreamDeserialiser<'t, C>,
 }
 
-impl<R> StreamParserComb<'_, R> {
+impl<C, R> StreamParserComb<'_, C, R> {
     /// Deserialise the input and return the result if all bytes have been consumed.
     pub fn into_result(self) -> Result<(R, OwnedProofTree), ProofError> {
         if !self.deser.input.is_empty() {
@@ -278,10 +292,10 @@ impl<R> StreamParserComb<'_, R> {
     }
 }
 
-impl<'t, R> Suspended for StreamParserComb<'t, R> {
+impl<'t, C: LeafCodec, R> Suspended for StreamParserComb<'t, C, R> {
     type Output = R;
 
-    type Parent = StreamDeserialiser<'t>;
+    type Parent = StreamDeserialiser<'t, C>;
 
     fn map<T>(
         self,
@@ -296,16 +310,16 @@ impl<'t, R> Suspended for StreamParserComb<'t, R> {
 }
 
 /// Branch combinator for [`StreamDeserialiser`] deserialiser.
-pub struct StreamBranchComb<'t> {
+pub struct StreamBranchComb<'t, C> {
     /// Children of the node within the Merkle proof
     proof_children: Vec<OwnedProofTree>,
 
     /// Parent deserialiser
-    deser: StreamDeserialiser<'t>,
+    deser: StreamDeserialiser<'t, C>,
 }
 
-impl<'t> DeserialiserNode for StreamBranchComb<'t> {
-    type Parent = StreamDeserialiser<'t>;
+impl<'t, C: LeafCodec> DeserialiserNode for StreamBranchComb<'t, C> {
+    type Parent = StreamDeserialiser<'t, C>;
 
     fn presence(&self) -> Partial<()> {
         self.deser.presence()
@@ -353,11 +367,11 @@ impl<'t> DeserialiserNode for StreamBranchComb<'t> {
 ///
 /// Convenience function to bundle deserialisation and execution of the suspended function for the]
 /// binary proof format deserialisation.
-pub fn deserialise<T: FromProof>(
+pub fn deserialise<C: LeafCodec, T: FromProof<C>>(
     proof_tree_raw_bytes: &[u8],
 ) -> Result<(T, OwnedProofTree), ProofError> {
     let input = StreamInput::new(proof_tree_raw_bytes);
-    let context = StreamDeserialiser::new_present(input);
+    let context = StreamDeserialiser::<C>::new_present(input);
 
     let result = T::from_proof(context)?;
 

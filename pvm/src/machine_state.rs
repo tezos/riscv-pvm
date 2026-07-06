@@ -32,6 +32,7 @@ use memory::MemoryGovernanceError;
 use memory::Permissions;
 use memory::listener::MemoryGovernanceListener;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
@@ -211,7 +212,7 @@ impl<MC> FromProof for MachineCoreState<MC, Verify>
 where
     MC: MemoryConfig,
 {
-    fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
+    fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser<Codec = codec::Bincode>>(
         proof: D,
     ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
@@ -374,9 +375,10 @@ impl<MC> FromProof for MachineState<MC, EmptyPageCache, Verify>
 where
     MC: MemoryConfig,
 {
-    fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
-        proof: D,
-    ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
+    fn from_proof<D>(proof: D) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self>
+    where
+        D: octez_riscv_data::merkle_proof::Deserialiser<Codec = codec::Bincode>,
+    {
         let result = MachineCoreState::from_proof(proof)?;
         let result = result.map(|core| Self {
             core,

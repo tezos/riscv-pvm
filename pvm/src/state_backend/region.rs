@@ -13,7 +13,7 @@ pub(crate) mod tests {
     use octez_riscv_data::hash::PartialHash;
     use octez_riscv_data::merkle_proof::proof_tree;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Mode;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Provable;
@@ -93,7 +93,7 @@ pub(crate) mod tests {
             // Verify the proof and check the final hash
             catch_not_found(|| {
                 let mut verify_foo = {
-                    let (bar, qux) = proof_tree::deserialise(ProofPart::Present(&proof))
+                    let (bar, qux) = proof_tree::deserialise(ProofTree::present(&proof))
                         .unwrap()
                         .0;
                     Foo { bar, qux }

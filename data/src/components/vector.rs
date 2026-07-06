@@ -22,6 +22,9 @@ use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
+use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
+use crate::codec::LeafEncode;
 use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
@@ -55,7 +58,6 @@ use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::not_found;
 use crate::partial_vec::PartialVec;
-use crate::serialisation::serialise;
 
 /// Vector state component
 ///
@@ -149,7 +151,10 @@ impl<T, M: VectorMode> Default for Vector<T, M> {
     }
 }
 
-impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Normal> {
+impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Normal>
+where
+    u64: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         let mut node = builder.into_node_fold();
 
@@ -165,7 +170,10 @@ impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Normal> {
     }
 }
 
-impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Prove<'_>> {
+impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Prove<'_>>
+where
+    u64: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         let mut node = builder.into_node_fold();
 
@@ -181,15 +189,20 @@ impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Prove<'_>> {
     }
 }
 
-impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for Vector<T, Prove<'_>> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+impl<C: LeafCodec, T: Foldable<MerkleProofFold<C>>> Foldable<MerkleProofFold<C>>
+    for Vector<T, Prove<'_>>
+where
+    u64: LeafEncode<C>,
+{
+    fn fold(&self, builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
         // Reminder: Merkle trees generated in Prove mode capture the state at beginning of proof
         // generation. This means we need to use `previous` state for the length and data.
 
         let mut node = builder.into_node_fold();
 
         let length = self.vector.previous.len();
-        let length_data = serialise(length as u64).expect("Serialising length should not fail");
+        let length_data = LeafEncode::<C>::leaf_encode(&(length as u64))
+            .expect("Serialising length should not fail");
         let is_length_needed = self.vector.need_length_in_proof();
         let length_constraint = if is_length_needed {
             MinimumPresence::Present
@@ -214,8 +227,12 @@ impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for Vector<T, Prove
     }
 }
 
-impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Vector<T, Verify> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+impl<C: LeafCodec, T: Foldable<PartialHashFold<C>>> Foldable<PartialHashFold<C>>
+    for Vector<T, Verify>
+where
+    u64: LeafEncode<C>,
+{
+    fn fold(&self, builder: PartialHashFold<C>) -> PartialHash {
         if self.vector.is_completely_absent() {
             return builder.previous();
         }
@@ -230,7 +247,9 @@ impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Vector<T, Verif
 
         let mut node = builder.into_node_fold();
 
-        let length_hash = Hash::hash_encodable(length as u64).expect("Hashing should not fail");
+        let length_hash = Hash::hash_bytes(
+            &LeafEncode::<C>::leaf_encode(&(length as u64)).expect("Hashing should not fail"),
+        );
         let length_node = PartialHash::Present(length_hash);
         node.add(&length_node);
 
@@ -278,8 +297,11 @@ impl<'normal, 'inner, E, T: ProvableExt<'normal, 'inner, E>> ProvableExt<'normal
     }
 }
 
-impl<T: FromProof> FromProof for Vector<T, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl<C: LeafCodec, T: FromProof<C>> FromProof<C> for Vector<T, Verify>
+where
+    u64: LeafDecode<C>,
+{
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let with_length = |length: Partial<u64>| {
             let length = length.map_present(|len: u64| len as usize);
             let state = Vector {

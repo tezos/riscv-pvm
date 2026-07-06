@@ -37,6 +37,7 @@ pub use elems::*;
 mod tests {
     use std::num::NonZeroUsize;
 
+    use octez_riscv_data::codec;
     use octez_riscv_data::components::atom::Atom;
     use octez_riscv_data::components::atom::AtomMode;
     use octez_riscv_data::components::data_space::DataSpace;
@@ -116,7 +117,7 @@ mod tests {
 
         // The Verify mode needs a proof, so we generate it from the Prove mode
         let proof_tree = MerkleProof::from_foldable(&mem_prove);
-        let proof_deser = ProofTree::Present(&proof_tree);
+        let proof_deser = ProofTree::present(&proof_tree);
         let mut mem_verify = DataSpace::from_proof(proof_deser).unwrap().into_result();
 
         unsafe {
@@ -186,9 +187,12 @@ mod tests {
         }
 
         impl FromProof for Foo<Verify> {
-            fn from_proof<Proof: octez_riscv_data::merkle_proof::Deserialiser>(
+            fn from_proof<Proof>(
                 proof: Proof,
-            ) -> octez_riscv_data::merkle_proof::SuspendedResult<Proof, Self> {
+            ) -> octez_riscv_data::merkle_proof::SuspendedResult<Proof, Self>
+            where
+                Proof: octez_riscv_data::merkle_proof::Deserialiser<Codec = codec::Bincode>,
+            {
                 let node = proof.into_node()?;
 
                 let (node, bar) = node.next_branch()?;
@@ -207,7 +211,7 @@ mod tests {
         operation(&mut foo_prove);
 
         let merkle_proof = MerkleProof::from_foldable(&foo_prove);
-        let proof_deser = ProofTree::Present(&merkle_proof);
+        let proof_deser = ProofTree::present(&merkle_proof);
 
         let expected_hash = Hash::from_foldable(&foo_prove);
 

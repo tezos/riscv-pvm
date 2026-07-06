@@ -20,6 +20,7 @@ use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use octez_riscv_data::codec;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
@@ -179,7 +180,9 @@ impl<KV> MerkleLayer<KV, Verify> {
 }
 
 impl<KV> FromProof for MerkleLayer<KV, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         // Capture before consuming `proof`.
         //
         // This is `None` for deserialisers that cannot capture an owned proof (e.g. the stream
@@ -847,7 +850,7 @@ mod tests {
     impl<KV> MerkleLayer<KV, Verify> {
         /// Construct a Verify-mode [`MerkleLayer`] by deserialising a [`MerkleProof`]
         pub fn from_proof(proof: MerkleProof) -> Result<Self, ProofError> {
-            let suspended = <Self as FromProof>::from_proof(ProofTree::Present(&proof))?;
+            let suspended = <Self as FromProof>::from_proof(ProofTree::present(&proof))?;
             Ok(suspended.into_result())
         }
     }

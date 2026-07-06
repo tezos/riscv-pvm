@@ -12,6 +12,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -72,7 +73,9 @@ impl<B: BuddyConfig> BuddyConfig for BuddyBranch2Config<B> {
         }
     }
 
-    fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
+    fn buddy_from_proof<D: Deserialiser<Codec = codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self::Buddy<Verify>> {
         let proof = proof.into_node()?;
 
         let (proof, free_info) = proof.next_branch()?;

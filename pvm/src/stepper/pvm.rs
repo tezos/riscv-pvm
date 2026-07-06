@@ -9,6 +9,7 @@ use std::ops::Bound;
 use std::path::Path;
 
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::data_space::CloneDataSpaceMode;
@@ -358,12 +359,12 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
         let (pvm, merkle_tree) = proof_binary::deserialise(&tree_serialisation)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
-        let deserialised_proof_tree = match merkle_tree {
-            OwnedProofTree::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
-            OwnedProofTree::Absent => ProofTree::Absent,
+        let deserialised_proof_tree: ProofTree<'_, codec::Bincode> = match merkle_tree {
+            OwnedProofTree::Present(ref merkle_tree) => ProofTree::present(merkle_tree),
+            OwnedProofTree::Absent => ProofTree::absent(),
         };
         debug_assert_eq!(
-            ProofTree::Present(proof.tree()),
+            ProofTree::present(proof.tree()),
             deserialised_proof_tree,
             "The Merkle proof tree obtained through deserialisation should match the original proof tree"
         );
@@ -382,13 +383,13 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
         DS: Foldable<PartialHashFold>,
         DS: FromProof + DurableStorage<Verify>,
     {
-        let proof_tree = ProofTree::Present(proof.tree());
+        let proof_tree = ProofTree::present(proof.tree());
         let (pvm, deserialised_proof_tree) = proof_tree::deserialise(proof_tree)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let gotten_proof_tree = match deserialised_proof_tree {
-            OwnedProofTree::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
-            OwnedProofTree::Absent => ProofTree::Absent,
+            OwnedProofTree::Present(ref merkle_tree) => ProofTree::present(merkle_tree),
+            OwnedProofTree::Absent => ProofTree::absent(),
         };
         debug_assert_eq!(
             proof_tree, gotten_proof_tree,
@@ -412,13 +413,13 @@ impl<H, MC: MemoryConfig, M: AtomMode + DataSpaceMode + VectorMode, PC: PageCach
         DS: Foldable<PartialHashFold>,
         DS: FromProof + DurableStorage<Verify>,
     {
-        let proof_tree = ProofTree::Present(proof.tree());
+        let proof_tree = ProofTree::present(proof.tree());
         let (pvm, deserialised_proof_tree) = proof_tree::deserialise(proof_tree)
             .map_err(ProofVerificationFailure::BadDeserialisation)?;
 
         let gotten_proof_tree = match deserialised_proof_tree {
-            OwnedProofTree::Present(ref merkle_tree) => ProofTree::Present(merkle_tree),
-            OwnedProofTree::Absent => ProofTree::Absent,
+            OwnedProofTree::Present(ref merkle_tree) => ProofTree::present(merkle_tree),
+            OwnedProofTree::Absent => ProofTree::absent(),
         };
         debug_assert_eq!(
             proof_tree, gotten_proof_tree,

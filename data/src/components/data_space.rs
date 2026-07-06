@@ -19,6 +19,8 @@ use super::bytes::Bytes;
 use super::bytes::ChunkedPage;
 use super::bytes::Page;
 use crate::clone::CloneState;
+use crate::codec::LeafCodec;
+use crate::codec::LeafEncode;
 use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
@@ -228,7 +230,11 @@ impl<C> Decode<C> for DataSpace<Normal> {
     }
 }
 
-impl<F: FoldLeaf> Foldable<F> for DataSpace<Normal> {
+impl<F: FoldLeaf> Foldable<F> for DataSpace<Normal>
+where
+    u64: LeafEncode<F::Codec>,
+    for<'x> ChunkedPage<'x>: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         let length = self.data_space.len();
         let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail");
@@ -247,7 +253,7 @@ impl<F: FoldLeaf> Foldable<F> for DataSpace<Normal> {
             FoldableClosure::new(move |builder: F| {
                 let page = ChunkedPage { chunks: &[data] };
                 builder
-                    .fold_leaf(page)
+                    .fold_leaf(&page)
                     .expect("Serialising page data should not fail")
             })
         };
@@ -324,8 +330,11 @@ impl Unfoldable for DataSpace<Normal> {
     }
 }
 
-impl FromProof for DataSpace<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+impl<C: LeafCodec> FromProof<C> for DataSpace<Verify>
+where
+    Bytes<Verify>: FromProof<C>,
+{
+    fn from_proof<D: Deserialiser<Codec = C>>(proof: D) -> SuspendedResult<D, Self> {
         let bytes = Bytes::<Verify>::from_proof(proof)?;
         let bytes = bytes.map(|bytes| DataSpace { data_space: bytes });
         Ok(bytes)

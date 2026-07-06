@@ -79,7 +79,10 @@ macro_rules! combined_buddy_branch {
                     $name(inner)
                 }
 
-                fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
+                fn buddy_from_proof<D>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>>
+                where
+                    D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>
+                {
                     let result = <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::buddy_from_proof(proof)?;
                     let result = result.map(|inner| $name(inner));
                     Ok(result)

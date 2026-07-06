@@ -14,6 +14,7 @@ use std::num::NonZeroUsize;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
 use listener::MemoryGovernanceListener;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
@@ -334,7 +335,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     type State<M: Mode>: Memory<M>;
 
     /// Parse the proof to obtain a memory instance.
-    fn state_from_proof<D: merkle_proof::Deserialiser>(
+    fn state_from_proof<D: merkle_proof::Deserialiser<Codec = codec::Bincode>>(
         proof: D,
     ) -> merkle_proof::SuspendedResult<D, Self::State<Verify>>;
 

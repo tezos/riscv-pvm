@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::vector::Vector;
 use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
@@ -358,7 +359,9 @@ impl<KV: KeyValueStore> FromProof for Registry<KV, Verify> {
     // deserialiser, verification will fail (as this does not support capturing the owned proof).
     // Deserialising from raw bytes therefore requires two passes: a stream pass to reconstruct
     // the proof tree, then a proof-tree pass to obtain a verifiable registry.
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let suspended = Vector::<Database<KV, Verify>, Verify>::from_proof(proof)?;
         Ok(suspended.map(|databases| Self {
             inner: VerifyImpl(PhantomData),
@@ -611,6 +614,7 @@ pub(super) mod tests {
     use std::marker::PhantomData;
 
     use bytes::Bytes;
+    use octez_riscv_data::codec;
     use octez_riscv_data::components::vector::VectorMode;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::hash::PartialHash;
@@ -620,7 +624,7 @@ pub(super) mod tests {
     use octez_riscv_data::merkle_proof::proof::serialise_proof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
@@ -1431,7 +1435,7 @@ pub(super) mod tests {
         assert_eq!(root_hash_prove_after, root_hash_prove_before, "Reads must not affect Prove-mode hashes");
 
         let proof = MerkleProof::from_foldable(&prove_registry);
-        let verify_registry = Registry::<KV, _>::from_proof(ProofPart::Present(&proof))
+        let verify_registry = Registry::<KV, _>::from_proof(ProofTree::present(&proof))
             .expect("from_proof should succeed")
             .into_result();
 
@@ -1669,7 +1673,7 @@ pub(super) mod tests {
         let bytes = serialise_proof(proof);
 
         let (reconstructed_proof, stream_registry) =
-            deserialise_proof::<Registry<KV, Verify>, _>(bytes.into_iter())
+            deserialise_proof::<codec::Bincode, Registry<KV, Verify>, _>(bytes.into_iter())
                 .expect("Stream deserialisation of the proof bytes should succeed");
         assert_eq!(
             &reconstructed_proof, proof,
@@ -1677,7 +1681,7 @@ pub(super) mod tests {
         );
 
         let verify_registry =
-            Registry::<KV, Verify>::from_proof(ProofPart::Present(reconstructed_proof.tree()))
+            Registry::<KV, Verify>::from_proof(ProofTree::present(reconstructed_proof.tree()))
                 .expect("from_proof should succeed")
                 .into_result();
 

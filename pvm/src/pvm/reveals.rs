@@ -9,6 +9,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -107,7 +108,7 @@ impl Unfoldable for RevealRequest<Normal> {
 }
 
 impl FromProof for RevealRequest<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = codec::Bincode>>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, bytes) = proof.next_branch()?;

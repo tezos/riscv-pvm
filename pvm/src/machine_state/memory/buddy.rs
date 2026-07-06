@@ -23,6 +23,7 @@ mod leaf;
 mod proxy;
 use bincode::enc::Encoder;
 use bincode::error::EncodeError;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
@@ -43,7 +44,9 @@ pub trait BuddyConfig: 'static {
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>>;
 
     /// Parse a proof to obtain the Buddy memory manager state.
-    fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>>;
+    fn buddy_from_proof<D: Deserialiser<Codec = codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self::Buddy<Verify>>;
 }
 
 /// Buddy-style memory manager

@@ -6,6 +6,7 @@
 
 use derive_more::From;
 
+use crate::codec::LeafCodec;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
@@ -243,8 +244,10 @@ pub struct DepthAdjustedSeqAsTree<T> {
     pub current_depth: u32,
 }
 
-impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for DepthAdjustedSeqAsTree<T> {
-    fn fold(&self, mut builder: PartialHashFold) -> PartialHash {
+impl<C: LeafCodec, T: Foldable<PartialHashFold<C>>> Foldable<PartialHashFold<C>>
+    for DepthAdjustedSeqAsTree<T>
+{
+    fn fold(&self, mut builder: PartialHashFold<C>) -> PartialHash {
         // If the original depth is larger than the current depth, then we need to scope the proof
         // that underlies the `PartialHash::Blinded` to not exceed that depth. We can do that by
         // picking the first child of any node until we reach the original depth - thereby

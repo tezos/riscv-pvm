@@ -367,8 +367,11 @@ unsafe fn test_data_space_with_funs(
 
     // Instantiating the verifier state allows us to replay the computation and verify it does
     // the right things.
-    let (mut verify_cell, out_proof) =
-        proof_tree::deserialise::<DataSpace<Verify>>(ProofTree::Present(&proof_tree)).unwrap();
+    let (mut verify_cell, out_proof) = proof_tree::deserialise::<
+        crate::codec::Bincode,
+        DataSpace<Verify>,
+    >(ProofTree::present(&proof_tree))
+    .unwrap();
 
     let OwnedProofTree::Present(out_proof) = out_proof else {
         panic!("Expected present proof");

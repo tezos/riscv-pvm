@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use bytes::BufMut;
 use bytes::Bytes;
+use octez_riscv_data::codec;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
@@ -460,7 +461,9 @@ impl<KV> Database<KV, Verify> {
 }
 
 impl<KV> FromProof for Database<KV, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let suspended = <MerkleLayer<KV, Verify> as FromProof>::from_proof(proof)?;
         Ok(suspended.map(|merkle| Database {
             inner: VerifyImpl { merkle },
@@ -635,7 +638,7 @@ pub(crate) mod tests {
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
@@ -2249,7 +2252,7 @@ pub(crate) mod tests {
             matches!(proof, octez_riscv_data::tree::Tree::Leaf(MerkleProofLeaf::Blind(_))),
             "database should be fully blinded");
 
-        let mut verify = Database::<KV, Verify>::from_proof(ProofPart::Present(&proof))
+        let mut verify = Database::<KV, Verify>::from_proof(ProofTree::present(&proof))
             .expect("Can convert blinded leaf proof into blinded verify database")
             .into_result();
 
