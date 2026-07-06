@@ -257,7 +257,10 @@ fn proof_blinding() {
         let merkle_proof = MerkleProof::from_foldable(&proof_state);
 
         let verifier_state =
-            proof_tree::deserialise::<TestState<Verify>>(ProofTree::Present(&merkle_proof)).unwrap();
+            proof_tree::deserialise::<crate::codec::Bincode, TestState<Verify>>(
+                ProofTree::present(&merkle_proof),
+            )
+            .unwrap();
 
         // The first component of the state was present in the proof, can be
         // fully read, and contains the initial state.

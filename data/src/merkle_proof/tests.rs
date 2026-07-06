@@ -5,13 +5,14 @@
 
 use std::num::NonZeroUsize;
 
-use bincode::Decode;
 use bincode::Encode;
 use proptest::proptest;
 use proptest::test_runner::TestCaseResult;
 
 use super::proof_tree::MerkleProofFold;
 use super::proof_tree::MinimumPresence;
+use crate::codec::Bincode;
+use crate::codec::LeafDecodeError;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
@@ -34,9 +35,13 @@ use crate::merkle_proof::tag::TAG_NODE;
 use crate::merkle_proof::tag::TAG_READ;
 use crate::serialisation::serialise;
 
-fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
+fn generic_computation<T, D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    T: Into<i32> + crate::codec::LeafDecode<D::Codec>,
+    Hash: crate::codec::LeafDecode<D::Codec>,
+{
     // The tree structure:
     // Node (root)
     // ├── Leaf (type: Hash)
@@ -62,19 +67,30 @@ fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
 
 fn computation_i16<D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    i16: crate::codec::LeafDecode<D::Codec>,
+    Hash: crate::codec::LeafDecode<D::Codec>,
+{
     generic_computation::<i16, D>(proof)
 }
 
 fn computation_bool<D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    bool: crate::codec::LeafDecode<D::Codec>,
+    Hash: crate::codec::LeafDecode<D::Codec>,
+{
     generic_computation::<bool, D>(proof)
 }
 
 fn computation_leaves<D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    i32: crate::codec::LeafDecode<D::Codec>,
+{
     // The tree structure
     // Node (root)
     // ├── Leaf 1 (type: i32)
@@ -109,17 +125,17 @@ fn computation_leaves<D: Deserialiser>(
 
 /// Execute a deserialising computation over an owned Merkle proof.
 fn run_owned_deserialiser<'t>(
-    deser: impl FnOnce(ProofTree<'t>) -> Result<ProofTreeResult<'t, i32>, ProofError>,
+    deser: impl FnOnce(ProofTree<'t>) -> Result<ProofTreeResult<'t, Bincode, i32>, ProofError>,
     merkle_proof: &'t MerkleProof,
 ) -> Result<i32, ProofError> {
-    let proof = ProofTree::Present(merkle_proof);
+    let proof = ProofTree::present(merkle_proof);
     let parsed_result = deser(proof)?;
     Ok(parsed_result.into_result())
 }
 
 /// Execute a deserialising computation over raw bytes.
 fn run_stream_deserialiser<'t>(
-    deser: impl FnOnce(StreamDeserialiser<'t>) -> Result<StreamParserComb<'t, i32>, ProofError>,
+    deser: impl FnOnce(StreamDeserialiser<'t>) -> Result<StreamParserComb<'t, Bincode, i32>, ProofError>,
     bytes: &'t [u8],
 ) -> Result<i32, ProofError> {
     let input = StreamInput::new(bytes);
@@ -130,7 +146,7 @@ fn run_stream_deserialiser<'t>(
 #[test]
 fn test_absent_computation() {
     // Root is absent already
-    let proof = ProofTree::Absent;
+    let proof: ProofTree<'_> = ProofTree::absent();
     let comp_fn = computation_i16(proof).unwrap();
     assert_eq!(comp_fn.into_result(), 0);
 
@@ -139,7 +155,7 @@ fn test_absent_computation() {
         MerkleProof::leaf_read(Hash::hash_bytes(&[0, 1, 2]).as_ref().to_vec()),
         MerkleProof::leaf_blind(Hash::hash_bytes(&[3, 4, 5])),
     ]);
-    let proof = ProofTree::Present(&merkle_proof);
+    let proof: ProofTree<'_> = ProofTree::present(&merkle_proof);
     let comp_fn = computation_i16(proof).unwrap();
     assert_eq!(comp_fn.into_result(), 0);
 }
@@ -185,10 +201,10 @@ fn test_not_enough_bytes_error() {
 
     // Corresponds to a bincode::Error & std::io::Error because the hash deserialisation is done by
     // serde/bincode.
-    if let ProofError::Deserialise(bincode::error::DecodeError::Io {
+    if let ProofError::LeafDecode(LeafDecodeError::Bincode(bincode::error::DecodeError::Io {
         inner: io_err,
         additional: 32,
-    }) = res
+    })) = res
     {
         assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
     } else {
@@ -217,10 +233,10 @@ fn test_not_enough_bytes_error() {
 
     // In this case, the error happens earlier, at the tag deserialisation, so it is an error
     // thrown by our own `Deserialiser` traits.
-    if let ProofError::Deserialise(bincode::error::DecodeError::Io {
+    if let ProofError::LeafDecode(LeafDecodeError::Bincode(bincode::error::DecodeError::Io {
         inner: io_err,
         additional: 32,
-    }) = res
+    })) = res
     {
         assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
     } else {
@@ -240,9 +256,9 @@ fn test_not_enough_bytes_error() {
     assert!(
         matches!(
             res,
-            Err(ProofError::Deserialise(
+            Err(ProofError::LeafDecode(LeafDecodeError::Bincode(
                 bincode::error::DecodeError::UnexpectedEnd { additional: 27 }
-            ))
+            )))
         ),
         "{res:?}"
     )
@@ -263,7 +279,7 @@ fn test_bad_bincode() {
 
     let res = run_stream_deserialiser(computation_bool, &raw_bytes_content);
 
-    assert!(matches!(res, Err(ProofError::Deserialise(_))));
+    assert!(matches!(res, Err(ProofError::LeafDecode(_))));
 
     let merkle_proof = MerkleProof::node_without_data(vec![
         MerkleProof::leaf_read(hash_read.to_vec()),
@@ -271,7 +287,7 @@ fn test_bad_bincode() {
     ]);
     let res = run_owned_deserialiser(computation_bool, &merkle_proof);
     eprintln!("Result: {res:?}");
-    assert!(matches!(res, Err(ProofError::Deserialise(_))));
+    assert!(matches!(res, Err(ProofError::LeafDecode(_))));
 }
 
 #[test]
@@ -302,14 +318,14 @@ fn test_blind_computation() {
         MerkleProof::leaf_blind(Hash::hash_bytes(&[0, 1, 2])),
         MerkleProof::node_without_data(vec![MerkleProof::leaf_blind(Hash::hash_bytes(&[0, 1, 2]))]),
     ]);
-    let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&absent_shape));
+    let comp_fn = computation_i16::<ProofTree>(ProofTree::present(&absent_shape));
 
     assert_eq!(comp_fn.unwrap().into_result(), -1);
 
     // For computation_2, the provided merkle proof will resolve as blinded
     // since root is blinded
     let merkle_proof = MerkleProof::leaf_blind(Hash::hash_bytes(&[6, 7, 8]));
-    let proof = ProofTree::Present(&merkle_proof);
+    let proof: ProofTree<'_> = ProofTree::present(&merkle_proof);
     let comp_fn = computation_leaves(proof).unwrap();
     assert_eq!(comp_fn.into_result(), -1);
 }
@@ -336,7 +352,7 @@ fn test_blind_computation_stream() {
     // For computation_2, the provided merkle proof will resolve as blinded
     // since root is blinded
     let merkle_proof = MerkleProof::leaf_blind(Hash::hash_bytes(&[6, 7, 8]));
-    let proof = ProofTree::Present(&merkle_proof);
+    let proof: ProofTree<'_> = ProofTree::present(&merkle_proof);
     let comp_fn = computation_leaves(proof).unwrap();
     assert_eq!(comp_fn.into_result(), -1);
 }
@@ -361,13 +377,13 @@ fn test_bad_structure() {
     ]);
 
     // Tree is missing branches
-    let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_1));
+    let comp_fn = computation_i16::<ProofTree>(ProofTree::present(&bad_shape_1));
     assert!(comp_fn.is_err_and(|e| matches!(e, ProofError::BadNumberOfBranches { .. })));
 
     // First 2 children of root are ok in shape (blinded) but the total number of children does not correspond
     // Ideally, we would like to have expected: 2, got: 5, but the implementation for `ProofTree`
     // does not track this information (the original number of children)
-    let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_2));
+    let comp_fn = computation_i16::<ProofTree>(ProofTree::present(&bad_shape_2));
     assert!(comp_fn.is_err_and(|e| {
         println!("{e:?}");
         matches!(
@@ -380,11 +396,11 @@ fn test_bad_structure() {
     }));
 
     // The first child is a node, but is expected to be a leaf
-    let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_3));
+    let comp_fn = computation_i16::<ProofTree>(ProofTree::present(&bad_shape_3));
     assert!(comp_fn.is_err_and(|e| matches!(e, ProofError::UnexpectedNode)));
 
     // The second child is a leaf, but is expected to be a node
-    let comp_fn = computation_i16::<ProofTree>(ProofTree::Present(&bad_shape_4));
+    let comp_fn = computation_i16::<ProofTree>(ProofTree::present(&bad_shape_4));
     assert!(comp_fn.is_err_and(|e| { matches!(e, ProofError::UnexpectedLeaf) }));
 }
 
@@ -446,7 +462,7 @@ fn test_valid_computation() {
         MerkleProof::leaf_blind(Hash::hash_bytes(&[9, 10, 11])),
     ]);
 
-    let proof = ProofTree::Present(&merkleproof);
+    let proof: ProofTree<'_> = ProofTree::present(&merkleproof);
     let comp_fn = computation_leaves(proof).unwrap();
     assert_eq!(comp_fn.into_result(), 0x140A_0000 + 0xC0005);
 }
@@ -504,20 +520,16 @@ fn test_descend_tree_trailing_remainder() {
 
     let mut visited = Vec::new();
 
-    descend_tree(
-        ProofTree::Present(&proof),
-        arity,
-        leaves,
-        &mut |idx, proof| {
-            let leaf = proof.into_leaf::<usize>()?;
-            Ok(leaf.map(|leaf| {
-                let Partial::Present(value) = leaf else {
-                    panic!("Expected a present leaf in this proof")
-                };
-                visited.push((idx, value));
-            }))
-        },
-    )
+    let proof_tree: ProofTree<'_> = ProofTree::present(&proof);
+    descend_tree(proof_tree, arity, leaves, &mut |idx, proof| {
+        let leaf = proof.into_leaf::<usize>()?;
+        Ok(leaf.map(|leaf| {
+            let Partial::Present(value) = leaf else {
+                panic!("Expected a present leaf in this proof")
+            };
+            visited.push((idx, value));
+        }))
+    })
     .map(ProofTreeResult::into_result)
     .expect("descend_tree should parse a 17-leaf arity-4 tree with trailing remainder");
 
@@ -532,20 +544,16 @@ fn round_trip_descend_tree_indexable_seq_as_tree() {
         let seq_as_tree = IndexableSeqAsTree::new(data.len(), arity.get(), &get_item);
         let proof = MerkleProof::from_foldable(&seq_as_tree);
 
-        descend_tree(
-            ProofTree::Present(&proof),
-            arity.get(),
-            data.len(),
-            &mut |idx, proof| {
-                let leaf = proof.into_leaf::<usize>()?;
-                Ok(leaf.map(|leaf| {
-                    let Partial::Present(value) = leaf else {
-                        panic!("Expected a present leaf in this proof")
-                    };
-                    assert_eq!(value, data[idx]);
-                }))
-            },
-        )
+        let proof_tree: ProofTree<'_> = ProofTree::present(&proof);
+        descend_tree(proof_tree, arity.get(), data.len(), &mut |idx, proof| {
+            let leaf = proof.into_leaf::<usize>()?;
+            Ok(leaf.map(|leaf| {
+                let Partial::Present(value) = leaf else {
+                    panic!("Expected a present leaf in this proof")
+                };
+                assert_eq!(value, data[idx]);
+            }))
+        })
         .unwrap()
         .into_result();
 

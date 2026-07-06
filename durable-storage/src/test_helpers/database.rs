@@ -735,7 +735,7 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
     // Construct the Verify-mode database from the proof and verify
     let mut verify_db = TracedDatabase::from(
         <Database<KV, Verify> as octez_riscv_data::merkle_proof::FromProof>::from_proof(
-            octez_riscv_data::merkle_proof::proof_tree::ProofTree::Present(&proof),
+            octez_riscv_data::merkle_proof::proof_tree::ProofTree::present(&proof),
         )
         .expect("proof should be valid")
         .into_result(),

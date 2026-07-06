@@ -4,7 +4,6 @@
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 
-use bincode::Decode;
 use bincode::enc::write::Writer;
 
 use super::Deserialiser;
@@ -15,11 +14,13 @@ use super::ProofError;
 use super::Suspended;
 use super::tag::LeafTag;
 use super::tag::Tag;
+use crate::codec::Bincode;
+use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::hash::Hash;
-use crate::serialisation;
 use crate::tree::Tree;
 
 /// Merkle proof tree structure.
@@ -91,9 +92,15 @@ impl MerkleProof {
         matches!(self, MerkleProof::Leaf(MerkleProofLeaf::Blind(_)))
     }
 
-    /// Fold the given data structure into a compressed Merkle proof tree.
+    /// Fold the given data structure into a compressed Merkle proof tree (bincode leaf codec).
     pub fn from_foldable(foldable: &impl Foldable<MerkleProofFold>) -> Self {
         foldable.fold(MerkleProofFold::new()).tree
+    }
+
+    /// Fold the given data structure into a compressed Merkle proof tree, using the given leaf
+    /// [`LeafCodec`].
+    pub fn from_foldable_with<C: LeafCodec>(foldable: &impl Foldable<MerkleProofFold<C>>) -> Self {
+        foldable.fold(MerkleProofFold::<C>::new()).tree
     }
 
     /// Blind the tree as much as feasible. In general, this will fully blind the tree.
@@ -247,8 +254,8 @@ impl CompressibleMerkleProof {
     }
 }
 
-impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
-    fn fold(&self, _builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+impl<C: LeafCodec> Foldable<MerkleProofFold<C>> for CompressibleMerkleProof {
+    fn fold(&self, _builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
         if self.constraint == MinimumPresence::Present || self.tree.is_blind() {
             return self.clone();
         }
@@ -275,8 +282,10 @@ pub struct ForceMinimumPresence<T> {
     pub inner: T,
 }
 
-impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for ForceMinimumPresence<T> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+impl<C: LeafCodec, T: Foldable<MerkleProofFold<C>>> Foldable<MerkleProofFold<C>>
+    for ForceMinimumPresence<T>
+{
+    fn fold(&self, builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
         let mut proof = self.inner.fold(builder);
         proof.constraint = self.min_constraint.max(proof.constraint);
         proof
@@ -284,16 +293,20 @@ impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for ForceMinimumPre
 }
 
 /// [`Fold`] for creating a [`MerkleProof`] tree from a foldable structure
-pub struct MerkleProofFold {
-    _private: (),
+///
+/// Parameterised by the leaf [`LeafCodec`]; defaults to [`Bincode`].
+pub struct MerkleProofFold<C = Bincode> {
+    _codec: PhantomData<C>,
 }
 
-impl MerkleProofFold {
+impl<C: LeafCodec> MerkleProofFold<C> {
     /// Create a new fold builder for Merkle proofs.
     ///
     /// NOTE: This should be private! We don't want users to create this directly.
     fn new() -> Self {
-        MerkleProofFold { _private: () }
+        MerkleProofFold {
+            _codec: PhantomData,
+        }
     }
 
     /// Fold into a Merkle tree proof leaf.
@@ -332,26 +345,31 @@ impl MerkleProofFold {
     }
 }
 
-impl Fold for MerkleProofFold {
+impl<C: LeafCodec> Fold for MerkleProofFold<C> {
     type Folded = CompressibleMerkleProof;
 
-    type NodeFold = MerkleProofNodeFold;
+    type NodeFold = MerkleProofNodeFold<C>;
+
+    type Codec = C;
 
     fn into_node_fold(self) -> Self::NodeFold {
         MerkleProofNodeFold {
             children: Vec::new(),
+            _codec: PhantomData,
         }
     }
 }
 
 /// [`NodeFold`] for creating a [`MerkleProof`] node from a foldable structure
-pub struct MerkleProofNodeFold {
+pub struct MerkleProofNodeFold<C = Bincode> {
     /// Children of the node that is being folded
     children: Vec<CompressibleMerkleProof>,
+
+    _codec: PhantomData<C>,
 }
 
-impl NodeFold for MerkleProofNodeFold {
-    type Parent = MerkleProofFold;
+impl<C: LeafCodec> NodeFold for MerkleProofNodeFold<C> {
+    type Parent = MerkleProofFold<C>;
 
     fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
         let child_info = child.fold(MerkleProofFold::new());
@@ -453,13 +471,35 @@ impl<T> ProofPart<T> {
     }
 }
 
-/// Part of a Merkle proof tree
-pub type ProofTree<'a> = ProofPart<&'a MerkleProof>;
+/// Part of a Merkle proof tree, viewed as a deserialiser parameterised by the leaf [`LeafCodec`].
+///
+/// Defaults to [`Bincode`]. Only leaf decoding depends on the codec; the tree structure is shared.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProofTree<'a, C = Bincode> {
+    part: ProofPart<&'a MerkleProof>,
+    _codec: PhantomData<C>,
+}
 
-impl<'a> ProofTree<'a> {
+impl<'a, C> ProofTree<'a, C> {
+    /// A present proof tree backed by the given [`MerkleProof`].
+    pub fn present(tree: &'a MerkleProof) -> Self {
+        ProofTree {
+            part: ProofPart::Present(tree),
+            _codec: PhantomData,
+        }
+    }
+
+    /// An absent proof tree.
+    pub fn absent() -> Self {
+        ProofTree {
+            part: ProofPart::Absent,
+            _codec: PhantomData,
+        }
+    }
+
     /// Deserialise the proof tree as a leaf.
-    pub fn as_leaf(self) -> Result<Partial<&'a [u8]>, ProofError> {
-        let Self::Present(tree) = self else {
+    fn as_leaf(&self) -> Result<Partial<&'a [u8]>, ProofError> {
+        let ProofPart::Present(tree) = self.part else {
             return Ok(Partial::Absent);
         };
 
@@ -473,8 +513,8 @@ impl<'a> ProofTree<'a> {
     }
 
     /// Deserialise the proof tree as a node.
-    pub fn as_node(self) -> Result<Partial<Vec<Self>>, ProofError> {
-        let Self::Present(tree) = self else {
+    fn as_node(&self) -> Result<Partial<Vec<Self>>, ProofError> {
+        let ProofPart::Present(tree) = self.part else {
             return Ok(Partial::Absent);
         };
 
@@ -483,19 +523,24 @@ impl<'a> ProofTree<'a> {
                 MerkleProofLeaf::Blind(hash) => Partial::Blinded(*hash),
                 MerkleProofLeaf::Read(_) => return Err(ProofError::UnexpectedLeaf),
             },
-            Tree::Node(node) => {
-                Partial::Present(node.children.iter().map(ProofPart::Present).collect())
-            }
+            Tree::Node(node) => Partial::Present(
+                node.children
+                    .iter()
+                    .map(|c| ProofTree::present(c))
+                    .collect(),
+            ),
         };
 
         Ok(node)
     }
 }
 
-impl<'t> Deserialiser for ProofTree<'t> {
+impl<'t, C: LeafCodec> Deserialiser for ProofTree<'t, C> {
     type Error = ProofError;
 
-    type Suspended<R> = ProofTreeResult<'t, R>;
+    type Codec = C;
+
+    type Suspended<R> = ProofTreeResult<'t, C, R>;
 
     type DeserialiserNode = Partial<std::vec::IntoIter<Self>>;
 
@@ -517,10 +562,10 @@ impl<'t> Deserialiser for ProofTree<'t> {
             .map(ProofTreeResult::new)
     }
 
-    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<T>>, Self::Error> {
+    fn into_leaf<T: LeafDecode<C>>(self) -> Result<Self::Suspended<Partial<T>>, Self::Error> {
         let result = self
             .as_leaf()?
-            .map_present_fallible(serialisation::deserialise)?;
+            .map_present_fallible(<T as LeafDecode<C>>::leaf_decode)?;
         Ok(ProofTreeResult::new(result))
     }
 
@@ -529,9 +574,9 @@ impl<'t> Deserialiser for ProofTree<'t> {
     }
 
     fn capture_owned_proof(&self) -> Option<MerkleProof> {
-        match self {
+        match self.part {
             ProofPart::Absent => None,
-            ProofPart::Present(proof) => Some((*proof).clone()),
+            ProofPart::Present(proof) => Some(proof.clone()),
         }
     }
 }
@@ -578,8 +623,8 @@ impl OwnedProofTree {
     }
 }
 
-impl<'t, BS: Iterator<Item = ProofTree<'t>>> DeserialiserNode for Partial<BS> {
-    type Parent = ProofTree<'t>;
+impl<'t, C: LeafCodec, BS: Iterator<Item = ProofTree<'t, C>>> DeserialiserNode for Partial<BS> {
+    type Parent = ProofTree<'t, C>;
 
     fn presence(&self) -> Partial<()> {
         match self {
@@ -600,7 +645,7 @@ impl<'t, BS: Iterator<Item = ProofTree<'t>>> DeserialiserNode for Partial<BS> {
     ) -> Result<(Self, T), ProofError> {
         let next_branch = match self {
             // If the node is absent or blinded, the branch to be deserialised as a tree is absent.
-            Partial::Absent | Partial::Blinded(_) => ProofTree::Absent,
+            Partial::Absent | Partial::Blinded(_) => ProofTree::absent(),
             Partial::Present(ref mut branches) => {
                 branches.next().ok_or(ProofError::BadNumberOfBranches {
                     expected: 1,
@@ -632,12 +677,12 @@ impl<'t, BS: Iterator<Item = ProofTree<'t>>> DeserialiserNode for Partial<BS> {
 }
 
 /// Result of parsing a [`ProofTree`]
-pub struct ProofTreeResult<'t, R> {
+pub struct ProofTreeResult<'t, C, R> {
     result: R,
-    _pd: PhantomData<fn(ProofTree<'t>)>,
+    _pd: PhantomData<fn(ProofTree<'t, C>)>,
 }
 
-impl<R> ProofTreeResult<'_, R> {
+impl<C, R> ProofTreeResult<'_, C, R> {
     /// Construct a new result.
     fn new(result: R) -> Self {
         Self {
@@ -652,10 +697,10 @@ impl<R> ProofTreeResult<'_, R> {
     }
 }
 
-impl<'t, R> Suspended for ProofTreeResult<'t, R> {
+impl<'t, C: LeafCodec, R> Suspended for ProofTreeResult<'t, C, R> {
     type Output = R;
 
-    type Parent = ProofTree<'t>;
+    type Parent = ProofTree<'t, C>;
 
     fn map<T>(
         self,
@@ -669,8 +714,10 @@ impl<'t, R> Suspended for ProofTreeResult<'t, R> {
 }
 
 /// Given a [`ProofTree`] deserialise it as `T`.
-pub fn deserialise<T: FromProof>(proof: ProofTree) -> Result<(T, OwnedProofTree), ProofError> {
-    let owned_proof = match proof {
+pub fn deserialise<C: LeafCodec, T: FromProof<C>>(
+    proof: ProofTree<C>,
+) -> Result<(T, OwnedProofTree), ProofError> {
+    let owned_proof = match proof.part {
         ProofPart::Absent => OwnedProofTree::Absent,
         ProofPart::Present(proof) => OwnedProofTree::Present(proof.clone()),
     };

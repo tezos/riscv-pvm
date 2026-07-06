@@ -429,8 +429,11 @@ where
             let proof_bytes = serialise(proof_tree).unwrap();
 
             // Parsing the proof so we can see if the proof generation worked.
-            let (mut vector_verify, parsed_proof_tree) =
-                proof_binary::deserialise::<Vector<InnerVerify, Verify>>(&proof_bytes).unwrap();
+            let (mut vector_verify, parsed_proof_tree) = proof_binary::deserialise::<
+                crate::codec::Bincode,
+                Vector<InnerVerify, Verify>,
+            >(&proof_bytes)
+            .unwrap();
             let parsed_proof_tree = parsed_proof_tree.into_present();
 
             // The parsed state should have a state hash equal to that of the initial Normal/Prove state.

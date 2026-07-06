@@ -14,6 +14,7 @@ use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -463,7 +464,7 @@ where
 }
 
 impl<MC: MemoryConfig, DS: FromProof> FromProof for Pvm<MC, EmptyPageCache, DS, Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = codec::Bincode>>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, system_state) = proof.next_branch()?;
@@ -520,7 +521,7 @@ where
 impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
-        let (pvm, _) = proof_tree::deserialise(ProofTree::Present(proof)).ok()?;
+        let (pvm, _) = proof_tree::deserialise(ProofTree::present(proof)).ok()?;
         Some(pvm)
     }
 
@@ -537,7 +538,7 @@ impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
     where
         DS: DurableStorage<Verify>,
     {
-        let proof_tree = ProofTree::Present(&outbox_proof.proof);
+        let proof_tree = ProofTree::present(&outbox_proof.proof);
 
         catch_not_found(move || {
             let (pvm, _): (Self, _) = proof_tree::deserialise(proof_tree)?;

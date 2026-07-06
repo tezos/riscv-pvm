@@ -4,6 +4,7 @@
 
 use std::num::NonZeroUsize;
 
+use octez_riscv_data::codec;
 use octez_riscv_data::merkle_proof;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::mode::Mode;
@@ -30,7 +31,7 @@ where
     type State<M: Mode> =
         MemoryImpl<PAGES, TOTAL_BYTES, <BuddyConfigProxy<PAGES> as BuddyConfig>::Buddy<M>, M>;
 
-    fn state_from_proof<D: merkle_proof::Deserialiser>(
+    fn state_from_proof<D: merkle_proof::Deserialiser<Codec = codec::Bincode>>(
         proof: D,
     ) -> merkle_proof::SuspendedResult<D, Self::State<Verify>> {
         let proof = proof.into_node()?;

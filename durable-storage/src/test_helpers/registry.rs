@@ -14,12 +14,13 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 
 use bytes::Bytes;
+use octez_riscv_data::codec;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::proof::deserialise_proof;
 use octez_riscv_data::merkle_proof::proof::serialise_proof;
-use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Verify;
@@ -257,13 +258,13 @@ where
 
     let bytes = serialise_proof(&proof);
     let (reconstructed, _stream) =
-        deserialise_proof::<Registry<KV, Verify>, _>(bytes.clone().into_iter())
+        deserialise_proof::<codec::Bincode, Registry<KV, Verify>, _>(bytes.clone().into_iter())
             .expect("Stream deserialisation of the proof bytes should succeed");
     assert_eq!(
         reconstructed, proof,
         "The proof reconstructed from bytes should match the original"
     );
-    let mut verify = Registry::<KV, Verify>::from_proof(ProofPart::Present(reconstructed.tree()))
+    let mut verify = Registry::<KV, Verify>::from_proof(ProofTree::present(reconstructed.tree()))
         .expect("from_proof should succeed")
         .into_result();
 

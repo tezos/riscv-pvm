@@ -15,6 +15,7 @@ use bincode::error::DecodeError;
 use bincode::error::EncodeError;
 use num_enum::TryFromPrimitive;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::atom::CloneAtomMode;
@@ -404,7 +405,7 @@ impl Unfoldable for CSRegisters<Normal> {
 }
 
 impl FromProof for CSRegisters<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = codec::Bincode>>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, fflags) = proof.next_branch()?;

@@ -208,10 +208,10 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         ctx: D,
     ) -> Result<(D, Self), <D::Parent as Deserialiser>::Error>
     where
-        Atom<i64, M>: FromProof,
-        Atom<Key, M>: FromProof,
-        DataId: FromProof,
-        TreeId: FromProof,
+        Atom<i64, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
+        Atom<Key, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
+        DataId: FromProof<<D::Parent as Deserialiser>::Codec>,
+        TreeId: FromProof<<D::Parent as Deserialiser>::Codec>,
     {
         let (ctx, balance_factor) = ctx.next_branch::<Atom<i64, M>>()?;
         let (ctx, key) = ctx.next_branch::<Atom<Key, M>>()?;

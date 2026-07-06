@@ -21,6 +21,7 @@ use libsecp256k1::Message;
 use libsecp256k1::PublicKey;
 use libsecp256k1::Signature as SecpSig;
 use octez_riscv_data::clone::CloneState;
+use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
 use octez_riscv_data::components::atom::CloneAtomMode;
 use octez_riscv_data::components::atom::EncodeAtomMode;
@@ -180,7 +181,7 @@ impl Unfoldable for Tezos<Normal> {
 }
 
 impl FromProof for Tezos<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = codec::Bincode>>(proof: D) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, outbox) = proof.next_branch()?;
