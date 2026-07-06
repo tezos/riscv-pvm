@@ -2547,6 +2547,7 @@ dependencies = [
  "proptest",
  "rand 0.10.1",
  "range-collections",
+ "rkyv",
  "serde",
  "thiserror 2.0.18",
  "trait-set",
