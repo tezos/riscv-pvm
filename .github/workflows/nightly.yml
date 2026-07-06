@@ -23,9 +23,9 @@ env:
   MAX_MINUTES: "330"
 
 jobs:
-  # Build the long-test binary once and share it with every matrix job below.
+  # Build the long_test binary once and share it with every matrix job below.
   build:
-    name: "Build database long test binary"
+    name: "Build nds long test binary"
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -51,8 +51,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  long-test:
-    name: "Database long test ops=${{ matrix.config.ops }} cases=${{ matrix.config.cases }} #${{ matrix.replica }}"
+  nds-long-test:
+    name: "${{ matrix.test }} nds long test ops=${{ matrix.config.ops }} cases=${{ matrix.config.cases }} #${{ matrix.replica }}"
     needs: build
     runs-on: ubuntu-latest
 
@@ -67,7 +67,16 @@ jobs:
           - { ops: 4000,  cases: 128 }
           - { ops: 8000,  cases: 64 }
           - { ops: 16000, cases: 32 }
-        replica: [1, 2, 3, 4, 5]
+        test: [database, registry-stable]
+        replica: [1, 2]
+        include:
+          - test: database
+            args: database test
+          - test: registry-stable
+            args: registry test --keep-stable-size
+        exclude:
+          - test: database
+            replica: 2
 
     steps:
       - name: Checkout
@@ -82,21 +91,21 @@ jobs:
         with:
           name: long_test
 
-      - name: Run long test
+      - name: Run nds long test
         run: |
           chmod +x ./long_test # upload-artifact strips the executable bit
-          ./long_test database test \
+          ./long_test ${{ matrix.args }} \
             --ops-per-epoch ${{ matrix.config.ops }} \
             --cases-per-epoch ${{ matrix.config.cases }} \
             --keep-epochs 1 \
             --max-minutes ${{ env.MAX_MINUTES }} \
-            --out-dir '${{ github.workspace }}/run-${{ matrix.config.ops }}-${{ matrix.config.cases }}-${{ matrix.replica }}'
+            --out-dir '${{ github.workspace }}/run-${{ matrix.test }}-${{ matrix.config.ops }}-${{ matrix.config.cases }}-${{ matrix.replica }}'
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: dursto-long-test-${{ matrix.config.ops }}-${{ matrix.config.cases }}-r${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ github.workspace }}/run-${{ matrix.config.ops }}-${{ matrix.config.cases }}-${{ matrix.replica }}/failure
+          name: dursto-long-test-${{ matrix.test }}-${{ matrix.config.ops }}-${{ matrix.config.cases }}-r${{ matrix.replica }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/run-${{ matrix.test }}-${{ matrix.config.ops }}-${{ matrix.config.cases }}-${{ matrix.replica }}/failure
           if-no-files-found: warn
           retention-days: 90
