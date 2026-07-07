@@ -8,11 +8,11 @@
 use std::sync::Arc;
 
 use bincode::Decode;
-use bincode::Encode;
 use bincode::error::DecodeError;
-use bincode::error::EncodeError;
 
-use crate::serialisation::serialise;
+use crate::codec::LeafCodec;
+use crate::codec::LeafEncode;
+use crate::codec::LeafEncodeError;
 
 pub mod seq_tree;
 
@@ -86,6 +86,12 @@ pub trait Fold {
     /// This type provides additional methods for folding nodes.
     type NodeFold: NodeFold<Parent = Self>;
 
+    /// The codec used to (de)serialise leaf values while folding.
+    ///
+    /// Threaded through so that leaf-encoding [`Foldable`] implementations can bound their leaves on
+    /// [`LeafEncode<Self::Codec>`] rather than a fixed serialisation format.
+    type Codec: LeafCodec;
+
     /// Start folding a node.
     fn into_node_fold(self) -> Self::NodeFold;
 }
@@ -104,9 +110,12 @@ pub trait NodeFold {
 
 /// Extension trait for `Fold` implementations that can treat leaves in a standard way.
 pub trait FoldLeaf: Fold + Sized {
-    /// Fold any serialisable value as a single leaf.
-    fn fold_leaf<T: Encode>(self, t: T) -> Result<<Self as Fold>::Folded, EncodeError> {
-        let bytes = serialise(t)?;
+    /// Fold any serialisable value as a single leaf, encoding it with this fold's [`Fold::Codec`].
+    fn fold_leaf<T: LeafEncode<Self::Codec>>(
+        self,
+        t: T,
+    ) -> Result<<Self as Fold>::Folded, LeafEncodeError> {
+        let bytes = t.leaf_encode()?;
         Ok(self.fold_leaf_raw(&bytes))
     }
 
@@ -126,7 +135,10 @@ impl<T> EncodeLeaf<T> {
     }
 }
 
-impl<F: FoldLeaf, T: Encode> Foldable<F> for EncodeLeaf<T> {
+impl<F: FoldLeaf, T> Foldable<F> for EncodeLeaf<T>
+where
+    for<'a> &'a T: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> <F as Fold>::Folded {
         builder.fold_leaf(&self.data).expect(self.err_msg)
     }

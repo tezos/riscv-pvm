@@ -21,6 +21,8 @@ use bincode::error::EncodeError;
 use perfect_derive::perfect_derive;
 
 use crate::clone::CloneState;
+use crate::codec::LeafCodec;
+use crate::codec::LeafEncode;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
@@ -45,7 +47,6 @@ use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
-use crate::serialisation::serialise;
 
 /// Single value state component
 ///
@@ -173,7 +174,10 @@ impl<T: Default + 'static, M: AtomMode> Default for Atom<T, M> {
     }
 }
 
-impl<T: Encode, F: FoldLeaf> Foldable<F> for Atom<T, Normal> {
+impl<T, F: FoldLeaf> Foldable<F> for Atom<T, Normal>
+where
+    for<'a> &'a Atom<T, Normal>: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         builder
             .fold_leaf(self)
@@ -181,7 +185,10 @@ impl<T: Encode, F: FoldLeaf> Foldable<F> for Atom<T, Normal> {
     }
 }
 
-impl<'normal, T: Encode + 'static, F: FoldLeaf> Foldable<F> for Atom<T, Prove<'normal>> {
+impl<'normal, T: 'static, F: FoldLeaf> Foldable<F> for Atom<T, Prove<'normal>>
+where
+    for<'a> &'a T: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         let value = self
             .atom
@@ -194,9 +201,17 @@ impl<'normal, T: Encode + 'static, F: FoldLeaf> Foldable<F> for Atom<T, Prove<'n
     }
 }
 
-impl<T: Encode + 'static> Foldable<MerkleProofFold> for Atom<T, Prove<'_>> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let data = serialise(self.atom.previous.deref()).expect("Serialisation should not fail");
+impl<T: 'static, C: LeafCodec> Foldable<MerkleProofFold<C>> for Atom<T, Prove<'_>>
+where
+    T: LeafEncode<C>,
+{
+    fn fold(&self, builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
+        let data = self
+            .atom
+            .previous
+            .deref()
+            .leaf_encode()
+            .expect("Serialisation should not fail");
 
         // Determine whether the value has been read or written during proof generation. If so, we
         // must keep it in the Merkle tree (not blind it).
@@ -210,13 +225,16 @@ impl<T: Encode + 'static> Foldable<MerkleProofFold> for Atom<T, Prove<'_>> {
     }
 }
 
-impl<T: Encode + 'static> Foldable<PartialHashFold> for Atom<T, Verify> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+impl<T: 'static, C: LeafCodec> Foldable<PartialHashFold<C>> for Atom<T, Verify>
+where
+    T: LeafEncode<C>,
+{
+    fn fold(&self, builder: PartialHashFold<C>) -> PartialHash {
         let hash = match &self.atom {
             Partial::Absent => return builder.previous(),
             Partial::Blinded(hash) => *hash,
             Partial::Present(value) => {
-                Hash::hash_encodable(value).expect("Hashing should not fail")
+                Hash::hash_bytes(&value.leaf_encode().expect("Hashing should not fail"))
             }
         };
         PartialHash::Present(hash)

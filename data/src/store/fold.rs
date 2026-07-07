@@ -10,6 +10,7 @@ use derive_more::From;
 
 use super::BlobStore;
 use super::BlobStoreError;
+use crate::codec::Bincode;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
@@ -40,6 +41,8 @@ impl<BS: BlobStore> Fold for BlobStoreFold<BS> {
     type Folded = Result<Hash, BlobStoreError>;
 
     type NodeFold = BlobStoreNodeFold<BS>;
+
+    type Codec = Bincode;
 
     fn into_node_fold(self) -> BlobStoreNodeFold<BS> {
         BlobStoreNodeFold {

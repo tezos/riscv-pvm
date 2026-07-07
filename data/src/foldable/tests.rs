@@ -66,6 +66,8 @@ impl Fold for TestFolder {
 
     type NodeFold = TestNodeFolder;
 
+    type Codec = crate::codec::Bincode;
+
     fn into_node_fold(self) -> Self::NodeFold {
         TestNodeFolder {
             children: Vec::new(),

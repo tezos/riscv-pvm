@@ -15,6 +15,7 @@ use std::error;
 use bincode::Decode;
 use bincode::error::DecodeError;
 
+use crate::codec::LeafCodec;
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::Many;
 use crate::foldable::seq_tree::tree_depth;
@@ -68,8 +69,8 @@ impl<T> Partial<T> {
     }
 }
 
-impl<T: Foldable<PartialHashFold>> Foldable<PartialHashFold> for Partial<T> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+impl<C: LeafCodec, T: Foldable<PartialHashFold<C>>> Foldable<PartialHashFold<C>> for Partial<T> {
+    fn fold(&self, builder: PartialHashFold<C>) -> PartialHash {
         match self {
             Partial::Absent => builder.previous(),
             Partial::Blinded(hash) => builder.present(*hash),

@@ -19,6 +19,7 @@ use super::bytes::Bytes;
 use super::bytes::ChunkedPage;
 use super::bytes::Page;
 use crate::clone::CloneState;
+use crate::codec::LeafEncode;
 use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
@@ -228,7 +229,11 @@ impl<C> Decode<C> for DataSpace<Normal> {
     }
 }
 
-impl<F: FoldLeaf> Foldable<F> for DataSpace<Normal> {
+impl<F: FoldLeaf> Foldable<F> for DataSpace<Normal>
+where
+    for<'a> &'a u64: LeafEncode<F::Codec>,
+    for<'x> ChunkedPage<'x>: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         let length = self.data_space.len();
         let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail");

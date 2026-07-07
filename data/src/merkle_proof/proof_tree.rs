@@ -15,6 +15,8 @@ use super::ProofError;
 use super::Suspended;
 use super::tag::LeafTag;
 use super::tag::Tag;
+use crate::codec::Bincode;
+use crate::codec::LeafCodec;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
@@ -231,8 +233,8 @@ impl CompressibleMerkleProof {
     }
 }
 
-impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
-    fn fold(&self, _builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+impl<C: LeafCodec> Foldable<MerkleProofFold<C>> for CompressibleMerkleProof {
+    fn fold(&self, _builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
         if self.constraint == MinimumPresence::Present || self.tree.is_blind() {
             return self.clone();
         }
@@ -263,8 +265,10 @@ pub struct ForceMinimumPresence<T> {
     pub inner: T,
 }
 
-impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for ForceMinimumPresence<T> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+impl<C: LeafCodec, T: Foldable<MerkleProofFold<C>>> Foldable<MerkleProofFold<C>>
+    for ForceMinimumPresence<T>
+{
+    fn fold(&self, builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
         let mut proof = self.inner.fold(builder);
         proof.constraint = self.min_constraint.max(proof.constraint);
         proof
@@ -272,16 +276,20 @@ impl<T: Foldable<MerkleProofFold>> Foldable<MerkleProofFold> for ForceMinimumPre
 }
 
 /// [`Fold`] for creating a [`MerkleProof`] tree from a foldable structure
-pub struct MerkleProofFold {
-    _private: (),
+///
+/// Parameterised by the leaf [`LeafCodec`]; defaults to [`Bincode`].
+pub struct MerkleProofFold<C = Bincode> {
+    _codec: PhantomData<C>,
 }
 
-impl MerkleProofFold {
+impl<C: LeafCodec> MerkleProofFold<C> {
     /// Create a new fold builder for Merkle proofs.
     ///
     /// NOTE: This should be private! We don't want users to create this directly.
     fn new() -> Self {
-        MerkleProofFold { _private: () }
+        MerkleProofFold {
+            _codec: PhantomData,
+        }
     }
 
     /// Fold into a Merkle tree proof leaf.
@@ -320,26 +328,31 @@ impl MerkleProofFold {
     }
 }
 
-impl Fold for MerkleProofFold {
+impl<C: LeafCodec> Fold for MerkleProofFold<C> {
     type Folded = CompressibleMerkleProof;
 
-    type NodeFold = MerkleProofNodeFold;
+    type NodeFold = MerkleProofNodeFold<C>;
+
+    type Codec = C;
 
     fn into_node_fold(self) -> Self::NodeFold {
         MerkleProofNodeFold {
             children: Vec::new(),
+            _codec: PhantomData,
         }
     }
 }
 
 /// [`NodeFold`] for creating a [`MerkleProof`] node from a foldable structure
-pub struct MerkleProofNodeFold {
+pub struct MerkleProofNodeFold<C = Bincode> {
     /// Children of the node that is being folded
     children: Vec<CompressibleMerkleProof>,
+
+    _codec: PhantomData<C>,
 }
 
-impl NodeFold for MerkleProofNodeFold {
-    type Parent = MerkleProofFold;
+impl<C: LeafCodec> NodeFold for MerkleProofNodeFold<C> {
+    type Parent = MerkleProofFold<C>;
 
     fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
         let child_info = child.fold(MerkleProofFold::new());
