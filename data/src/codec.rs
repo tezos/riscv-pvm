@@ -19,8 +19,18 @@ use bincode::Decode;
 use bincode::Encode;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use rkyv::api::high::HighSerializer;
+use rkyv::api::high::HighValidator;
+use rkyv::bytecheck::CheckBytes;
+use rkyv::de::Pool;
+use rkyv::rancor;
+use rkyv::rancor::Strategy;
+use rkyv::ser::allocator::ArenaHandle;
+use rkyv::util::AlignedVec;
 
 use crate::serialisation::deserialise;
+use crate::serialisation::rkyv_deserialise;
+use crate::serialisation::rkyv_serialise;
 use crate::serialisation::serialise;
 
 /// A leaf serialisation codec: the strategy used to turn a leaf value into bytes (and back) when
@@ -61,6 +71,9 @@ pub enum LeafDecodeError {
 
     #[error("rkyv deserialisation error: {0}")]
     Rkyv(#[from] rkyv::rancor::Error),
+
+    #[error("rkyv leaf framing error: {0}")]
+    Framing(&'static str),
 }
 
 /// A value that can be encoded as a hash/proof leaf under codec `C`.
@@ -107,11 +120,73 @@ impl<T: Decode<()>> LeafDecode<Bincode> for T {
     }
 }
 
+// --- Rkyv codec. ---
+//
+// An rkyv archive is not self-delimiting from the front, so each leaf is length-framed: an 8-byte
+// little-endian archive length followed by the archive bytes. The prefix is part of the leaf's byte
+// representation, so it is included in the leaf hash and stored verbatim in a proof — this keeps the
+// merkle-proof machinery codec-agnostic (it always shuttles opaque leaf bytes) while remaining
+// self-delimiting for the stream deserialiser. Decoding copies the archive into an `AlignedVec`
+// before validated access (see [`rkyv_deserialise`]), since a leaf slice sits at an arbitrary offset.
+
+/// Number of bytes in the leaf length prefix used by the rkyv codec.
+const RKYV_LEN_PREFIX: usize = size_of::<u64>();
+
+impl<T> LeafEncode<Rkyv> for T
+where
+    T: for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rancor::Error>>,
+{
+    fn leaf_encode(&self) -> Result<Vec<u8>, LeafEncodeError> {
+        let archive = rkyv_serialise(self)?;
+
+        let mut out = Vec::with_capacity(RKYV_LEN_PREFIX + archive.len());
+        out.extend_from_slice(&(archive.len() as u64).to_le_bytes());
+        out.extend_from_slice(&archive);
+        Ok(out)
+    }
+}
+
+impl<T> LeafDecode<Rkyv> for T
+where
+    T: rkyv::Archive,
+    T::Archived: for<'a> CheckBytes<HighValidator<'a, rancor::Error>>
+        + rkyv::Deserialize<T, Strategy<Pool, rancor::Error>>,
+{
+    fn leaf_decode(bytes: &[u8]) -> Result<Self, LeafDecodeError> {
+        let (value, _consumed) = Self::leaf_decode_stream(bytes)?;
+        Ok(value)
+    }
+
+    fn leaf_decode_stream(bytes: &[u8]) -> Result<(Self, usize), LeafDecodeError> {
+        let len_bytes = bytes
+            .get(..RKYV_LEN_PREFIX)
+            .ok_or(LeafDecodeError::Framing("leaf shorter than length prefix"))?;
+        // The slice length matches the prefix width, so the conversion cannot fail.
+        let len = u64::from_le_bytes(
+            len_bytes
+                .try_into()
+                .map_err(|_| LeafDecodeError::Framing("invalid length prefix"))?,
+        ) as usize;
+
+        let end = RKYV_LEN_PREFIX
+            .checked_add(len)
+            .ok_or(LeafDecodeError::Framing("leaf length overflow"))?;
+        let archive = bytes
+            .get(RKYV_LEN_PREFIX..end)
+            .ok_or(LeafDecodeError::Framing("leaf shorter than framed length"))?;
+
+        let value = rkyv_deserialise(archive)?;
+        Ok((value, end))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Bincode;
     use super::LeafDecode;
+    use super::LeafDecodeError;
     use super::LeafEncode;
+    use super::Rkyv;
     use crate::serialisation::serialise;
 
     #[test]
@@ -126,5 +201,54 @@ mod tests {
         // And it round-trips.
         let decoded: u64 = LeafDecode::<Bincode>::leaf_decode(&via_codec).expect("decode ok");
         assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn rkyv_codec_round_trip() {
+        let value: u64 = 0x0123_4567_89AB_CDEF;
+
+        let encoded = LeafEncode::<Rkyv>::leaf_encode(&value).expect("rkyv encode ok");
+
+        // Whole-slice decode.
+        let decoded: u64 = LeafDecode::<Rkyv>::leaf_decode(&encoded).expect("rkyv decode ok");
+        assert_eq!(decoded, value);
+
+        // Stream decode reports the exact number of bytes consumed (prefix + archive), so
+        // back-to-back leaves can be parsed in sequence.
+        let (decoded, consumed): (u64, usize) =
+            LeafDecode::<Rkyv>::leaf_decode_stream(&encoded).expect("rkyv stream decode ok");
+        assert_eq!(decoded, value);
+        assert_eq!(consumed, encoded.len());
+    }
+
+    #[test]
+    fn rkyv_stream_decode_stops_at_leaf_boundary() {
+        // Two framed leaves back-to-back: the stream decoder must consume exactly the first.
+        let mut buf = LeafEncode::<Rkyv>::leaf_encode(&1u32).expect("encode ok");
+        let first_len = buf.len();
+        buf.extend_from_slice(&LeafEncode::<Rkyv>::leaf_encode(&2u32).expect("encode ok"));
+
+        let (a, consumed): (u32, usize) =
+            LeafDecode::<Rkyv>::leaf_decode_stream(&buf).expect("decode ok");
+        assert_eq!(a, 1);
+        assert_eq!(consumed, first_len);
+
+        let (b, _): (u32, usize) =
+            LeafDecode::<Rkyv>::leaf_decode_stream(&buf[consumed..]).expect("decode ok");
+        assert_eq!(b, 2);
+    }
+
+    #[test]
+    fn rkyv_decode_rejects_truncated_frame() {
+        let encoded = LeafEncode::<Rkyv>::leaf_encode(&12345u64).expect("encode ok");
+
+        // Chop a byte off the framed archive: the length prefix now over-runs the buffer.
+        let truncated = &encoded[..encoded.len() - 1];
+        let res: Result<u64, _> = LeafDecode::<Rkyv>::leaf_decode(truncated);
+        assert!(matches!(res, Err(LeafDecodeError::Framing(_))));
+
+        // Fewer bytes than the length prefix itself.
+        let res: Result<u64, _> = LeafDecode::<Rkyv>::leaf_decode(&[0u8; 3]);
+        assert!(matches!(res, Err(LeafDecodeError::Framing(_))));
     }
 }
