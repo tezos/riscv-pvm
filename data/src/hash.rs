@@ -42,7 +42,21 @@ pub enum HashError {
 /// produced by a preset hash function, currently BLAKE3. It can be obtained
 /// by either hashing data directly or after hashing by converting from
 /// a suitably sized byte slice or vector.
-#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, Hash, PartialOrd, Ord, derive_more::Debug)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Encode,
+    Decode,
+    Hash,
+    PartialOrd,
+    Ord,
+    derive_more::Debug,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[debug("{}", self)]
 pub struct Hash {
     digest: [u8; Hash::DIGEST_SIZE],
