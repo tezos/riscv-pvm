@@ -46,7 +46,7 @@ use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::repo::RegistryRepo;
 use crate::storage::KeyValueStore;
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 /// Structure to store the result of serialising a registry.
 struct RegistryManifest {
     database_hashes: Vec<CommitId>,

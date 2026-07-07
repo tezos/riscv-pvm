@@ -11,7 +11,19 @@ use octez_riscv_data::hash::Hash;
 
 /// [`CommitId`]'s are used to generate commits & to checkout specific commits
 /// from a `DirectoryManager`.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode, Hash)]
+#[derive(
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    Copy,
+    Encode,
+    Decode,
+    Hash,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[cfg_attr(
     test_utils,
     derive(serde::Serialize, serde::Deserialize),

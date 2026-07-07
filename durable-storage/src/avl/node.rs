@@ -45,7 +45,9 @@ use crate::storage::Storable;
 use crate::storage::StoreOptions;
 
 /// Metadata of a [`Node`] needed for accesses.
-#[derive(Clone, Default, Debug, Encode, Decode)]
+#[derive(
+    Clone, Default, Debug, Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub(crate) struct Meta {
     key: Key,
 
@@ -54,7 +56,7 @@ pub(crate) struct Meta {
 }
 
 /// This type is a compact serialised form of a [`Node`] with metadata and child subtree hashes.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct StoredNode {
     meta: Meta,
     data: Hash,
