@@ -121,6 +121,9 @@ pub enum OperationalError {
 
     #[error("Error during encoding.")]
     Encoding(#[from] bincode::error::EncodeError),
+
+    #[error("Error during rkyv (de)serialisation: {0}")]
+    Rkyv(#[from] rkyv::rancor::Error),
 }
 
 /// Errors that occur because of incorrect usage

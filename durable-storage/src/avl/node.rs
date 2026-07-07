@@ -25,8 +25,8 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
+use octez_riscv_data::serialisation::rkyv_deserialise;
+use octez_riscv_data::serialisation::rkyv_serialise;
 use perfect_derive::perfect_derive;
 
 use super::resolver::LazyDataId;
@@ -871,7 +871,7 @@ where
         };
 
         let &id = self.hash();
-        let bytes = serialise(repr)?;
+        let bytes = rkyv_serialise(&repr)?;
         store.blob_set(id, bytes)?;
 
         // Are we in charge of writing the value data to the KV store?
@@ -905,7 +905,7 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
                         root: id,
                         source: Box::new(error),
                     })?;
-            deserialise(bytes.as_ref())?
+            rkyv_deserialise(bytes.as_ref())?
         };
 
         let meta = Atom::new(meta);

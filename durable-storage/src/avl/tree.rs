@@ -28,8 +28,8 @@ use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::ProofError;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::utils::not_found;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
+use octez_riscv_data::serialisation::rkyv_deserialise;
+use octez_riscv_data::serialisation::rkyv_serialise;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
@@ -452,7 +452,7 @@ impl<NodeId: Storable> Storable for Tree<NodeId> {
         }
 
         let id = self.hash();
-        let bytes = serialise(repr)?;
+        let bytes = rkyv_serialise(&repr)?;
         store.blob_set(id, bytes)?;
 
         if let Some(node) = &self.0
@@ -481,7 +481,7 @@ impl<NodeId: Loadable> Loadable for Tree<NodeId> {
                         root: id,
                         source: Box::new(error),
                     })?;
-            deserialise(bytes.as_ref())?
+            rkyv_deserialise(bytes.as_ref())?
         };
 
         repr.map(|node_id| NodeId::load(node_id, store))
