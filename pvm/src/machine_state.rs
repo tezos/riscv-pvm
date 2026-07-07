@@ -211,7 +211,9 @@ impl<MC> FromProof for MachineCoreState<MC, Verify>
 where
     MC: MemoryConfig,
 {
-    fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
+    fn from_proof<
+        D: octez_riscv_data::merkle_proof::Deserialiser<Codec = octez_riscv_data::codec::Bincode>,
+    >(
         proof: D,
     ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
@@ -374,7 +376,9 @@ impl<MC> FromProof for MachineState<MC, EmptyPageCache, Verify>
 where
     MC: MemoryConfig,
 {
-    fn from_proof<D: octez_riscv_data::merkle_proof::Deserialiser>(
+    fn from_proof<
+        D: octez_riscv_data::merkle_proof::Deserialiser<Codec = octez_riscv_data::codec::Bincode>,
+    >(
         proof: D,
     ) -> octez_riscv_data::merkle_proof::SuspendedResult<D, Self> {
         let result = MachineCoreState::from_proof(proof)?;

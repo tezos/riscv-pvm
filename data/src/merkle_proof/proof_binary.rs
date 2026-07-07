@@ -9,6 +9,9 @@ use std::io::Read;
 use bincode::Decode;
 use bincode::error::DecodeError;
 
+use crate::codec::Bincode;
+use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
 use crate::hash::Hash;
 use crate::merkle_proof::Deserialiser;
 use crate::merkle_proof::DeserialiserNode;
@@ -37,14 +40,16 @@ impl<'t> StreamInput<'t> {
         Ok(deserialise_from(&mut self.data)?)
     }
 
-    /// Like [`Self::deserialise`] but also returns the raw bytes that were used to deserialise `T`.
-    fn capture_deserialise<T: Decode<()>>(&mut self) -> Result<(T, &'t [u8]), ProofError> {
+    /// Like [`Self::deserialise`] but decodes a leaf value with codec `C` and also returns the raw
+    /// bytes that were consumed.
+    fn capture_deserialise<C: LeafCodec, T: LeafDecode<C>>(
+        &mut self,
+    ) -> Result<(T, &'t [u8]), ProofError> {
         let start_pos = self.data;
-        let data = self.deserialise::<T>()?;
-        let end_pos = self.data;
+        let (data, consumed) = T::leaf_decode_stream(self.data)?;
+        self.data = &self.data[consumed..];
 
-        let data_len = start_pos.len() - end_pos.len();
-        let raw_bytes = &start_pos[..data_len];
+        let raw_bytes = &start_pos[..consumed];
 
         Ok((data, raw_bytes))
     }
@@ -128,6 +133,8 @@ impl<'t> StreamDeserialiser<'t> {
 impl<'t> Deserialiser for StreamDeserialiser<'t> {
     type Error = ProofError;
 
+    type Codec = Bincode;
+
     type Suspended<R> = StreamParserComb<'t, R>;
 
     type DeserialiserNode = StreamBranchComb<'t>;
@@ -180,7 +187,9 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
         })
     }
 
-    fn into_leaf<T: Decode<()>>(mut self) -> Result<Self::Suspended<Partial<T>>, ProofError> {
+    fn into_leaf<T: LeafDecode<Bincode>>(
+        mut self,
+    ) -> Result<Self::Suspended<Partial<T>>, ProofError> {
         if self.is_absent_or_blinded() {
             let this = StreamParserComb {
                 result: Partial::Absent,
@@ -202,7 +211,7 @@ impl<'t> Deserialiser for StreamDeserialiser<'t> {
                     (result, proof)
                 }
                 LeafTag::Read => {
-                    let (data, raw_bytes) = self.input.capture_deserialise::<T>()?;
+                    let (data, raw_bytes) = self.input.capture_deserialise::<Bincode, T>()?;
                     let result = Partial::Present(data);
                     let proof = Partial::Present(raw_bytes.to_vec());
                     (result, proof)

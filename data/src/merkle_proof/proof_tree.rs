@@ -4,7 +4,6 @@
 use std::borrow::Borrow;
 use std::marker::PhantomData;
 
-use bincode::Decode;
 use bincode::enc::write::Writer;
 
 use super::Deserialiser;
@@ -17,11 +16,11 @@ use super::tag::LeafTag;
 use super::tag::Tag;
 use crate::codec::Bincode;
 use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
 use crate::hash::Hash;
-use crate::serialisation;
 use crate::tree::Tree;
 
 /// Merkle proof tree structure.
@@ -496,6 +495,8 @@ impl<'a> ProofTree<'a> {
 impl<'t> Deserialiser for ProofTree<'t> {
     type Error = ProofError;
 
+    type Codec = Bincode;
+
     type Suspended<R> = ProofTreeResult<'t, R>;
 
     type DeserialiserNode = Partial<std::vec::IntoIter<Self>>;
@@ -518,10 +519,8 @@ impl<'t> Deserialiser for ProofTree<'t> {
             .map(ProofTreeResult::new)
     }
 
-    fn into_leaf<T: Decode<()>>(self) -> Result<Self::Suspended<Partial<T>>, Self::Error> {
-        let result = self
-            .as_leaf()?
-            .map_present_fallible(serialisation::deserialise)?;
+    fn into_leaf<T: LeafDecode<Bincode>>(self) -> Result<Self::Suspended<Partial<T>>, Self::Error> {
+        let result = self.as_leaf()?.map_present_fallible(T::leaf_decode)?;
         Ok(ProofTreeResult::new(result))
     }
 

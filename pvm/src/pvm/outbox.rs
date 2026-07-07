@@ -250,7 +250,9 @@ impl Unfoldable for Outbox<Normal> {
 }
 
 impl FromProof for Outbox<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
         let (proof, levels) = proof.next_branch()?;
         proof.done(Outbox { levels })
@@ -452,7 +454,9 @@ impl Unfoldable for OutboxLevel<Normal> {
 }
 
 impl FromProof for OutboxLevel<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
         let (proof, messages) = proof.next_branch()?;
         let (proof, level) = proof.next_branch()?;

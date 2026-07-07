@@ -33,7 +33,7 @@ where
         <PickConfig<PAGES> as BuddyConfig>::start_proof(instance)
     }
 
-    fn buddy_from_proof<D: merkle_proof::Deserialiser>(
+    fn buddy_from_proof<D: merkle_proof::Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
         proof: D,
     ) -> merkle_proof::SuspendedResult<D, Self::Buddy<Verify>> {
         <PickConfig<PAGES> as BuddyConfig>::buddy_from_proof(proof)

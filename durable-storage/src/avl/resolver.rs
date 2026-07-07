@@ -1108,7 +1108,9 @@ impl Foldable<PartialHashFold> for VerifyNodeId {
 }
 
 impl FromProof for VerifyNodeId {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         // Capture the sub-proof BEFORE consuming `proof`; `into_node` moves it.
         let original_proof = proof.capture_owned_proof().map(Arc::new);
         let ctx = proof.into_node()?;
@@ -1149,7 +1151,9 @@ impl Foldable<PartialHashFold> for VerifyTreeId {
 }
 
 impl FromProof for VerifyTreeId {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let ctx = proof.into_node()?;
         let (ctx, partial) = Tree::from_branches(ctx)?;
         let tree_id = match partial {

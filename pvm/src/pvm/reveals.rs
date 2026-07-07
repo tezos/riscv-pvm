@@ -107,7 +107,9 @@ impl Unfoldable for RevealRequest<Normal> {
 }
 
 impl FromProof for RevealRequest<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, bytes) = proof.next_branch()?;

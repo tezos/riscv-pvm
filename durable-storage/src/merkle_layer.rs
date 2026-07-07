@@ -179,7 +179,9 @@ impl<KV> MerkleLayer<KV, Verify> {
 }
 
 impl<KV> FromProof for MerkleLayer<KV, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         // Capture before consuming `proof`.
         //
         // This is `None` for deserialisers that cannot capture an owned proof (e.g. the stream

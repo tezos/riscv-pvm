@@ -349,7 +349,9 @@ impl<KV: KeyValueStore> FromProof for Registry<KV, Verify> {
     // deserialiser, verification will fail (as this does not support capturing the owned proof).
     // Deserialising from raw bytes therefore requires two passes: a stream pass to reconstruct
     // the proof tree, then a proof-tree pass to obtain a verifiable registry.
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let suspended = Vector::<Database<KV, Verify>, Verify>::from_proof(proof)?;
         Ok(suspended.map(|databases| Self {
             inner: VerifyImpl(PhantomData),

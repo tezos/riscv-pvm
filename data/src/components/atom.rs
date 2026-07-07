@@ -22,6 +22,7 @@ use perfect_derive::perfect_derive;
 
 use crate::clone::CloneState;
 use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
 use crate::codec::LeafEncode;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
@@ -248,8 +249,8 @@ impl<T: Decode<()>> Unfoldable for Atom<T, Normal> {
     }
 }
 
-impl<T: Decode<()> + 'static> FromProof for Atom<T, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl<C: LeafCodec, T: LeafDecode<C> + 'static> FromProof<C> for Atom<T, Verify> {
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let result = proof.into_leaf()?.map(|value| Atom { atom: value });
         Ok(result)
     }

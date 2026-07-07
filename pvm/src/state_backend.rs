@@ -186,7 +186,11 @@ mod tests {
         }
 
         impl FromProof for Foo<Verify> {
-            fn from_proof<Proof: octez_riscv_data::merkle_proof::Deserialiser>(
+            fn from_proof<
+                Proof: octez_riscv_data::merkle_proof::Deserialiser<
+                        Codec = octez_riscv_data::codec::Bincode,
+                    >,
+            >(
                 proof: Proof,
             ) -> octez_riscv_data::merkle_proof::SuspendedResult<Proof, Self> {
                 let node = proof.into_node()?;

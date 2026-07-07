@@ -19,6 +19,7 @@ use super::bytes::Bytes;
 use super::bytes::ChunkedPage;
 use super::bytes::Page;
 use crate::clone::CloneState;
+use crate::codec::LeafCodec;
 use crate::codec::LeafEncode;
 use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
@@ -329,8 +330,11 @@ impl Unfoldable for DataSpace<Normal> {
     }
 }
 
-impl FromProof for DataSpace<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+impl<C: LeafCodec> FromProof<C> for DataSpace<Verify>
+where
+    Bytes<Verify>: FromProof<C>,
+{
+    fn from_proof<D: Deserialiser<Codec = C>>(proof: D) -> SuspendedResult<D, Self> {
         let bytes = Bytes::<Verify>::from_proof(proof)?;
         let bytes = bytes.map(|bytes| DataSpace { data_space: bytes });
         Ok(bytes)

@@ -43,7 +43,9 @@ pub trait BuddyConfig: 'static {
     fn start_proof(instance: &Self::Buddy<Normal>) -> Self::Buddy<Prove<'_>>;
 
     /// Parse a proof to obtain the Buddy memory manager state.
-    fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>>;
+    fn buddy_from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self::Buddy<Verify>>;
 }
 
 /// Buddy-style memory manager

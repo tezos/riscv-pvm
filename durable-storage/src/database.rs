@@ -455,7 +455,9 @@ impl<KV> Database<KV, Verify> {
 }
 
 impl<KV> FromProof for Database<KV, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let suspended = <MerkleLayer<KV, Verify> as FromProof>::from_proof(proof)?;
         Ok(suspended.map(|merkle| Database {
             inner: VerifyImpl { merkle },

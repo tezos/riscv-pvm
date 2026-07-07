@@ -334,7 +334,7 @@ pub trait MemoryConfig: Send + Sync + Sized + 'static {
     type State<M: Mode>: Memory<M>;
 
     /// Parse the proof to obtain a memory instance.
-    fn state_from_proof<D: merkle_proof::Deserialiser>(
+    fn state_from_proof<D: merkle_proof::Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
         proof: D,
     ) -> merkle_proof::SuspendedResult<D, Self::State<Verify>>;
 

@@ -71,8 +71,16 @@ pub trait LeafEncode<C: LeafCodec> {
 
 /// A value that can be reconstructed from a hash/proof leaf's bytes under codec `C`.
 pub trait LeafDecode<C: LeafCodec>: Sized {
-    /// Decode the leaf byte representation for codec `C` back into an owned value.
+    /// Decode the leaf byte representation for codec `C` from an exact byte slice.
     fn leaf_decode(bytes: &[u8]) -> Result<Self, LeafDecodeError>;
+
+    /// Decode a leaf from the front of `bytes`, returning the value and the number of bytes
+    /// consumed.
+    ///
+    /// This is the streaming counterpart used by the byte-stream proof deserialiser, which lays
+    /// leaves back-to-back and needs to know where each one ends. For [`Bincode`] the archive is
+    /// self-delimiting so the length falls out of decoding; other codecs may need explicit framing.
+    fn leaf_decode_stream(bytes: &[u8]) -> Result<(Self, usize), LeafDecodeError>;
 }
 
 // --- Bincode codec: exactly the historical behaviour. ---
@@ -86,6 +94,16 @@ impl<T: Encode> LeafEncode<Bincode> for T {
 impl<T: Decode<()>> LeafDecode<Bincode> for T {
     fn leaf_decode(bytes: &[u8]) -> Result<Self, LeafDecodeError> {
         Ok(deserialise(bytes)?)
+    }
+
+    fn leaf_decode_stream(bytes: &[u8]) -> Result<(Self, usize), LeafDecodeError> {
+        // Decode from the front of the slice exactly as the stream deserialiser historically did
+        // (streaming read over `&[u8]`), computing the consumed length from how far the cursor
+        // advanced. This preserves the precise bincode error kind (e.g. `Io` on truncation).
+        let mut cursor: &[u8] = bytes;
+        let value = crate::serialisation::deserialise_from(&mut cursor)?;
+        let consumed = bytes.len() - cursor.len();
+        Ok((value, consumed))
     }
 }
 

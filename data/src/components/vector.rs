@@ -23,6 +23,7 @@ use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
 use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
 use crate::codec::LeafEncode;
 use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
@@ -299,8 +300,11 @@ impl<'normal, 'inner, E, T: ProvableExt<'normal, 'inner, E>> ProvableExt<'normal
     }
 }
 
-impl<T: FromProof> FromProof for Vector<T, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl<C: LeafCodec, T: FromProof<C>> FromProof<C> for Vector<T, Verify>
+where
+    u64: LeafDecode<C>,
+{
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
         let with_length = |length: Partial<u64>| {
             let length = length.map_present(|len: u64| len as usize);
             let state = Vector {

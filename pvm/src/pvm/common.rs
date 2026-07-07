@@ -463,7 +463,9 @@ where
 }
 
 impl<MC: MemoryConfig, DS: FromProof> FromProof for Pvm<MC, EmptyPageCache, DS, Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, system_state) = proof.next_branch()?;

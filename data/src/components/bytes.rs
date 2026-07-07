@@ -27,6 +27,7 @@ use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
 use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
 use crate::codec::LeafEncode;
 use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
@@ -503,8 +504,12 @@ impl Unfoldable for Bytes<Normal> {
     }
 }
 
-impl FromProof for Bytes<Verify> {
-    fn from_proof<Proof: Deserialiser>(
+impl<C: LeafCodec> FromProof<C> for Bytes<Verify>
+where
+    u64: LeafDecode<C>,
+    Page: LeafDecode<C>,
+{
+    fn from_proof<Proof: Deserialiser<Codec = C>>(
         proof: Proof,
     ) -> Result<<Proof as Deserialiser>::Suspended<Self>, <Proof as Deserialiser>::Error> {
         sequence_as_tree_from_proof::<u64, Self, _>(

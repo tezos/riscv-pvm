@@ -5,13 +5,13 @@
 
 use std::num::NonZeroUsize;
 
-use bincode::Decode;
 use bincode::Encode;
 use proptest::proptest;
 use proptest::test_runner::TestCaseResult;
 
 use super::proof_tree::MerkleProofFold;
 use super::proof_tree::MinimumPresence;
+use crate::codec::LeafDecodeError;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
@@ -34,9 +34,13 @@ use crate::merkle_proof::tag::TAG_NODE;
 use crate::merkle_proof::tag::TAG_READ;
 use crate::serialisation::serialise;
 
-fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
+fn generic_computation<T, D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    T: Into<i32> + crate::codec::LeafDecode<D::Codec>,
+    Hash: crate::codec::LeafDecode<D::Codec>,
+{
     // The tree structure:
     // Node (root)
     // ├── Leaf (type: Hash)
@@ -62,19 +66,30 @@ fn generic_computation<T: Into<i32> + Decode<()>, D: Deserialiser>(
 
 fn computation_i16<D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    i16: crate::codec::LeafDecode<D::Codec>,
+    Hash: crate::codec::LeafDecode<D::Codec>,
+{
     generic_computation::<i16, D>(proof)
 }
 
 fn computation_bool<D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    bool: crate::codec::LeafDecode<D::Codec>,
+    Hash: crate::codec::LeafDecode<D::Codec>,
+{
     generic_computation::<bool, D>(proof)
 }
 
 fn computation_leaves<D: Deserialiser>(
     proof: D,
-) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error> {
+) -> Result<<D as Deserialiser>::Suspended<i32>, D::Error>
+where
+    i32: crate::codec::LeafDecode<D::Codec>,
+{
     // The tree structure
     // Node (root)
     // ├── Leaf 1 (type: i32)
@@ -185,10 +200,10 @@ fn test_not_enough_bytes_error() {
 
     // Corresponds to a bincode::Error & std::io::Error because the hash deserialisation is done by
     // serde/bincode.
-    if let ProofError::Deserialise(bincode::error::DecodeError::Io {
+    if let ProofError::LeafDecode(LeafDecodeError::Bincode(bincode::error::DecodeError::Io {
         inner: io_err,
         additional: 32,
-    }) = res
+    })) = res
     {
         assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
     } else {
@@ -217,10 +232,10 @@ fn test_not_enough_bytes_error() {
 
     // In this case, the error happens earlier, at the tag deserialisation, so it is an error
     // thrown by our own `Deserialiser` traits.
-    if let ProofError::Deserialise(bincode::error::DecodeError::Io {
+    if let ProofError::LeafDecode(LeafDecodeError::Bincode(bincode::error::DecodeError::Io {
         inner: io_err,
         additional: 32,
-    }) = res
+    })) = res
     {
         assert_eq!(io_err.kind(), std::io::ErrorKind::UnexpectedEof);
     } else {
@@ -240,9 +255,9 @@ fn test_not_enough_bytes_error() {
     assert!(
         matches!(
             res,
-            Err(ProofError::Deserialise(
+            Err(ProofError::LeafDecode(LeafDecodeError::Bincode(
                 bincode::error::DecodeError::UnexpectedEnd { additional: 27 }
-            ))
+            )))
         ),
         "{res:?}"
     )
@@ -263,7 +278,7 @@ fn test_bad_bincode() {
 
     let res = run_stream_deserialiser(computation_bool, &raw_bytes_content);
 
-    assert!(matches!(res, Err(ProofError::Deserialise(_))));
+    assert!(matches!(res, Err(ProofError::LeafDecode(_))));
 
     let merkle_proof = MerkleProof::node_without_data(vec![
         MerkleProof::leaf_read(hash_read.to_vec()),
@@ -271,7 +286,7 @@ fn test_bad_bincode() {
     ]);
     let res = run_owned_deserialiser(computation_bool, &merkle_proof);
     eprintln!("Result: {res:?}");
-    assert!(matches!(res, Err(ProofError::Deserialise(_))));
+    assert!(matches!(res, Err(ProofError::LeafDecode(_))));
 }
 
 #[test]

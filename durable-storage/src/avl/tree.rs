@@ -10,6 +10,8 @@ use std::sync::LazyLock;
 use bincode::Decode;
 use bincode::de::Decoder;
 use bincode::error::DecodeError;
+use octez_riscv_data::codec::Bincode;
+use octez_riscv_data::codec::LeafDecode;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
@@ -66,11 +68,15 @@ impl Tree<LazyNodeId> {
     }
 }
 
-impl<NodeId: FromProof> Tree<NodeId> {
+impl<NodeId> Tree<NodeId> {
     /// Parse a tree from a proof deserialiser node.
     pub(super) fn from_branches<D: DeserialiserNode>(
         ctx: D,
-    ) -> Result<(D, Partial<Self>), <D::Parent as Deserialiser>::Error> {
+    ) -> Result<(D, Partial<Self>), <D::Parent as Deserialiser>::Error>
+    where
+        NodeId: FromProof<<D::Parent as Deserialiser>::Codec>,
+        bool: LeafDecode<<D::Parent as Deserialiser>::Codec>,
+    {
         match ctx.presence() {
             Partial::Absent => Ok((ctx, Partial::Absent)),
             // TODO: RV-895: The proof should include the empty tree rather
@@ -420,7 +426,9 @@ impl Foldable<PartialHashFold> for Tree<VerifyNodeId> {
 }
 
 impl FromProof for Tree<VerifyNodeId> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = Bincode>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let ctx = proof.into_node()?;
         let (ctx, tree) = Tree::from_branches(ctx)?;
         // The top-level fold for a Normal-mode `Tree<LazyNodeId>` always emits a node fold,
