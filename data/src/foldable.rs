@@ -111,11 +111,14 @@ pub trait NodeFold {
 /// Extension trait for `Fold` implementations that can treat leaves in a standard way.
 pub trait FoldLeaf: Fold + Sized {
     /// Fold any serialisable value as a single leaf, encoding it with this fold's [`Fold::Codec`].
-    fn fold_leaf<T: LeafEncode<Self::Codec>>(
+    ///
+    /// Takes the leaf by reference so the bound is on the owned type `T`. This matters for codecs
+    /// (rkyv) that do not implement their serialise trait for references.
+    fn fold_leaf<T: LeafEncode<Self::Codec> + ?Sized>(
         self,
-        t: T,
+        t: &T,
     ) -> Result<<Self as Fold>::Folded, LeafEncodeError> {
-        let bytes = t.leaf_encode()?;
+        let bytes = <T as LeafEncode<Self::Codec>>::leaf_encode(t)?;
         Ok(self.fold_leaf_raw(&bytes))
     }
 
@@ -137,7 +140,7 @@ impl<T> EncodeLeaf<T> {
 
 impl<F: FoldLeaf, T> Foldable<F> for EncodeLeaf<T>
 where
-    for<'a> &'a T: LeafEncode<F::Codec>,
+    T: LeafEncode<F::Codec>,
 {
     fn fold(&self, builder: F) -> <F as Fold>::Folded {
         builder.fold_leaf(&self.data).expect(self.err_msg)

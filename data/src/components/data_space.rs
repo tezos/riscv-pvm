@@ -232,7 +232,7 @@ impl<C> Decode<C> for DataSpace<Normal> {
 
 impl<F: FoldLeaf> Foldable<F> for DataSpace<Normal>
 where
-    for<'a> &'a u64: LeafEncode<F::Codec>,
+    u64: LeafEncode<F::Codec>,
     for<'x> ChunkedPage<'x>: LeafEncode<F::Codec>,
 {
     fn fold(&self, builder: F) -> F::Folded {
@@ -253,7 +253,7 @@ where
             FoldableClosure::new(move |builder: F| {
                 let page = ChunkedPage { chunks: &[data] };
                 builder
-                    .fold_leaf(page)
+                    .fold_leaf(&page)
                     .expect("Serialising page data should not fail")
             })
         };

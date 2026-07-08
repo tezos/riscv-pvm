@@ -25,15 +25,12 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
-use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
@@ -41,7 +38,6 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::not_found;
-use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use crate::avl::resolver::CachedOnlyResolver;
@@ -54,6 +50,9 @@ use crate::avl::resolver::Resolver;
 use crate::avl::resolver::VerifyResolver;
 use crate::avl::resolver::VerifyTreeId;
 use crate::avl::tree::Tree;
+use crate::codec::HashFold;
+use crate::codec::MerkleProofFold;
+use crate::codec::PartialHashFold;
 use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::OperationalError;
@@ -178,8 +177,8 @@ impl<KV> MerkleLayer<KV, Verify> {
     }
 }
 
-impl<KV> FromProof for MerkleLayer<KV, Verify> {
-    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+impl<KV> FromProof<octez_riscv_data::codec::Rkyv> for MerkleLayer<KV, Verify> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Rkyv>>(
         proof: Proof,
     ) -> SuspendedResult<Proof, Self> {
         // Capture before consuming `proof`.
@@ -426,10 +425,13 @@ impl MerkleLayerMode for Verify {
             .original_proof
             .as_ref()
             .map(|proof| proof.as_ref().clone());
-        PartialHash::from_foldable(original_proof, &this.inner.tree)
-            .to_hash()
-            // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
-            .unwrap_or_else(|| unsafe { not_found() })
+        PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+            original_proof,
+            &this.inner.tree,
+        )
+        .to_hash()
+        // SAFETY: `not_found` is safe to call because we're in `Verify` mode.
+        .unwrap_or_else(|| unsafe { not_found() })
     }
 
     fn delete<KV: KeyValueStore>(
@@ -513,7 +515,7 @@ impl<KV> NormalImpl<KV> {
 
     /// Returns the root hash, potentially re-hashing uncached nodes.
     fn hash(&self) -> Hash {
-        Hash::from_foldable(&self.tree)
+        Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.tree)
     }
 
     /// Delete the data associated with a given [Key].
@@ -626,7 +628,8 @@ impl<KV: KeyValueStore> Foldable<MerkleProofFold> for MerkleLayer<KV, Prove<'_>>
         // *NB* inserting into an empty tree works, as the deserialiser
         // correctly recognises the special `EMPTY_TREE_HASH`.
         if !self.inner.resolver.was_any_accessed() {
-            let root_hash = Hash::from_foldable(&self.inner.initial_tree);
+            let root_hash =
+                Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.inner.initial_tree);
             return builder.into_blind(root_hash);
         }
 
@@ -646,7 +649,7 @@ struct InitialTreeFold<'a, KV> {
 
 impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialTreeFold<'_, KV> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let root_hash = Hash::from_foldable(self.tree_id);
+        let root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self.tree_id);
 
         if !self.prove_impl.resolver.was_tree_accessed(&root_hash) {
             // TODO: RV-968 - replace `into_blind` with a non-`CompressibleMerkleProof`-constructing
@@ -670,7 +673,7 @@ struct InitialNodeFold<'a, KV> {
 
 impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
-        let hash = Hash::from_foldable(self.node_id);
+        let hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self.node_id);
 
         if !self.prove_impl.resolver.was_node_accessed(&hash) {
             // TODO: RV-968 - replace `into_blind` with a non-`CompressibleMerkleProof`-constructing
@@ -753,9 +756,12 @@ fn fold_resolved_tree<KV: KeyValueStore>(
 
     let mut node_fold = builder.into_node_fold();
 
-    // Bool leaf: true if the initial tree is occupied.
+    // Bool leaf: true if the initial tree is occupied. Encoded with the durable-storage leaf codec
+    // so it matches the presence leaf produced by the `HashFold`/`Tree` fold.
     let present = tree.root().is_some();
-    let bool_data = serialise(present).expect("Serialising a bool should not fail");
+    let bool_data =
+        octez_riscv_data::codec::LeafEncode::<crate::codec::Codec>::leaf_encode(&present)
+            .expect("Serialising a bool should not fail");
     let bool_leaf = MerkleProofFold::new_leaf(MinimumPresence::Present, bool_data);
     node_fold.add(&bool_leaf);
 
@@ -776,7 +782,7 @@ fn fold_resolved_tree<KV: KeyValueStore>(
 pub(crate) fn new_verify_layer<KV: KeyValueStore>(repo: &KV::Repo) -> MerkleLayer<KV, Verify> {
     let normal_ml = new_merkle_layer::<KV>(repo);
     let prove_ml = normal_ml.start_proof();
-    let proof = MerkleProof::from_foldable(&prove_ml);
+    let proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_ml);
     MerkleLayer::from_proof(proof).expect("empty-tree proof should deserialise")
 }
 
@@ -839,7 +845,9 @@ mod tests {
     impl<KV> MerkleLayer<KV, Verify> {
         /// Construct a Verify-mode [`MerkleLayer`] by deserialising a [`MerkleProof`]
         pub fn from_proof(proof: MerkleProof) -> Result<Self, ProofError> {
-            let suspended = <Self as FromProof>::from_proof(ProofTree::present(&proof))?;
+            let suspended = <Self as FromProof<octez_riscv_data::codec::Rkyv>>::from_proof(
+                ProofTree::present(&proof),
+            )?;
             Ok(suspended.into_result())
         }
     }
@@ -859,7 +867,7 @@ mod tests {
         /// Generate a Merkle proof from the current Prove-mode layer and produce a Verify-mode
         /// layer that replays the same data via that proof.
         pub(crate) fn to_verify(&self) -> MerkleLayer<KV, Verify> {
-            let proof = MerkleProof::from_foldable(self);
+            let proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self);
             MerkleLayer::from_proof(proof).expect("proof deserialization should succeed")
         }
     }
@@ -954,7 +962,8 @@ mod tests {
         let prove_final_hash = prove_ml.hash();
 
         // ---- Generate proof ----
-        let merkle_proof = MerkleProof::from_foldable(&prove_ml);
+        let merkle_proof =
+            MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_ml);
 
         // Property 1: proof's root hash == initial Normal-mode hash.
         assert_eq!(
@@ -2128,7 +2137,7 @@ mod tests {
         assert_eq!(node, b"prove to verify");
 
         // Verify mode
-        let proof = MerkleProof::from_foldable(&prove_ml);
+        let proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_ml);
         let verify_ml: MerkleLayer<KV, Verify> =
             MerkleLayer::from_proof(proof).expect("The proof should be deserialisable");
 
@@ -2289,7 +2298,7 @@ mod tests {
             "read-only prove step must not change the hash"
         );
 
-        let proof = MerkleProof::from_foldable(&prove_ml);
+        let proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_ml);
         assert_eq!(
             normal_hash,
             proof.root_hash(),
@@ -2333,7 +2342,8 @@ mod tests {
         assert_ne!(initial_hash, expected_hash, "write should change the hash");
 
         // ---- Generate proof ----
-        let merkle_proof = MerkleProof::from_foldable(&prove_ml);
+        let merkle_proof =
+            MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_ml);
 
         // ---- Verify: deserialize proof, replay identical ops ----
         let mut verify_ml: MerkleLayer<KV, Verify> =

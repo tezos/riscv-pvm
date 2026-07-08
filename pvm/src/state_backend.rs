@@ -116,7 +116,7 @@ mod tests {
 
         // The Verify mode needs a proof, so we generate it from the Prove mode
         let proof_tree = MerkleProof::from_foldable(&mem_prove);
-        let proof_deser = ProofTree::present(&proof_tree);
+        let proof_deser: ProofTree<'_> = ProofTree::present(&proof_tree);
         let mut mem_verify = DataSpace::from_proof(proof_deser).unwrap().into_result();
 
         unsafe {

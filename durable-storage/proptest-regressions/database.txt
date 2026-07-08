@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 4e0f6fc812b7cc2056ecdae9fe77da620a788045fe885f11986e0b867b113535 # shrinks to generated = ([Key([0])], [b"\0"], [CommitCheckoutRoundtrip, Write(Index(0), 4655952153816738, Index(15523033703182779703)), CommitCheckoutRoundtrip, Set(Index(5247932127895921218), Index(12036897310779564997)), Exists(Index(6689932604961491192)), Hash, Set(Index(3156288663196043912), Index(8686501897056101072)), Set(Index(13612109159566398078), Index(8457496383795141308))], [CommitCheckoutRoundtrip, Write(Index(0), 4655952153816738, Index(15523033703182779703)), Set(Index(5247932127895921218), Index(12036897310779564997)), CommitCheckoutRoundtrip, Exists(Index(6689932604961491192)), Hash, Set(Index(3156288663196043912), Index(8686501897056101072)), Set(Index(13612109159566398078), Index(8457496383795141308))])

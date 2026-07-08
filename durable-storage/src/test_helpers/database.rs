@@ -712,7 +712,7 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
 ) -> Option<Vec<u8>> {
     use octez_riscv_data::hash::PartialHash;
 
-    let pre_root_hash = Hash::from_foldable(database);
+    let pre_root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(database);
 
     // Produce a proof and record the trace of applying `operation`
     let mut prover = database
@@ -724,30 +724,33 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
         return None;
     }
 
-    let post_root_hash = Hash::from_foldable(&prover);
-    let proof = MerkleProof::from_foldable(&prover);
+    let post_root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prover);
+    let proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prover);
     let proof_step_trace = prover.into_trace();
     let proof_bytes = serialise(&proof).expect("serialising the proof should succeed");
 
     // Construct the Verify-mode database from the proof and verify
     let mut verify_db = TracedDatabase::from(
-        <Database<KV, Verify> as octez_riscv_data::merkle_proof::FromProof>::from_proof(
-            octez_riscv_data::merkle_proof::proof_tree::ProofTree::present(&proof),
+        <Database<KV, Verify> as octez_riscv_data::merkle_proof::FromProof<
+            octez_riscv_data::codec::Rkyv,
+        >>::from_proof(
+            octez_riscv_data::merkle_proof::proof_tree::ProofTree::present(&proof)
         )
         .expect("proof should be valid")
         .into_result(),
     );
     assert_eq!(
-        PartialHash::from_foldable(None, &verify_db)
+        PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(None, &verify_db)
             .to_hash()
             .expect("hashing the Verify database should succeed"),
         pre_root_hash,
         "the proof must reconstruct the pre-operation root hash"
     );
     apply_database_step(&mut verify_db, operation).expect("applying a step should succeed");
-    let verify_post_root_hash = PartialHash::from_foldable(None, &verify_db)
-        .to_hash()
-        .expect("hashing the Verify database should succeed");
+    let verify_post_root_hash =
+        PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(None, &verify_db)
+            .to_hash()
+            .expect("hashing the Verify database should succeed");
     let verify_step_trace = verify_db.into_trace();
 
     assert_eq!(

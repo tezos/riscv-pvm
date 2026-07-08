@@ -24,6 +24,8 @@ use crate::clone::CloneState;
 use crate::codec::LeafCodec;
 use crate::codec::LeafDecode;
 use crate::codec::LeafEncode;
+use crate::codec::LeafEncodeError;
+use crate::codec::Rkyv;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
@@ -175,9 +177,24 @@ impl<T: Default + 'static, M: AtomMode> Default for Atom<T, M> {
     }
 }
 
+/// Encode an [`Atom`] leaf under the rkyv codec as its inner value.
+///
+/// `Atom<T, Normal>` is a mode wrapper and not itself `rkyv::Serialize`, so — mirroring the bincode
+/// `Encode` impl which delegates to `EncodeAtomMode::Normal` — we encode the contained value. This
+/// keeps a `Normal`-mode atom's leaf bytes identical to folding the bare inner value (as `Prove`/
+/// `Verify` mode do), so the state hash agrees across modes.
+impl<T: 'static> LeafEncode<Rkyv> for Atom<T, Normal>
+where
+    T: LeafEncode<Rkyv>,
+{
+    fn leaf_encode(&self) -> Result<Vec<u8>, LeafEncodeError> {
+        <T as LeafEncode<Rkyv>>::leaf_encode(self.deref())
+    }
+}
+
 impl<T, F: FoldLeaf> Foldable<F> for Atom<T, Normal>
 where
-    for<'a> &'a Atom<T, Normal>: LeafEncode<F::Codec>,
+    Atom<T, Normal>: LeafEncode<F::Codec>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         builder
@@ -188,7 +205,7 @@ where
 
 impl<'normal, T: 'static, F: FoldLeaf> Foldable<F> for Atom<T, Prove<'normal>>
 where
-    for<'a> &'a T: LeafEncode<F::Codec>,
+    T: LeafEncode<F::Codec>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let value = self
@@ -207,11 +224,7 @@ where
     T: LeafEncode<C>,
 {
     fn fold(&self, builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
-        let data = self
-            .atom
-            .previous
-            .deref()
-            .leaf_encode()
+        let data = <T as LeafEncode<C>>::leaf_encode(self.atom.previous.deref())
             .expect("Serialisation should not fail");
 
         // Determine whether the value has been read or written during proof generation. If so, we
@@ -234,9 +247,9 @@ where
         let hash = match &self.atom {
             Partial::Absent => return builder.previous(),
             Partial::Blinded(hash) => *hash,
-            Partial::Present(value) => {
-                Hash::hash_bytes(&value.leaf_encode().expect("Hashing should not fail"))
-            }
+            Partial::Present(value) => Hash::hash_bytes(
+                &<T as LeafEncode<C>>::leaf_encode(value).expect("Hashing should not fail"),
+            ),
         };
         PartialHash::Present(hash)
     }

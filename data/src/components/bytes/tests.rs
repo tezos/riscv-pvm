@@ -419,6 +419,34 @@ fn bytes_are_same_across_modes() {
     });
 }
 
+// Bytes behaves the same across modes under the rkyv leaf codec (mirrors
+// `bytes_are_same_across_modes`), exercising the `ChunkedPage`/`Page` rkyv leaf impls end-to-end.
+#[test]
+fn bytes_are_same_across_modes_rkyv() {
+    use crate::codec::Rkyv;
+
+    proptest!(|(ops in vec(BytesMutOp::any(64 * PAGE_SIZE), 1..20))| {
+        let mut bytes_normal = Bytes::<Normal>::default();
+        ops.iter().for_each(|op| { op.run(&mut bytes_normal); });
+        let hash_normal = Hash::from_foldable_with::<Rkyv>(&bytes_normal);
+
+        let mut bytes_prove = Bytes::<Prove>::default();
+        ops.iter().for_each(|op| { op.run(&mut bytes_prove); });
+        let hash_prove = Hash::from_foldable_with::<Rkyv>(&bytes_prove);
+        prop_assert_eq!(hash_normal, hash_prove);
+
+        let merkle_proof = MerkleProof::from_foldable_with::<Rkyv>(&bytes_prove);
+
+        let mut bytes_verify = Bytes::<Verify>::default();
+        ops.iter().for_each(|op| { op.run(&mut bytes_verify); });
+        let hash_verify =
+            PartialHash::from_foldable_with::<Rkyv>(Some(merkle_proof), &bytes_verify)
+                .to_hash()
+                .unwrap();
+        prop_assert_eq!(hash_normal, hash_verify);
+    });
+}
+
 #[test]
 fn proof_round_trip() {
     proptest!(|(ops in vec(BytesMutOp::any(64 * PAGE_SIZE), 1..20))| {
@@ -446,7 +474,8 @@ fn proof_round_trip() {
             let proof_bytes = serialise(proof_tree).unwrap();
 
             // Parsing the proof so we can see if the proof generation worked.
-            let (mut bytes_verify, parsed_proof_tree) = proof_binary::deserialise(&proof_bytes).unwrap();
+            let (mut bytes_verify, parsed_proof_tree) =
+                proof_binary::deserialise::<crate::codec::Bincode, _>(&proof_bytes).unwrap();
             let parsed_proof_tree = parsed_proof_tree.into_present();
 
             // The parsed state should have a state hash equal to that of the initial Normal/Prove state

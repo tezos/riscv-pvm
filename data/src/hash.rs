@@ -117,7 +117,7 @@ impl Hash {
     pub fn hash_leaf<C: LeafCodec, T: LeafEncode<C>>(
         data: &T,
     ) -> Result<Self, crate::codec::LeafEncodeError> {
-        Ok(Hash::hash_bytes(&data.leaf_encode()?))
+        Ok(Hash::hash_bytes(&<T as LeafEncode<C>>::leaf_encode(data)?))
     }
 
     /// Creates a [`struct@Hash`] from a collection of iterables that can be
@@ -171,8 +171,8 @@ impl AsRef<[u8]> for Hash {
     }
 }
 
-impl Foldable<HashFold> for Hash {
-    fn fold(&self, _builder: HashFold) -> Hash {
+impl<C: LeafCodec> Foldable<HashFold<C>> for Hash {
+    fn fold(&self, _builder: HashFold<C>) -> Hash {
         *self
     }
 }

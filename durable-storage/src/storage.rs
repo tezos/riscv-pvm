@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use tempfile::TempDir;
 
+use crate::codec::HashFold;
 use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::OperationalError;

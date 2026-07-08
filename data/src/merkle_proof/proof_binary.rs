@@ -47,7 +47,7 @@ impl<'t> StreamInput<'t> {
         &mut self,
     ) -> Result<(T, &'t [u8]), ProofError> {
         let start_pos = self.data;
-        let (data, consumed) = T::leaf_decode_stream(self.data)?;
+        let (data, consumed) = <T as LeafDecode<C>>::leaf_decode_stream(self.data)?;
         self.data = &self.data[consumed..];
 
         let raw_bytes = &start_pos[..consumed];

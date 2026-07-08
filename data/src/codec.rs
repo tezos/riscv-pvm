@@ -63,6 +63,9 @@ pub enum LeafEncodeError {
 
     #[error("rkyv serialisation error: {0}")]
     Rkyv(#[from] rkyv::rancor::Error),
+
+    #[error("invalid leaf: {0}")]
+    Invalid(&'static str),
 }
 
 /// Error raised while decoding a leaf value under some [`LeafCodec`].
@@ -155,7 +158,7 @@ where
         + rkyv::Deserialize<T, Strategy<Pool, rancor::Error>>,
 {
     fn leaf_decode(bytes: &[u8]) -> Result<Self, LeafDecodeError> {
-        let (value, _consumed) = Self::leaf_decode_stream(bytes)?;
+        let (value, _consumed) = <Self as LeafDecode<Rkyv>>::leaf_decode_stream(bytes)?;
         Ok(value)
     }
 

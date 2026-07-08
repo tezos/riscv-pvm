@@ -153,7 +153,7 @@ impl<T, M: VectorMode> Default for Vector<T, M> {
 
 impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Normal>
 where
-    for<'a> &'a u64: LeafEncode<F::Codec>,
+    u64: LeafEncode<F::Codec>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut node = builder.into_node_fold();
@@ -172,7 +172,7 @@ where
 
 impl<F: FoldLeaf, T: Foldable<F>> Foldable<F> for Vector<T, Prove<'_>>
 where
-    for<'a> &'a u64: LeafEncode<F::Codec>,
+    u64: LeafEncode<F::Codec>,
 {
     fn fold(&self, builder: F) -> F::Folded {
         let mut node = builder.into_node_fold();
@@ -201,8 +201,7 @@ where
         let mut node = builder.into_node_fold();
 
         let length = self.vector.previous.len();
-        let length_data = (length as u64)
-            .leaf_encode()
+        let length_data = LeafEncode::<C>::leaf_encode(&(length as u64))
             .expect("Serialising length should not fail");
         let is_length_needed = self.vector.need_length_in_proof();
         let length_constraint = if is_length_needed {
@@ -249,9 +248,7 @@ where
         let mut node = builder.into_node_fold();
 
         let length_hash = Hash::hash_bytes(
-            &(length as u64)
-                .leaf_encode()
-                .expect("Hashing should not fail"),
+            &LeafEncode::<C>::leaf_encode(&(length as u64)).expect("Hashing should not fail"),
         );
         let length_node = PartialHash::Present(length_hash);
         node.add(&length_node);

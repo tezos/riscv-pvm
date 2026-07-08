@@ -232,7 +232,7 @@ where
     KV: BackgroundKeyValueStore,
     KV::Repo: Clone,
 {
-    let pre_root = Hash::from_foldable(registry);
+    let pre_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(registry);
 
     // Pre-operation length, read from the original registry (not the Prove-mode registry)
     // to avoid touching the registry when deciding if an operation should be a no-op.
@@ -253,7 +253,7 @@ where
 
     let bytes = serialise_proof(&proof);
     let (reconstructed, _stream) =
-        deserialise_proof::<octez_riscv_data::codec::Bincode, Registry<KV, Verify>, _>(
+        deserialise_proof::<octez_riscv_data::codec::Rkyv, Registry<KV, Verify>, _>(
             bytes.clone().into_iter(),
         )
         .expect("Stream deserialisation of the proof bytes should succeed");
@@ -265,18 +265,24 @@ where
         .expect("from_proof should succeed")
         .into_result();
 
-    let verify_pre = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
-        .to_hash()
-        .expect("Hashing the Verify registry should succeed");
+    let verify_pre = PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+        Some(reconstructed.tree().clone()),
+        &verify,
+    )
+    .to_hash()
+    .expect("Hashing the Verify registry should succeed");
     assert_eq!(
         verify_pre, pre_root,
         "The Verify-mode registry must start from the pre-operation state hash"
     );
 
     apply_registry_step(&mut verify, op, len);
-    let verify_post = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
-        .to_hash()
-        .expect("Hashing the Verify registry should succeed");
+    let verify_post = PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+        Some(reconstructed.tree().clone()),
+        &verify,
+    )
+    .to_hash()
+    .expect("Hashing the Verify registry should succeed");
     assert_eq!(
         verify_post,
         proof.final_state_hash(),
@@ -334,7 +340,9 @@ where
                 registry_model[index].observe_hash(new_digest);
 
                 checkout_candidates
-                    .entry(Hash::from_foldable(&registry))
+                    .entry(Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+                        &registry,
+                    ))
                     .or_insert(false);
             }
             RegistryOperation::Database(_, DatabaseOperation::Commit) => {

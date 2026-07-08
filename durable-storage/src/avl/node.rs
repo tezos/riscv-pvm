@@ -19,7 +19,6 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -35,6 +34,7 @@ use super::resolver::ProveNode;
 use super::resolver::TreeResolver;
 use super::tree::Tree;
 use crate::avl::resolver::AvlResolver;
+use crate::codec::HashFold;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -240,7 +240,8 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         DataId: Foldable<HashFold>,
         TreeId: Foldable<HashFold>,
     {
-        self.hash.get_or_init(|| Hash::from_foldable(self))
+        self.hash
+            .get_or_init(|| Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self))
     }
 
     /// The metadata of this [`Node`].
@@ -865,9 +866,9 @@ where
         // should be written to the KV store separately.
         let repr = StoredNode {
             meta: self.meta.deref().clone(),
-            data: Hash::from_foldable(&self.data),
-            left: Hash::from_foldable(&self.left),
-            right: Hash::from_foldable(&self.right),
+            data: Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.data),
+            left: Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.left),
+            right: Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.right),
         };
 
         let &id = self.hash();

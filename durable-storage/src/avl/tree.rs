@@ -10,7 +10,6 @@ use std::sync::LazyLock;
 use bincode::Decode;
 use bincode::de::Decoder;
 use bincode::error::DecodeError;
-use octez_riscv_data::codec::Bincode;
 use octez_riscv_data::codec::LeafDecode;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
@@ -19,9 +18,7 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
-use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserError;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
@@ -40,6 +37,8 @@ use super::resolver::VerifyNodeId;
 use crate::avl::resolver::AvlResolver;
 use crate::avl::resolver::LazyNodeId;
 use crate::avl::resolver::NodeResolver;
+use crate::codec::HashFold;
+use crate::codec::PartialHashFold;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -51,8 +50,9 @@ use crate::storage::StoreOptions;
 
 /// Hash of the empty AVL tree (`Tree::<NodeId>(None)`).
 /// The empty-tree hash is independent of the `NodeId` type parameter.
-static EMPTY_TREE_HASH: LazyLock<Hash> =
-    LazyLock::new(|| Hash::from_foldable(&Tree::<LazyNodeId>::default()));
+static EMPTY_TREE_HASH: LazyLock<Hash> = LazyLock::new(|| {
+    Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&Tree::<LazyNodeId>::default())
+});
 
 /// A key-value store tree with left and right nodes that supports traversal and value retrieval.
 #[perfect_derive(Clone, Default, Debug)]
@@ -215,7 +215,7 @@ impl<NodeId> Tree<NodeId> {
     where
         NodeId: Foldable<HashFold>,
     {
-        Hash::from_foldable(self)
+        Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self)
     }
 
     /// Take the root [`Node`] out of this tree, leaving the [`Tree`] empty.
@@ -391,7 +391,10 @@ impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
         let mut node = builder.into_node_fold();
 
         let present = self.0.is_some();
-        node.add(&Hash::hash_encodable(present).expect("Hashing a bool should never fail"));
+        node.add(
+            &Hash::hash_leaf::<octez_riscv_data::codec::Rkyv, _>(&present)
+                .expect("Hashing a bool should never fail"),
+        );
 
         if let Some(inner) = self.0.as_ref() {
             node.add(inner);
@@ -414,7 +417,8 @@ impl Foldable<PartialHashFold> for Tree<VerifyNodeId> {
         let mut node = builder.into_node_fold();
 
         let present = self.0.is_some();
-        let bool_hash = Hash::hash_encodable(present).expect("Hashing a bool should never fail");
+        let bool_hash = Hash::hash_leaf::<octez_riscv_data::codec::Rkyv, _>(&present)
+            .expect("Hashing a bool should never fail");
         node.add(&PartialHash::Present(bool_hash));
 
         if let Some(inner) = self.0.as_ref() {
@@ -425,8 +429,8 @@ impl Foldable<PartialHashFold> for Tree<VerifyNodeId> {
     }
 }
 
-impl FromProof for Tree<VerifyNodeId> {
-    fn from_proof<Proof: Deserialiser<Codec = Bincode>>(
+impl FromProof<octez_riscv_data::codec::Rkyv> for Tree<VerifyNodeId> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Rkyv>>(
         proof: Proof,
     ) -> SuspendedResult<Proof, Self> {
         let ctx = proof.into_node()?;
@@ -450,7 +454,10 @@ impl<NodeId: Storable> Storable for Tree<NodeId> {
         store: &impl KeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
-        let repr = self.0.as_ref().map(Hash::from_foldable);
+        let repr = self
+            .0
+            .as_ref()
+            .map(|t| Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(t));
 
         // We don't store empty trees. All leaf nodes contain two empty trees. Adding two more
         // redundant writes to all leaves is not desirable.

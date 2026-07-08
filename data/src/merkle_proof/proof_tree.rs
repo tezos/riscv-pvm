@@ -551,7 +551,9 @@ impl<'t, C: LeafCodec> Deserialiser for ProofTree<'t, C> {
     }
 
     fn into_leaf<T: LeafDecode<C>>(self) -> Result<Self::Suspended<Partial<T>>, Self::Error> {
-        let result = self.as_leaf()?.map_present_fallible(T::leaf_decode)?;
+        let result = self
+            .as_leaf()?
+            .map_present_fallible(<T as LeafDecode<C>>::leaf_decode)?;
         Ok(ProofTreeResult::new(result))
     }
 
