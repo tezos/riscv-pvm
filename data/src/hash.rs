@@ -19,6 +19,7 @@ use thiserror::Error;
 
 use crate::codec::Bincode;
 use crate::codec::LeafCodec;
+use crate::codec::LeafEncode;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
@@ -109,6 +110,16 @@ impl Hash {
         Ok(Hash { digest })
     }
 
+    /// Creates a [`struct@Hash`] from a leaf value, encoding it with the given [`LeafCodec`].
+    ///
+    /// This is the codec-generic counterpart of [`Hash::hash_encodable`] (which is fixed to
+    /// bincode); the resulting hash matches folding a single leaf under [`HashFold<C>`].
+    pub fn hash_leaf<C: LeafCodec, T: LeafEncode<C>>(
+        data: &T,
+    ) -> Result<Self, crate::codec::LeafEncodeError> {
+        Ok(Hash::hash_bytes(&data.leaf_encode()?))
+    }
+
     /// Creates a [`struct@Hash`] from a collection of iterables that can be
     /// [`Deref`]ed as a [`struct@Hash`]. Note that this method  is rehashing the
     /// hashes.
@@ -125,9 +136,14 @@ impl Hash {
         Hash { digest }
     }
 
-    /// Hash the underlying state of a foldable structure.
+    /// Hash the underlying state of a foldable structure (bincode leaf codec).
     pub fn from_foldable(foldable: &impl Foldable<HashFold>) -> Self {
         foldable.fold(HashFold::default())
+    }
+
+    /// Hash the underlying state of a foldable structure, using the given leaf [`LeafCodec`].
+    pub fn from_foldable_with<C: LeafCodec>(foldable: &impl Foldable<HashFold<C>>) -> Self {
+        foldable.fold(HashFold::<C>::default())
     }
 }
 
@@ -335,10 +351,18 @@ impl PartialHash {
         }
     }
 
-    /// Compute a [`PartialHash`] from a foldable structure.
+    /// Compute a [`PartialHash`] from a foldable structure (bincode leaf codec).
     pub fn from_foldable(
         proof: Option<MerkleProof>,
         foldable: &impl Foldable<PartialHashFold>,
+    ) -> PartialHash {
+        Self::from_foldable_with(proof, foldable)
+    }
+
+    /// Compute a [`PartialHash`] from a foldable structure, using the given leaf [`LeafCodec`].
+    pub fn from_foldable_with<C: LeafCodec>(
+        proof: Option<MerkleProof>,
+        foldable: &impl Foldable<PartialHashFold<C>>,
     ) -> PartialHash {
         foldable.fold(PartialHashFold {
             proof: proof.map(Arc::new),

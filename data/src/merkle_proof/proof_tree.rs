@@ -92,9 +92,15 @@ impl MerkleProof {
         matches!(self, MerkleProof::Leaf(MerkleProofLeaf::Blind(_)))
     }
 
-    /// Fold the given data structure into a compressed Merkle proof tree.
+    /// Fold the given data structure into a compressed Merkle proof tree (bincode leaf codec).
     pub fn from_foldable(foldable: &impl Foldable<MerkleProofFold>) -> Self {
         foldable.fold(MerkleProofFold::new()).tree
+    }
+
+    /// Fold the given data structure into a compressed Merkle proof tree, using the given leaf
+    /// [`LeafCodec`].
+    pub fn from_foldable_with<C: LeafCodec>(foldable: &impl Foldable<MerkleProofFold<C>>) -> Self {
+        foldable.fold(MerkleProofFold::<C>::new()).tree
     }
 }
 
