@@ -639,7 +639,7 @@ pub(crate) mod tests {
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
@@ -2253,7 +2253,7 @@ pub(crate) mod tests {
             matches!(proof, octez_riscv_data::tree::Tree::Leaf(MerkleProofLeaf::Blind(_))),
             "database should be fully blinded");
 
-        let mut verify = Database::<KV, Verify>::from_proof(ProofPart::Present(&proof))
+        let mut verify = Database::<KV, Verify>::from_proof(ProofTree::present(&proof))
             .expect("Can convert blinded leaf proof into blinded verify database")
             .into_result();
 

@@ -41,6 +41,7 @@ pub trait LeafCodec {}
 ///
 /// Its [`LeafEncode`]/[`LeafDecode`] impls delegate to the bincode helpers, so output is
 /// byte-identical to the pre-codec code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bincode;
 
 impl LeafCodec for Bincode {}
@@ -49,6 +50,7 @@ impl LeafCodec for Bincode {}
 ///
 /// This marker exists so folds and proof deserialisers can be parameterised by it now; the leaf
 /// impls (and proof leaf framing) are added in a subsequent step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rkyv;
 
 impl LeafCodec for Rkyv {}

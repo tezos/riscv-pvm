@@ -136,6 +136,7 @@ impl OutboxProof {
     pub fn deserialise(mut bytes: &[u8]) -> Result<Self, ProofError> {
         let info: OutputInfo = deserialise_from(&mut bytes)?;
         let (_pvm, proof_tree) = proof_binary::deserialise::<
+            octez_riscv_data::codec::Bincode,
             Pvm<NodePvmMemConfig, EmptyPageCache, DurableStorageDummy, Verify>,
         >(bytes)?;
 

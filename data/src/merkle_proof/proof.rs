@@ -108,13 +108,13 @@ fn deserialise_final_hash(bytes: &mut impl Iterator<Item = u8>) -> Result<Hash, 
 /// `T` is any type that knows how to be built from the partial Merkle tree
 /// via [`FromProof`]; the choice of `T` selects the concrete shape the
 /// proof tree must match (PVM state, durable-storage registry, ...).
-pub fn deserialise_proof<T: FromProof, I: Iterator<Item = u8>>(
+pub fn deserialise_proof<C: crate::codec::LeafCodec, T: FromProof<C>, I: Iterator<Item = u8>>(
     mut bytes: I,
 ) -> Result<(Proof, T), ProofError> {
     let final_state_hash = deserialise_final_hash(&mut bytes)?;
 
     let (state, proof_tree) =
-        proof_binary::deserialise::<T>(bytes.collect::<Vec<u8>>().as_slice())?;
+        proof_binary::deserialise::<C, T>(bytes.collect::<Vec<u8>>().as_slice())?;
 
     let merkle_tree = match proof_tree {
         OwnedProofTree::Absent => return Err(ProofError::AbsentProof),

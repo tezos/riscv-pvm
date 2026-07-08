@@ -522,7 +522,7 @@ where
 impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
     /// Construct a PVM state from a Merkle proof.
     pub fn from_proof(proof: &MerkleProof) -> Option<Self> {
-        let (pvm, _) = proof_tree::deserialise(ProofTree::Present(proof)).ok()?;
+        let (pvm, _) = proof_tree::deserialise(ProofTree::present(proof)).ok()?;
         Some(pvm)
     }
 
@@ -539,7 +539,7 @@ impl<MC: MemoryConfig, DS: FromProof> Pvm<MC, EmptyPageCache, DS, Verify> {
     where
         DS: DurableStorage<Verify>,
     {
-        let proof_tree = ProofTree::Present(&outbox_proof.proof);
+        let proof_tree = ProofTree::present(&outbox_proof.proof);
 
         catch_not_found(move || {
             let (pvm, _): (Self, _) = proof_tree::deserialise(proof_tree)?;

@@ -613,7 +613,7 @@ pub(super) mod tests {
     use octez_riscv_data::merkle_proof::proof::serialise_proof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
@@ -1425,7 +1425,7 @@ pub(super) mod tests {
         assert_eq!(root_hash_prove_after, root_hash_prove_before, "Reads must not affect Prove-mode hashes");
 
         let proof = MerkleProof::from_foldable(&prove_registry);
-        let verify_registry = Registry::<KV, _>::from_proof(ProofPart::Present(&proof))
+        let verify_registry = Registry::<KV, _>::from_proof(ProofTree::present(&proof))
             .expect("from_proof should succeed")
             .into_result();
 
@@ -1663,15 +1663,17 @@ pub(super) mod tests {
         let bytes = serialise_proof(proof);
 
         let (reconstructed_proof, stream_registry) =
-            deserialise_proof::<Registry<KV, Verify>, _>(bytes.into_iter())
-                .expect("Stream deserialisation of the proof bytes should succeed");
+            deserialise_proof::<octez_riscv_data::codec::Bincode, Registry<KV, Verify>, _>(
+                bytes.into_iter(),
+            )
+            .expect("Stream deserialisation of the proof bytes should succeed");
         assert_eq!(
             &reconstructed_proof, proof,
             "The proof reconstructed from bytes should match the original"
         );
 
         let verify_registry =
-            Registry::<KV, Verify>::from_proof(ProofPart::Present(reconstructed_proof.tree()))
+            Registry::<KV, Verify>::from_proof(ProofTree::present(reconstructed_proof.tree()))
                 .expect("from_proof should succeed")
                 .into_result();
 

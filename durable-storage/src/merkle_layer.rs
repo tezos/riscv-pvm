@@ -839,7 +839,7 @@ mod tests {
     impl<KV> MerkleLayer<KV, Verify> {
         /// Construct a Verify-mode [`MerkleLayer`] by deserialising a [`MerkleProof`]
         pub fn from_proof(proof: MerkleProof) -> Result<Self, ProofError> {
-            let suspended = <Self as FromProof>::from_proof(ProofTree::Present(&proof))?;
+            let suspended = <Self as FromProof>::from_proof(ProofTree::present(&proof))?;
             Ok(suspended.into_result())
         }
     }
