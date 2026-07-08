@@ -55,6 +55,12 @@ pub(crate) struct Meta {
     balance_factor: i64,
 }
 
+impl octez_riscv_data::codec::RkyvLeaf for Meta {
+    // `Meta` embeds a `Key` (a `Vec<u8>`), so its rkyv archive has out-of-line data and its length
+    // varies: it keeps the leaf length prefix.
+    const FIXED_LEN: Option<usize> = None;
+}
+
 /// This type is a compact serialised form of a [`Node`] with metadata and child subtree hashes.
 #[derive(Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct StoredNode {

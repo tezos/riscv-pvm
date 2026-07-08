@@ -15,11 +15,12 @@
 //! parameterised by that codec. The [`Bincode`] codec reproduces the historical byte format exactly;
 //! [`Rkyv`] is the format used by durable-storage.
 //!
-//! Because rkyv archives are not self-delimiting, the [`Rkyv`] leaf format prefixes each leaf with an
-//! 8-byte little-endian length ([`RKYV_LEN_PREFIX`]) so leaves can be read back out of a proof stream.
+//! Because rkyv archives are not self-delimiting, a *variable-length* [`Rkyv`] leaf is prefixed with
+//! an 8-byte little-endian length ([`RKYV_LEN_PREFIX`]) so it can be read back out of a proof stream.
 //! That prefix is part of the leaf bytes (and thus hashed), which keeps the fold/proof machinery
-//! codec-agnostic but adds a fixed +8 bytes per leaf versus bincode — see `RKYV_DS_FIRST_PLAN.md` §5
-//! Step F for the size table and a note on shrinking the prefix if proof size matters.
+//! codec-agnostic (it always shuttles opaque leaf bytes). A *fixed-length* leaf — one whose archive
+//! is always `size_of::<Archived>()` bytes — omits the prefix, since the stream deserialiser recovers
+//! its length from the type itself; see [`RkyvLeaf`].
 
 use bincode::Decode;
 use bincode::Encode;
@@ -52,10 +53,10 @@ pub struct Bincode;
 
 impl LeafCodec for Bincode {}
 
-/// The rkyv codec.
+/// The rkyv codec — the leaf format used by durable-storage.
 ///
-/// This marker exists so folds and proof deserialisers can be parameterised by it now; the leaf
-/// impls (and proof leaf framing) are added in a subsequent step.
+/// Its [`LeafEncode`]/[`LeafDecode`] impls (de)serialise leaves with rkyv, framing variable-length
+/// leaves with a length prefix and leaving fixed-length leaves unframed (see [`RkyvLeaf`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rkyv;
 
@@ -133,33 +134,94 @@ impl<T: Decode<()>> LeafDecode<Bincode> for T {
 
 // --- Rkyv codec. ---
 //
-// An rkyv archive is not self-delimiting from the front, so each leaf is length-framed: an 8-byte
-// little-endian archive length followed by the archive bytes. The prefix is part of the leaf's byte
-// representation, so it is included in the leaf hash and stored verbatim in a proof — this keeps the
-// merkle-proof machinery codec-agnostic (it always shuttles opaque leaf bytes) while remaining
-// self-delimiting for the stream deserialiser. Decoding copies the archive into an `AlignedVec`
-// before validated access (see [`rkyv_deserialise`]), since a leaf slice sits at an arbitrary offset.
+// An rkyv archive is not self-delimiting from the front, so a variable-length leaf is length-framed:
+// an 8-byte little-endian archive length followed by the archive bytes. A fixed-length leaf (see
+// `RkyvLeaf`) is stored bare, since its length is known from the type. The framing is part of the
+// leaf's byte representation, so it is included in the leaf hash and stored verbatim in a proof —
+// this keeps the merkle-proof machinery codec-agnostic (it always shuttles opaque leaf bytes) while
+// remaining self-delimiting for the stream deserialiser. Decoding copies the archive into an
+// `AlignedVec` before validated access (see [`rkyv_deserialise`]), since a leaf slice sits at an
+// arbitrary offset.
 
 /// Number of bytes in the leaf length prefix used by the rkyv codec.
 const RKYV_LEN_PREFIX: usize = size_of::<u64>();
 
+/// Per-type rkyv leaf framing.
+///
+/// rkyv archives are not self-delimiting, so a variable-length leaf is length-prefixed (an 8-byte LE
+/// [`RKYV_LEN_PREFIX`]) so the stream deserialiser knows where it ends. A type whose rkyv
+/// serialisation is *always* the same number of bytes — i.e. it has no out-of-line data (no
+/// `Vec`/`String`/slice fields), so the whole archive is exactly `size_of::<Archived>()` — does not
+/// need that prefix: the stream deserialiser recovers the length from the type itself. Such types set
+/// [`FIXED_LEN`](RkyvLeaf::FIXED_LEN) to `Some(size_of::<Archived>())` (use the `fixed_rkyv_leaf!`
+/// macro); variable-length types set it to `None`. Dropping the prefix saves 8 bytes per fixed leaf in
+/// proofs (and in the leaf hash, though that is free).
+///
+/// Every type used as an rkyv hash/proof leaf must implement this trait: it is a supertrait bound of
+/// the [`Rkyv`] [`LeafEncode`]/[`LeafDecode`] impls.
+pub trait RkyvLeaf: rkyv::Archive {
+    /// `Some(n)` if every rkyv archive of this type is exactly `n` bytes (⇒ no length prefix);
+    /// `None` if the archive length varies (⇒ [`RKYV_LEN_PREFIX`] length prefix).
+    const FIXED_LEN: Option<usize>;
+}
+
+/// Implement [`RkyvLeaf`] for types with no out-of-line rkyv data, whose archive is therefore a fixed
+/// `size_of::<Archived>()` bytes and needs no length prefix.
+macro_rules! fixed_rkyv_leaf {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl RkyvLeaf for $t {
+                const FIXED_LEN: Option<usize> =
+                    Some(size_of::<<$t as rkyv::Archive>::Archived>());
+            }
+        )+
+    };
+}
+
+fixed_rkyv_leaf!(u8, u16, u32, u64, u128, i8, i16, i32, i64, i128, bool);
+
+impl<const N: usize> RkyvLeaf for [u8; N] {
+    const FIXED_LEN: Option<usize> = Some(size_of::<<[u8; N] as rkyv::Archive>::Archived>());
+}
+
+impl RkyvLeaf for Vec<u8> {
+    const FIXED_LEN: Option<usize> = None;
+}
+
 impl<T> LeafEncode<Rkyv> for T
 where
-    T: for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rancor::Error>>,
+    T: RkyvLeaf
+        + for<'a> rkyv::Serialize<HighSerializer<AlignedVec, ArenaHandle<'a>, rancor::Error>>,
 {
     fn leaf_encode(&self) -> Result<Vec<u8>, LeafEncodeError> {
         let archive = rkyv_serialise(self)?;
 
-        let mut out = Vec::with_capacity(RKYV_LEN_PREFIX + archive.len());
-        out.extend_from_slice(&(archive.len() as u64).to_le_bytes());
-        out.extend_from_slice(&archive);
-        Ok(out)
+        match <T as RkyvLeaf>::FIXED_LEN {
+            // Fixed-length leaf: the archive is self-delimiting given the type, so no prefix. Guard
+            // against a mis-declared `FIXED_LEN` (a type that actually has out-of-line data) rather
+            // than silently emitting a leaf the decoder would mis-slice.
+            Some(fixed) => {
+                if archive.len() != fixed {
+                    return Err(LeafEncodeError::Invalid(
+                        "fixed-length rkyv leaf produced an unexpected archive length",
+                    ));
+                }
+                Ok(archive.to_vec())
+            }
+            // Variable-length leaf: prefix with the archive length so the stream is self-delimiting.
+            None => {
+                let mut out = Vec::with_capacity(RKYV_LEN_PREFIX + archive.len());
+                out.extend_from_slice(&(archive.len() as u64).to_le_bytes());
+                out.extend_from_slice(&archive);
+                Ok(out)
+            }
+        }
     }
 }
 
 impl<T> LeafDecode<Rkyv> for T
 where
-    T: rkyv::Archive,
+    T: RkyvLeaf,
     T::Archived: for<'a> CheckBytes<HighValidator<'a, rancor::Error>>
         + rkyv::Deserialize<T, Strategy<Pool, rancor::Error>>,
 {
@@ -169,25 +231,38 @@ where
     }
 
     fn leaf_decode_stream(bytes: &[u8]) -> Result<(Self, usize), LeafDecodeError> {
-        let len_bytes = bytes
-            .get(..RKYV_LEN_PREFIX)
-            .ok_or(LeafDecodeError::Framing("leaf shorter than length prefix"))?;
-        // The slice length matches the prefix width, so the conversion cannot fail.
-        let len = u64::from_le_bytes(
-            len_bytes
-                .try_into()
-                .map_err(|_| LeafDecodeError::Framing("invalid length prefix"))?,
-        ) as usize;
+        match <T as RkyvLeaf>::FIXED_LEN {
+            // Fixed-length leaf: the archive occupies exactly `fixed` bytes from the front.
+            Some(fixed) => {
+                let archive = bytes
+                    .get(..fixed)
+                    .ok_or(LeafDecodeError::Framing("leaf shorter than fixed length"))?;
+                let value = rkyv_deserialise(archive)?;
+                Ok((value, fixed))
+            }
+            // Variable-length leaf: read the length prefix, then the archive it delimits.
+            None => {
+                let len_bytes = bytes
+                    .get(..RKYV_LEN_PREFIX)
+                    .ok_or(LeafDecodeError::Framing("leaf shorter than length prefix"))?;
+                // The slice length matches the prefix width, so the conversion cannot fail.
+                let len = u64::from_le_bytes(
+                    len_bytes
+                        .try_into()
+                        .map_err(|_| LeafDecodeError::Framing("invalid length prefix"))?,
+                ) as usize;
 
-        let end = RKYV_LEN_PREFIX
-            .checked_add(len)
-            .ok_or(LeafDecodeError::Framing("leaf length overflow"))?;
-        let archive = bytes
-            .get(RKYV_LEN_PREFIX..end)
-            .ok_or(LeafDecodeError::Framing("leaf shorter than framed length"))?;
+                let end = RKYV_LEN_PREFIX
+                    .checked_add(len)
+                    .ok_or(LeafDecodeError::Framing("leaf length overflow"))?;
+                let archive = bytes
+                    .get(RKYV_LEN_PREFIX..end)
+                    .ok_or(LeafDecodeError::Framing("leaf shorter than framed length"))?;
 
-        let value = rkyv_deserialise(archive)?;
-        Ok((value, end))
+                let value = rkyv_deserialise(archive)?;
+                Ok((value, end))
+            }
+        }
     }
 }
 
@@ -224,8 +299,8 @@ mod tests {
         let decoded: u64 = LeafDecode::<Rkyv>::leaf_decode(&encoded).expect("rkyv decode ok");
         assert_eq!(decoded, value);
 
-        // Stream decode reports the exact number of bytes consumed (prefix + archive), so
-        // back-to-back leaves can be parsed in sequence.
+        // Stream decode reports the exact number of bytes consumed, so back-to-back leaves can be
+        // parsed in sequence.
         let (decoded, consumed): (u64, usize) =
             LeafDecode::<Rkyv>::leaf_decode_stream(&encoded).expect("rkyv stream decode ok");
         assert_eq!(decoded, value);
@@ -233,8 +308,42 @@ mod tests {
     }
 
     #[test]
-    fn rkyv_stream_decode_stops_at_leaf_boundary() {
+    fn rkyv_fixed_leaf_is_unframed() {
+        // A fixed-length leaf (`u64` has no out-of-line data) is stored bare — exactly its archive
+        // length, with no 8-byte length prefix.
+        let encoded = LeafEncode::<Rkyv>::leaf_encode(&12345u64).expect("encode ok");
+        assert_eq!(encoded.len(), size_of::<<u64 as rkyv::Archive>::Archived>());
+    }
+
+    #[test]
+    fn rkyv_variable_leaf_is_framed_and_round_trips() {
+        // A variable-length leaf (`Vec<u8>`) carries the 8-byte length prefix.
+        let value: Vec<u8> = vec![1, 2, 3, 4, 5];
+        let encoded = LeafEncode::<Rkyv>::leaf_encode(&value).expect("encode ok");
+        assert!(encoded.len() > super::RKYV_LEN_PREFIX);
+
         // Two framed leaves back-to-back: the stream decoder must consume exactly the first.
+        let mut buf = encoded.clone();
+        let first_len = buf.len();
+        buf.extend_from_slice(&LeafEncode::<Rkyv>::leaf_encode(&vec![9u8, 8]).expect("encode ok"));
+
+        let (a, consumed): (Vec<u8>, usize) =
+            LeafDecode::<Rkyv>::leaf_decode_stream(&buf).expect("decode ok");
+        assert_eq!(a, value);
+        assert_eq!(consumed, first_len);
+        let (b, _): (Vec<u8>, usize) =
+            LeafDecode::<Rkyv>::leaf_decode_stream(&buf[consumed..]).expect("decode ok");
+        assert_eq!(b, vec![9u8, 8]);
+
+        // A frame that over-runs the buffer is rejected.
+        let res: Result<Vec<u8>, _> =
+            LeafDecode::<Rkyv>::leaf_decode(&encoded[..encoded.len() - 1]);
+        assert!(matches!(res, Err(LeafDecodeError::Framing(_))));
+    }
+
+    #[test]
+    fn rkyv_stream_decode_stops_at_leaf_boundary() {
+        // Two fixed-length leaves back-to-back: the stream decoder must consume exactly the first.
         let mut buf = LeafEncode::<Rkyv>::leaf_encode(&1u32).expect("encode ok");
         let first_len = buf.len();
         buf.extend_from_slice(&LeafEncode::<Rkyv>::leaf_encode(&2u32).expect("encode ok"));
@@ -250,15 +359,14 @@ mod tests {
     }
 
     #[test]
-    fn rkyv_decode_rejects_truncated_frame() {
+    fn rkyv_decode_rejects_truncated_fixed_leaf() {
         let encoded = LeafEncode::<Rkyv>::leaf_encode(&12345u64).expect("encode ok");
 
-        // Chop a byte off the framed archive: the length prefix now over-runs the buffer.
+        // Fewer bytes than the type's fixed archive length: the slice is rejected as framing error.
         let truncated = &encoded[..encoded.len() - 1];
         let res: Result<u64, _> = LeafDecode::<Rkyv>::leaf_decode(truncated);
         assert!(matches!(res, Err(LeafDecodeError::Framing(_))));
 
-        // Fewer bytes than the length prefix itself.
         let res: Result<u64, _> = LeafDecode::<Rkyv>::leaf_decode(&[0u8; 3]);
         assert!(matches!(res, Err(LeafDecodeError::Framing(_))));
     }
