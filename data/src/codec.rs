@@ -13,7 +13,13 @@
 //! A [`crate::foldable::Fold`] (and the proof [`crate::merkle_proof::Deserialiser`]) carries an
 //! associated [`LeafCodec`], and leaf values are (de)serialised through [`LeafEncode`]/[`LeafDecode`]
 //! parameterised by that codec. The [`Bincode`] codec reproduces the historical byte format exactly;
-//! [`Rkyv`] is the new format (its leaf impls are added in a later step).
+//! [`Rkyv`] is the format used by durable-storage.
+//!
+//! Because rkyv archives are not self-delimiting, the [`Rkyv`] leaf format prefixes each leaf with an
+//! 8-byte little-endian length ([`RKYV_LEN_PREFIX`]) so leaves can be read back out of a proof stream.
+//! That prefix is part of the leaf bytes (and thus hashed), which keeps the fold/proof machinery
+//! codec-agnostic but adds a fixed +8 bytes per leaf versus bincode — see `RKYV_DS_FIRST_PLAN.md` §5
+//! Step F for the size table and a note on shrinking the prefix if proof size matters.
 
 use bincode::Decode;
 use bincode::Encode;
