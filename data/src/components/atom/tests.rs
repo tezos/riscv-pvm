@@ -257,7 +257,10 @@ fn proof_blinding() {
         let merkle_proof = MerkleProof::from_foldable(&proof_state);
 
         let verifier_state =
-            proof_tree::deserialise::<TestState<Verify>>(ProofTree::Present(&merkle_proof)).unwrap();
+            proof_tree::deserialise::<crate::codec::Bincode, TestState<Verify>>(
+                ProofTree::present(&merkle_proof),
+            )
+            .unwrap();
 
         // The first component of the state was present in the proof, can be
         // fully read, and contains the initial state.
@@ -355,6 +358,35 @@ fn atom_is_same_across_modes() {
 
         let hash_verify =
             PartialHash::from_foldable(Some(merkle_proof), &atom_verify)
+                .to_hash()
+                .unwrap();
+        prop_assert_eq!(hash_normal, hash_verify);
+    });
+}
+
+/// Atom behaves the same across modes under the rkyv leaf codec (mirrors
+/// [`atom_is_same_across_modes`], but folds/proves/verifies with [`Rkyv`]). This exercises the
+/// component-level rkyv leaf impls end-to-end: `Normal` hash == proof root hash == `Verify` hash.
+#[test]
+fn atom_is_same_across_modes_rkyv() {
+    use crate::codec::Rkyv;
+
+    proptest!(|(initial in any::<u64>(), ops in vec(AtomMutOp::<u64>::any(), 1..20))| {
+        let mut atom_normal = Atom::<u64, Normal>::new(initial);
+        ops.iter().for_each(|op| { op.run(&mut atom_normal); });
+        let hash_normal = Hash::from_foldable_with::<Rkyv>(&atom_normal);
+
+        let mut atom_prove = Atom::<u64, Prove>::new(initial);
+        ops.iter().for_each(|op| { op.run(&mut atom_prove); });
+        let hash_prove = Hash::from_foldable_with::<Rkyv>(&atom_prove);
+        prop_assert_eq!(hash_normal, hash_prove);
+
+        let merkle_proof = MerkleProof::from_foldable_with::<Rkyv>(&atom_prove);
+
+        let mut atom_verify = Atom::<u64, Verify>::new(initial);
+        ops.iter().for_each(|op| { op.run(&mut atom_verify); });
+        let hash_verify =
+            PartialHash::from_foldable_with::<Rkyv>(Some(merkle_proof), &atom_verify)
                 .to_hash()
                 .unwrap();
         prop_assert_eq!(hash_normal, hash_verify);

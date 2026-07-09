@@ -65,7 +65,6 @@ proptest = "1.11.0"
 quanta = "0.12.6"
 rand = "0.10.1"
 range-collections = "0.4.6"
-rkyv = { version = "0.8", features = ["bytes-1"] }
 rustc-demangle = "0.1"
 rocksdb = "0.24.0"
 rustc_apfloat = "0.2.3"
@@ -118,6 +117,10 @@ features = ["rustls-tls"]
 version = "2.1.1"
 features = ["debug", "display", "from", "into", "error"]
 
+[workspace.dependencies.rkyv]
+version = "0.8"
+features = ["bytes-1"]
+
 [workspace.dependencies.serde]
 version = "1.0.228"
 features = ["derive"]
@@ -125,7 +128,6 @@ features = ["derive"]
 [workspace.dependencies.hex]
 version = "0.4.3"
 features = ["serde"]
-
 
 [workspace.dependencies.tokio]
 version = "1"

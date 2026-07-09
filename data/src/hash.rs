@@ -7,6 +7,7 @@
 
 use std::borrow::Borrow;
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -16,6 +17,9 @@ use bincode::error::EncodeError;
 use perfect_derive::perfect_derive;
 use thiserror::Error;
 
+use crate::codec::Bincode;
+use crate::codec::LeafCodec;
+use crate::codec::LeafEncode;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
 use crate::foldable::Foldable;
@@ -42,7 +46,21 @@ pub enum HashError {
 /// produced by a preset hash function, currently BLAKE3. It can be obtained
 /// by either hashing data directly or after hashing by converting from
 /// a suitably sized byte slice or vector.
-#[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, Hash, PartialOrd, Ord, derive_more::Debug)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Encode,
+    Decode,
+    Hash,
+    PartialOrd,
+    Ord,
+    derive_more::Debug,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[debug("{}", self)]
 pub struct Hash {
     digest: [u8; Hash::DIGEST_SIZE],
@@ -92,6 +110,16 @@ impl Hash {
         Ok(Hash { digest })
     }
 
+    /// Creates a [`struct@Hash`] from a leaf value, encoding it with the given [`LeafCodec`].
+    ///
+    /// This is the codec-generic counterpart of [`Hash::hash_encodable`] (which is fixed to
+    /// bincode); the resulting hash matches folding a single leaf under [`HashFold<C>`].
+    pub fn hash_leaf<C: LeafCodec, T: LeafEncode<C>>(
+        data: &T,
+    ) -> Result<Self, crate::codec::LeafEncodeError> {
+        Ok(Hash::hash_bytes(&<T as LeafEncode<C>>::leaf_encode(data)?))
+    }
+
     /// Creates a [`struct@Hash`] from a collection of iterables that can be
     /// [`Deref`]ed as a [`struct@Hash`]. Note that this method  is rehashing the
     /// hashes.
@@ -108,9 +136,14 @@ impl Hash {
         Hash { digest }
     }
 
-    /// Hash the underlying state of a foldable structure.
+    /// Hash the underlying state of a foldable structure (bincode leaf codec).
     pub fn from_foldable(foldable: &impl Foldable<HashFold>) -> Self {
-        foldable.fold(HashFold)
+        foldable.fold(HashFold::default())
+    }
+
+    /// Hash the underlying state of a foldable structure, using the given leaf [`LeafCodec`].
+    pub fn from_foldable_with<C: LeafCodec>(foldable: &impl Foldable<HashFold<C>>) -> Self {
+        foldable.fold(HashFold::<C>::default())
     }
 }
 
@@ -138,8 +171,8 @@ impl AsRef<[u8]> for Hash {
     }
 }
 
-impl Foldable<HashFold> for Hash {
-    fn fold(&self, _builder: HashFold) -> Hash {
+impl<C: LeafCodec> Foldable<HashFold<C>> for Hash {
+    fn fold(&self, _builder: HashFold<C>) -> Hash {
         *self
     }
 }
@@ -212,23 +245,34 @@ impl<Data: AsRef<[u8]>> HashedData<Data> {
 }
 
 /// [`Fold`] implementation producing a [`struct@Hash`]
-pub struct HashFold;
+///
+/// Parameterised by the leaf [`LeafCodec`]; defaults to [`Bincode`] so existing `HashFold`
+/// references keep the historical byte format.
+pub struct HashFold<C = Bincode> {
+    _codec: PhantomData<C>,
+}
 
-impl Fold for HashFold {
+impl<C> Default for HashFold<C> {
+    fn default() -> Self {
+        HashFold {
+            _codec: PhantomData,
+        }
+    }
+}
+
+impl<C: LeafCodec> Fold for HashFold<C> {
     type Folded = Hash;
 
-    type NodeFold = HashNodeFold;
+    type NodeFold = HashNodeFold<C>;
+
+    type Codec = C;
 
     fn into_node_fold(self) -> Self::NodeFold {
         HashNodeFold::default()
     }
 }
 
-impl FoldLeaf for HashFold {
-    fn fold_leaf<T: Encode>(self, t: T) -> Result<Hash, EncodeError> {
-        Hash::hash_encodable(t)
-    }
-
+impl<C: LeafCodec> FoldLeaf for HashFold<C> {
     fn fold_leaf_raw(self, bytes: &[u8]) -> Hash {
         Hash::hash_bytes(bytes)
     }
@@ -238,17 +282,27 @@ impl FoldLeaf for HashFold {
 ///
 /// It collects the hashes of all children and then combines them by hashing the concatenation of
 /// children's [`struct@Hash`] bytes.
-#[derive(Default)]
-pub struct HashNodeFold {
+pub struct HashNodeFold<C = Bincode> {
     /// Hasher used to combine children's hashes
     hasher: Hasher,
+
+    _codec: PhantomData<C>,
 }
 
-impl NodeFold for HashNodeFold {
-    type Parent = HashFold;
+impl<C> Default for HashNodeFold<C> {
+    fn default() -> Self {
+        HashNodeFold {
+            hasher: Hasher::default(),
+            _codec: PhantomData,
+        }
+    }
+}
 
-    fn add<F: Foldable<HashFold>>(&mut self, child: &F) {
-        let folded_child = child.fold(HashFold);
+impl<C: LeafCodec> NodeFold for HashNodeFold<C> {
+    type Parent = HashFold<C>;
+
+    fn add<F: Foldable<HashFold<C>>>(&mut self, child: &F) {
+        let folded_child = child.fold(HashFold::default());
         self.hasher.update(folded_child.as_ref());
     }
 
@@ -297,19 +351,28 @@ impl PartialHash {
         }
     }
 
-    /// Compute a [`PartialHash`] from a foldable structure.
+    /// Compute a [`PartialHash`] from a foldable structure (bincode leaf codec).
     pub fn from_foldable(
         proof: Option<MerkleProof>,
         foldable: &impl Foldable<PartialHashFold>,
     ) -> PartialHash {
+        Self::from_foldable_with(proof, foldable)
+    }
+
+    /// Compute a [`PartialHash`] from a foldable structure, using the given leaf [`LeafCodec`].
+    pub fn from_foldable_with<C: LeafCodec>(
+        proof: Option<MerkleProof>,
+        foldable: &impl Foldable<PartialHashFold<C>>,
+    ) -> PartialHash {
         foldable.fold(PartialHashFold {
             proof: proof.map(Arc::new),
+            _codec: PhantomData,
         })
     }
 }
 
-impl Foldable<PartialHashFold> for PartialHash {
-    fn fold(&self, builder: PartialHashFold) -> Self {
+impl<C: LeafCodec> Foldable<PartialHashFold<C>> for PartialHash {
+    fn fold(&self, builder: PartialHashFold<C>) -> Self {
         match self {
             PartialHash::Previous => builder.previous(),
             PartialHash::Present(hash) => builder.present(*hash),
@@ -319,16 +382,20 @@ impl Foldable<PartialHashFold> for PartialHash {
 }
 
 /// [`Fold`] implementation for computing the [`PartialHash`] of a state
-pub struct PartialHashFold {
+///
+/// Parameterised by the leaf [`LeafCodec`]; defaults to [`Bincode`].
+pub struct PartialHashFold<C = Bincode> {
     /// Original proof which is the source of previous hashes.
     ///
     /// Stored as `Arc` so that callers (notably the verify-mode AVL fold) can attach a node-local
     /// override cheaply: the override site only bumps the refcount instead of automatically
     /// deep-cloning the proof.
     proof: Option<Arc<MerkleProof>>,
+
+    _codec: PhantomData<C>,
 }
 
-impl PartialHashFold {
+impl<C: LeafCodec> PartialHashFold<C> {
     /// Mark the state as present with the given hash.
     pub fn present(self, hash: Hash) -> PartialHash {
         PartialHash::Present(hash)
@@ -350,8 +417,11 @@ impl PartialHashFold {
     /// Use when a sub-structure carries its own captured proof that should override whatever the
     /// parent fold passed down. Unlike [`PartialHashFold::map_reference_proof`], this does not
     /// require the existing proof to be `Some`.
-    pub fn with_proof(self, proof: Option<Arc<MerkleProof>>) -> PartialHashFold {
-        PartialHashFold { proof }
+    pub fn with_proof(self, proof: Option<Arc<MerkleProof>>) -> PartialHashFold<C> {
+        PartialHashFold {
+            proof,
+            _codec: PhantomData,
+        }
     }
 
     /// Modify the reference proof that `PartialHashFold` uses when traversing the described
@@ -363,20 +433,23 @@ impl PartialHashFold {
     pub fn map_reference_proof(
         self,
         proj: impl FnOnce(MerkleProof) -> Option<MerkleProof>,
-    ) -> PartialHashFold {
+    ) -> PartialHashFold<C> {
         PartialHashFold {
             proof: self
                 .proof
                 .and_then(|arc| proj(Arc::unwrap_or_clone(arc)))
                 .map(Arc::new),
+            _codec: PhantomData,
         }
     }
 }
 
-impl Fold for PartialHashFold {
+impl<C: LeafCodec> Fold for PartialHashFold<C> {
     type Folded = PartialHash;
 
-    type NodeFold = PartialHashNodeFold;
+    type NodeFold = PartialHashNodeFold<C>;
+
+    type Codec = C;
 
     fn into_node_fold(self) -> Self::NodeFold {
         let Some(tree) = self.proof else {
@@ -384,6 +457,7 @@ impl Fold for PartialHashFold {
                 node_hash: None,
                 children: VecDeque::new(),
                 child_hashes: VecDeque::new(),
+                _codec: PhantomData,
             };
         };
 
@@ -396,25 +470,28 @@ impl Fold for PartialHashFold {
                 node_hash: None,
                 children: VecDeque::from_iter(node.children),
                 child_hashes: VecDeque::new(),
+                _codec: PhantomData,
             },
 
             Tree::Leaf(MerkleProofLeaf::Read(_)) => PartialHashNodeFold {
                 node_hash: None,
                 children: VecDeque::new(),
                 child_hashes: VecDeque::new(),
+                _codec: PhantomData,
             },
 
             Tree::Leaf(MerkleProofLeaf::Blind(hash)) => PartialHashNodeFold {
                 node_hash: Some(hash),
                 children: VecDeque::new(),
                 child_hashes: VecDeque::new(),
+                _codec: PhantomData,
             },
         }
     }
 }
 
 /// [`NodeFold`] implementation for computing the [`PartialHash`] of a state
-pub struct PartialHashNodeFold {
+pub struct PartialHashNodeFold<C = Bincode> {
     /// Previous hash for this node, if available
     node_hash: Option<Hash>,
 
@@ -423,10 +500,12 @@ pub struct PartialHashNodeFold {
 
     /// Hash of each child seen so far
     child_hashes: VecDeque<PartialHash>,
+
+    _codec: PhantomData<C>,
 }
 
-impl NodeFold for PartialHashNodeFold {
-    type Parent = PartialHashFold;
+impl<C: LeafCodec> NodeFold for PartialHashNodeFold<C> {
+    type Parent = PartialHashFold<C>;
 
     fn add<F: Foldable<Self::Parent>>(&mut self, child: &F) {
         let hash = match self.children.pop_front() {
@@ -434,6 +513,7 @@ impl NodeFold for PartialHashNodeFold {
                 let prev_hash = tree.root_hash();
                 let hash = child.fold(PartialHashFold {
                     proof: Some(Arc::new(tree)),
+                    _codec: PhantomData,
                 });
 
                 // If the child is absent but we have the previous hash, we can use it here.
@@ -443,7 +523,10 @@ impl NodeFold for PartialHashNodeFold {
                 }
             }
 
-            None => child.fold(PartialHashFold { proof: None }),
+            None => child.fold(PartialHashFold {
+                proof: None,
+                _codec: PhantomData,
+            }),
         };
 
         self.child_hashes.push_back(hash);

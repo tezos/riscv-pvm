@@ -3,7 +3,9 @@
 //
 // SPDX-License-Identifier: MIT
 
+pub mod binary;
 pub mod clone;
+pub mod codec;
 pub mod components;
 pub mod foldable;
 pub mod hash;

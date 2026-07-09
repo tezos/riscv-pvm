@@ -15,8 +15,37 @@ use crate::errors::InvalidArgumentError;
 pub const KEY_MAX_SIZE: usize = 256;
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
-#[derive(Clone, Debug, Default, Encode, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Encode,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    rkyv::Archive,
+    rkyv::Serialize,
+)]
 pub struct Key(Vec<u8>);
+
+// Manual implementation of rkyv `Deserialize` (rather than deriving it) to preserve the size
+// validation enforced by the bincode `Decode` impl below. This matters because `Key` is
+// deserialised nested inside `Meta`/`StoredNode`, so the validation must travel with the type.
+impl<D> rkyv::Deserialize<Key, D> for ArchivedKey
+where
+    D: rkyv::rancor::Fallible + ?Sized,
+    D::Error: rkyv::rancor::Source,
+{
+    fn deserialize(&self, deserializer: &mut D) -> Result<Key, D::Error> {
+        let bytes: Vec<u8> = rkyv::Deserialize::deserialize(&self.0, deserializer)?;
+
+        Key::check_bytes_validity(&bytes).map_err(<D::Error as rkyv::rancor::Source>::new)?;
+
+        Ok(Key(bytes))
+    }
+}
 
 impl Key {
     /// Create a new key from a byte slice, ensuring it is valid.
@@ -142,6 +171,36 @@ mod tests {
         assert!(
             res.is_err(),
             "Decoding of a key that's too large should fail"
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn key_rkyv_round_trip(key_len in 0..=KEY_MAX_SIZE) {
+            let key = Key::new(&vec![0; key_len]).expect("Key is valid");
+
+            let serialised = rkyv::to_bytes::<rkyv::rancor::Error>(&key)
+                .expect("rkyv serialisation of a key should succeed");
+
+            let key_decoded = rkyv::from_bytes::<Key, rkyv::rancor::Error>(&serialised)
+                .expect("rkyv deserialisation of a valid encoded key should succeed");
+
+            assert_eq!(key, key_decoded, "rkyv encode then decode must produce the same key");
+        }
+    }
+
+    #[test]
+    fn key_rkyv_decode_protects_key_too_large() {
+        // NB the public api does not allow for such an invalid key.
+        let key = Key(vec![0; KEY_MAX_SIZE + 1]);
+
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&key)
+            .expect("rkyv serialisation of a key should succeed");
+
+        let res = rkyv::from_bytes::<Key, rkyv::rancor::Error>(&bytes);
+        assert!(
+            res.is_err(),
+            "rkyv decoding of a key that's too large should fail"
         );
     }
 }

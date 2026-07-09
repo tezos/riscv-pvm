@@ -255,7 +255,8 @@ fn proof_size(state: &Bytes<Normal>, op: &BytesMutOp) -> usize {
 /// which includes generating both hashes, without actually checking the proof is valid.
 fn verify_proof(proof: &[u8], op: &BytesMutOp) {
     let (mut bytes_verify, parsed_proof_tree) =
-        proof_binary::deserialise(proof).expect("can deserialise proof");
+        proof_binary::deserialise::<octez_riscv_data::codec::Bincode, _>(proof)
+            .expect("can deserialise proof");
     let parsed_proof_tree = parsed_proof_tree.into_present();
 
     // To verify the proof the initial hash and final hash must both be computed. We won't actually

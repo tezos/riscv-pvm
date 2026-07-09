@@ -258,7 +258,9 @@ impl Unfoldable for SignalActions<Normal> {
 }
 
 impl FromProof for SignalActions<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
 
         let (proof, actions) = proof.next_branch()?;

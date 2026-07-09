@@ -116,7 +116,7 @@ mod tests {
 
         // The Verify mode needs a proof, so we generate it from the Prove mode
         let proof_tree = MerkleProof::from_foldable(&mem_prove);
-        let proof_deser = ProofTree::Present(&proof_tree);
+        let proof_deser: ProofTree<'_> = ProofTree::present(&proof_tree);
         let mut mem_verify = DataSpace::from_proof(proof_deser).unwrap().into_result();
 
         unsafe {
@@ -186,7 +186,11 @@ mod tests {
         }
 
         impl FromProof for Foo<Verify> {
-            fn from_proof<Proof: octez_riscv_data::merkle_proof::Deserialiser>(
+            fn from_proof<
+                Proof: octez_riscv_data::merkle_proof::Deserialiser<
+                        Codec = octez_riscv_data::codec::Bincode,
+                    >,
+            >(
                 proof: Proof,
             ) -> octez_riscv_data::merkle_proof::SuspendedResult<Proof, Self> {
                 let node = proof.into_node()?;
@@ -207,7 +211,7 @@ mod tests {
         operation(&mut foo_prove);
 
         let merkle_proof = MerkleProof::from_foldable(&foo_prove);
-        let proof_deser = ProofTree::Present(&merkle_proof);
+        let proof_deser = ProofTree::present(&merkle_proof);
 
         let expected_hash = Hash::from_foldable(&foo_prove);
 

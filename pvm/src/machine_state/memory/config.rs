@@ -30,7 +30,7 @@ where
     type State<M: Mode> =
         MemoryImpl<PAGES, TOTAL_BYTES, <BuddyConfigProxy<PAGES> as BuddyConfig>::Buddy<M>, M>;
 
-    fn state_from_proof<D: merkle_proof::Deserialiser>(
+    fn state_from_proof<D: merkle_proof::Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
         proof: D,
     ) -> merkle_proof::SuspendedResult<D, Self::State<Verify>> {
         let proof = proof.into_node()?;

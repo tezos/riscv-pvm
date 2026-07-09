@@ -19,14 +19,13 @@ use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
+use octez_riscv_data::serialisation::rkyv_deserialise;
+use octez_riscv_data::serialisation::rkyv_serialise;
 use perfect_derive::perfect_derive;
 
 use super::resolver::LazyDataId;
@@ -35,6 +34,7 @@ use super::resolver::ProveNode;
 use super::resolver::TreeResolver;
 use super::tree::Tree;
 use crate::avl::resolver::AvlResolver;
+use crate::codec::HashFold;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -45,7 +45,9 @@ use crate::storage::Storable;
 use crate::storage::StoreOptions;
 
 /// Metadata of a [`Node`] needed for accesses.
-#[derive(Clone, Default, Debug, Encode, Decode)]
+#[derive(
+    Clone, Default, Debug, Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub(crate) struct Meta {
     key: Key,
 
@@ -53,8 +55,14 @@ pub(crate) struct Meta {
     balance_factor: i64,
 }
 
+impl octez_riscv_data::codec::RkyvLeaf for Meta {
+    // `Meta` embeds a `Key` (a `Vec<u8>`), so its rkyv archive has out-of-line data and its length
+    // varies: it keeps the leaf length prefix.
+    const FIXED_LEN: Option<usize> = None;
+}
+
 /// This type is a compact serialised form of a [`Node`] with metadata and child subtree hashes.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct StoredNode {
     meta: Meta,
     data: Hash,
@@ -208,9 +216,9 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         ctx: D,
     ) -> Result<(D, Self), <D::Parent as Deserialiser>::Error>
     where
-        Atom<Meta, M>: FromProof,
-        DataId: FromProof,
-        TreeId: FromProof,
+        Atom<Meta, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
+        DataId: FromProof<<D::Parent as Deserialiser>::Codec>,
+        TreeId: FromProof<<D::Parent as Deserialiser>::Codec>,
     {
         let (ctx, meta) = ctx.next_branch::<Atom<Meta, M>>()?;
         let (ctx, data) = ctx.next_branch::<DataId>()?;
@@ -238,7 +246,8 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         DataId: Foldable<HashFold>,
         TreeId: Foldable<HashFold>,
     {
-        self.hash.get_or_init(|| Hash::from_foldable(self))
+        self.hash
+            .get_or_init(|| Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self))
     }
 
     /// The metadata of this [`Node`].
@@ -863,13 +872,13 @@ where
         // should be written to the KV store separately.
         let repr = StoredNode {
             meta: self.meta.deref().clone(),
-            data: Hash::from_foldable(&self.data),
-            left: Hash::from_foldable(&self.left),
-            right: Hash::from_foldable(&self.right),
+            data: Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.data),
+            left: Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.left),
+            right: Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&self.right),
         };
 
         let &id = self.hash();
-        let bytes = serialise(repr)?;
+        let bytes = rkyv_serialise(&repr)?;
         store.blob_set(id, bytes)?;
 
         // Are we in charge of writing the value data to the KV store?
@@ -903,7 +912,7 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
                         root: id,
                         source: Box::new(error),
                     })?;
-            deserialise(bytes.as_ref())?
+            rkyv_deserialise(bytes.as_ref())?
         };
 
         let meta = Atom::new(meta);

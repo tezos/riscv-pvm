@@ -19,14 +19,11 @@ use bytes::Bytes;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
-use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
-use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
@@ -39,6 +36,9 @@ use tokio::runtime::Handle;
 
 use crate::avl::resolver::ProveNodeId;
 use crate::avl::tree::Tree;
+use crate::codec::HashFold;
+use crate::codec::MerkleProofFold;
+use crate::codec::PartialHashFold;
 use crate::commit::CommitId;
 use crate::database::value_ref::AsRefValueRef;
 use crate::database::value_ref::ValueRef;
@@ -454,9 +454,14 @@ impl<KV> Database<KV, Verify> {
     }
 }
 
-impl<KV> FromProof for Database<KV, Verify> {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
-        let suspended = <MerkleLayer<KV, Verify> as FromProof>::from_proof(proof)?;
+impl<KV> FromProof<octez_riscv_data::codec::Rkyv> for Database<KV, Verify> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Rkyv>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
+        let suspended =
+            <MerkleLayer<KV, Verify> as FromProof<octez_riscv_data::codec::Rkyv>>::from_proof(
+                proof,
+            )?;
         Ok(suspended.map(|merkle| Database {
             inner: VerifyImpl { merkle },
         }))
@@ -637,7 +642,7 @@ pub(crate) mod tests {
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
@@ -2245,13 +2250,13 @@ pub(crate) mod tests {
         let database = new_database::<KV>(handle, &repo);
 
         let prove = database.try_start_proof().expect("starting a proof should succeed");
-        let proof = MerkleProof::from_foldable(&prove);
+        let proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove);
 
         assert!(
             matches!(proof, octez_riscv_data::tree::Tree::Leaf(MerkleProofLeaf::Blind(_))),
             "database should be fully blinded");
 
-        let mut verify = Database::<KV, Verify>::from_proof(ProofPart::Present(&proof))
+        let mut verify = Database::<KV, Verify>::from_proof(ProofTree::present(&proof))
             .expect("Can convert blinded leaf proof into blinded verify database")
             .into_result();
 

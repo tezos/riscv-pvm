@@ -31,8 +31,8 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
+use octez_riscv_data::serialisation::rkyv_deserialise;
+use octez_riscv_data::serialisation::rkyv_serialise;
 use tokio::runtime::Runtime;
 
 use crate::avl::tree::Tree;
@@ -46,7 +46,7 @@ use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::repo::RegistryRepo;
 use crate::storage::KeyValueStore;
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 /// Structure to store the result of serialising a registry.
 struct RegistryManifest {
     database_hashes: Vec<CommitId>,
@@ -119,8 +119,8 @@ impl<KV: KeyValueStore> Registry<KV, Prove<'static>> {
     /// subtrees that were not touched) with the registry's current — final —
     /// state hash.
     pub fn produce_proof(&self) -> Proof {
-        let merkle_proof = MerkleProof::from_foldable(self);
-        let final_state_hash = Hash::from_foldable(self);
+        let merkle_proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self);
+        let final_state_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(self);
         Proof::new(merkle_proof, final_state_hash)
     }
 }
@@ -144,7 +144,9 @@ where
             databases: Vector::new(databases),
         };
 
-        let actual_commit = CommitId::from(Hash::from_foldable(&registry));
+        let actual_commit = CommitId::from(
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry),
+        );
         if actual_commit != commit_id {
             return Err(Error::Operational(OperationalError::RegistryCommitMismatch));
         }
@@ -157,7 +159,7 @@ where
         commit_id: &CommitId,
     ) -> Result<RegistryManifest, OperationalError> {
         let commit_bytes = repo.read_registry_commit(commit_id)?;
-        deserialise(&commit_bytes).map_err(OperationalError::from)
+        rkyv_deserialise(&commit_bytes).map_err(OperationalError::from)
     }
 
     fn checkout_databases(
@@ -185,11 +187,13 @@ where
             database_hashes.push(hash);
         }
 
-        let registry_commit = CommitId::from(Hash::from_foldable(&self));
+        let registry_commit = CommitId::from(Hash::from_foldable_with::<
+            octez_riscv_data::codec::Rkyv,
+        >(&self));
 
         let manifest = RegistryManifest { database_hashes };
         let encoded =
-            serialise(&manifest).expect("Serialising the registry manifest should not fail");
+            rkyv_serialise(&manifest).expect("Serialising the registry manifest should not fail");
 
         self.inner
             .repo
@@ -343,13 +347,15 @@ where
     }
 }
 
-impl<KV: KeyValueStore> FromProof for Registry<KV, Verify> {
+impl<KV: KeyValueStore> FromProof<octez_riscv_data::codec::Rkyv> for Registry<KV, Verify> {
     // TODO (TZX-161): for a verify mode Registry, the resulting registry state is currently
     // only usable if `proof` is the ProofTree. Otherwise, if created using the stream
     // deserialiser, verification will fail (as this does not support capturing the owned proof).
     // Deserialising from raw bytes therefore requires two passes: a stream pass to reconstruct
     // the proof tree, then a proof-tree pass to obtain a verifiable registry.
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Rkyv>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let suspended = Vector::<Database<KV, Verify>, Verify>::from_proof(proof)?;
         Ok(suspended.map(|databases| Self {
             inner: VerifyImpl(PhantomData),
@@ -611,13 +617,14 @@ pub(super) mod tests {
     use octez_riscv_data::merkle_proof::proof::serialise_proof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProofLeaf;
-    use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+    use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::ProvableExt;
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::catch_not_found;
-    use octez_riscv_data::serialisation::deserialise;
+    use octez_riscv_data::serialisation::rkyv_deserialise;
+    use octez_riscv_data::serialisation::rkyv_serialise;
     use octez_riscv_data::serialisation::serialise;
 
     use super::ProveImpl;
@@ -944,7 +951,7 @@ pub(super) mod tests {
                 .repo
                 .read_registry_commit(commit_id)
                 .expect("Manifest should be readable");
-            deserialise(&bytes).expect("Manifest should be deserialisable")
+            rkyv_deserialise(&bytes).expect("Manifest should be deserialisable")
         }
 
         /// Assert that the manifest written for `commit_id` contains the expected database commit IDs.
@@ -962,7 +969,7 @@ pub(super) mod tests {
 
         // the hash is of the empty vector (zero length and empty list):
         // (hash (concat (hash 0) (hash-as-seq '())))
-        let zero = Hash::hash_encodable(0u64).expect("hashing u64 should succeed");
+        let zero = Hash::hash_leaf::<octez_riscv_data::codec::Rkyv, _>(&0u64).expect("hashing u64 should succeed");
         let empty_seq = Hash::hash_bytes(&[]);
         let expected_root = CommitId::from(Hash::combine_hashes([zero, empty_seq]));
 
@@ -989,7 +996,7 @@ pub(super) mod tests {
 
         // the hash is of the single-entry vector (one length and list size 1):
         // (hash (concat (hash 1) (hash-as-seq '(db))))
-        let one = Hash::hash_encodable(1u64).expect("hashing u64 should succeed");
+        let one = Hash::hash_leaf::<octez_riscv_data::codec::Rkyv, _>(&1u64).expect("hashing u64 should succeed");
         let db_hash = expected_db_hashes[0];
         let expected_root = CommitId::from(Hash::combine_hashes([&one, db_hash.as_hash()]));
 
@@ -1031,7 +1038,7 @@ pub(super) mod tests {
             .iter()
             .map(|db| db.hash().unwrap().into())
             .collect();
-        let two = Hash::hash_encodable(2u64).expect("hashing u64 should succeed");
+        let two = Hash::hash_leaf::<octez_riscv_data::codec::Rkyv, _>(&2u64).expect("hashing u64 should succeed");
         let dbs_root_hash = Hash::combine_hashes(expected_db_hashes.iter().map(CommitId::as_hash));
 
         let expected_root = CommitId::from(Hash::combine_hashes([two, dbs_root_hash]));
@@ -1052,7 +1059,7 @@ pub(super) mod tests {
 
         assert!(checked_out.is_empty());
         assert_eq!(
-            CommitId::from(Hash::from_foldable(&checked_out)),
+            CommitId::from(Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&checked_out)),
             root_commit
         );
     });
@@ -1075,7 +1082,7 @@ pub(super) mod tests {
         checked_out.databases[0].assert_database_value(&key_a, b"alpha");
         checked_out.databases[1].assert_database_value(&key_b, b"beta");
         assert_eq!(
-            CommitId::from(Hash::from_foldable(&checked_out)),
+            CommitId::from(Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&checked_out)),
             root_commit
         );
     });
@@ -1104,7 +1111,7 @@ pub(super) mod tests {
 
         let fake_commit = CommitId::from(Hash::hash_bytes(b"fake-registry-commit"));
         let fake_manifest_bytes =
-            serialise(&manifest).expect("Manifest should be serialisable");
+            rkyv_serialise(&manifest).expect("Manifest should be serialisable");
         repo.write_registry_commit(&fake_commit, &fake_manifest_bytes)
             .expect("Writing the fake manifest should succeed");
 
@@ -1139,19 +1146,19 @@ pub(super) mod tests {
             .expect("Converting to prove mode should succeed");
 
         let proof_before_hash =
-            octez_riscv_data::merkle_proof::proof_tree::MerkleProof::from_foldable(
+            octez_riscv_data::merkle_proof::proof_tree::MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
                 &prove_registry.databases,
             );
 
         let proof_before_hash_bytes =
             serialise(&proof_before_hash).expect("Serialising proof should succeed");
 
-        let normal_root = Hash::from_foldable(&registry);
-        let prove_root = Hash::from_foldable(&prove_registry);
+        let normal_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
+        let prove_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
         assert_eq!(prove_root, normal_root);
 
         let proof_after_hash =
-            octez_riscv_data::merkle_proof::proof_tree::MerkleProof::from_foldable(
+            octez_riscv_data::merkle_proof::proof_tree::MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
                 &prove_registry.databases,
             );
         let proof_after_hash_bytes =
@@ -1375,7 +1382,7 @@ pub(super) mod tests {
 
         let expected_hashes = [db_0_hash, db_1_hash];
 
-        let root_hash = Hash::from_foldable(&registry);
+        let root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
 
         let prove_registry = registry.try_start_proof()
             .expect("Converting to prove mode should succeed");
@@ -1391,7 +1398,7 @@ pub(super) mod tests {
             .collect::<Vec<_>>();
         assert_eq!(prove_hashes_before.as_slice(), expected_hashes);
 
-        let root_hash_prove_before = Hash::from_foldable(&prove_registry);
+        let root_hash_prove_before = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
 
         assert_eq!(root_hash_prove_before, root_hash, "Converting to proof mode concerves root hash");
 
@@ -1413,7 +1420,7 @@ pub(super) mod tests {
                     .expect("Hashing should succeed.")
             })
             .collect::<Vec<_>>();
-        let root_hash_prove_after = Hash::from_foldable(&prove_registry);
+        let root_hash_prove_after = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
 
         assert_eq!(
             prove_hashes_after, prove_hashes_before,
@@ -1421,8 +1428,8 @@ pub(super) mod tests {
         );
         assert_eq!(root_hash_prove_after, root_hash_prove_before, "Reads must not affect Prove-mode hashes");
 
-        let proof = MerkleProof::from_foldable(&prove_registry);
-        let verify_registry = Registry::<KV, _>::from_proof(ProofPart::Present(&proof))
+        let proof = MerkleProof::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
+        let verify_registry = Registry::<KV, _>::from_proof(ProofTree::present(&proof))
             .expect("from_proof should succeed")
             .into_result();
 
@@ -1660,15 +1667,17 @@ pub(super) mod tests {
         let bytes = serialise_proof(proof);
 
         let (reconstructed_proof, stream_registry) =
-            deserialise_proof::<Registry<KV, Verify>, _>(bytes.into_iter())
-                .expect("Stream deserialisation of the proof bytes should succeed");
+            deserialise_proof::<octez_riscv_data::codec::Rkyv, Registry<KV, Verify>, _>(
+                bytes.into_iter(),
+            )
+            .expect("Stream deserialisation of the proof bytes should succeed");
         assert_eq!(
             &reconstructed_proof, proof,
             "The proof reconstructed from bytes should match the original"
         );
 
         let verify_registry =
-            Registry::<KV, Verify>::from_proof(ProofPart::Present(reconstructed_proof.tree()))
+            Registry::<KV, Verify>::from_proof(ProofTree::present(reconstructed_proof.tree()))
                 .expect("from_proof should succeed")
                 .into_result();
 
@@ -1686,7 +1695,7 @@ pub(super) mod tests {
     fn registry_root_hash_small<KV: BackgroundKeyValueStore>(
         registry: &Registry<KV, Verify>,
     ) -> Hash {
-        PartialHash::from_foldable(None, registry)
+        PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(None, registry)
             .to_hash()
             .expect("Database captures owned proof, should be able to hash")
     }
@@ -1702,7 +1711,7 @@ pub(super) mod tests {
         populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
         populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
 
-        let initial_root = Hash::from_foldable(&registry);
+        let initial_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
 
         // The step: read a value from database 0, write a fresh key to database 1.
         let mut prove_registry = registry
@@ -1722,7 +1731,7 @@ pub(super) mod tests {
             .set(key_c.clone(), Bytes::from_static(b"baz"))
             .expect("Setting a value should succeed");
 
-        let final_root = Hash::from_foldable(&prove_registry);
+        let final_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
         let proof = prove_registry.produce_proof();
 
         assert_eq!(
@@ -1807,7 +1816,7 @@ pub(super) mod tests {
             populate_database_with_key_value::<KV>(&mut registry, i, &[i as u8], b"val");
         }
 
-        let root_hash = Hash::from_foldable(&registry);
+        let root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
 
         for db_n in 0..16 {
             let key_n = Key::new(&[db_n]).unwrap();
@@ -1833,10 +1842,10 @@ pub(super) mod tests {
             // The proof round-trips and the verifier can replay the touched read.
             let (_stream, verify) = deserialise_proof_via_bytes::<KV>(&proof);
 
-            let hash = PartialHash::from_foldable(None, &verify).to_hash();
+            let hash = PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(None, &verify).to_hash();
             assert_eq!(None, hash, "hashing minimal proof requires proof arg");
 
-            let hash = PartialHash::from_foldable(Some(proof.into_tree()), &verify)
+            let hash = PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(Some(proof.into_tree()), &verify)
                 .to_hash()
                 .expect("partial hash of registry with proof succeeds");
 
@@ -1860,7 +1869,7 @@ pub(super) mod tests {
         populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
         populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
 
-        let initial_root = Hash::from_foldable(&registry);
+        let initial_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
 
         // The step touches nothing.
         let prove_registry = registry
@@ -1881,7 +1890,7 @@ pub(super) mod tests {
         // It round-trips through bytes (previously rejected with `LengthAbsentButItemsPresent`) and
         // the resulting verify-mode registry still hashes to the initial root.
         let (_stream_registry, verify_registry) = deserialise_proof_via_bytes::<KV>(&proof);
-        let verify_root = PartialHash::from_foldable(Some(proof.tree().clone()), &verify_registry)
+        let verify_root = PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(Some(proof.tree().clone()), &verify_registry)
             .to_hash()
             .expect("a fully blinded registry must still hash to its root");
         assert_eq!(
@@ -2036,7 +2045,7 @@ pub(super) mod tests {
         populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
         populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
 
-        let initial_root = Hash::from_foldable(&registry);
+        let initial_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
 
         let mut prove_registry = registry
             .try_start_proof()
@@ -2044,14 +2053,14 @@ pub(super) mod tests {
         prove_registry
             .copy_database(0, 1)
             .expect("Copying should succeed");
-        let final_root = Hash::from_foldable(&prove_registry);
+        let final_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
 
         // Reference: the same step in Normal mode.
         registry
             .copy_database(0, 1)
             .expect("Copying should succeed");
         assert_eq!(
-            Hash::from_foldable(&registry),
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry),
             final_root,
             "Prove-mode copy must produce the Normal-mode final hash"
         );
@@ -2085,7 +2094,7 @@ pub(super) mod tests {
         populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
         populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
 
-        let initial_root = Hash::from_foldable(&registry);
+        let initial_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
 
         let mut prove_registry = registry
             .try_start_proof()
@@ -2093,14 +2102,14 @@ pub(super) mod tests {
         prove_registry
             .move_database(0, 1)
             .expect("Moving should succeed");
-        let final_root = Hash::from_foldable(&prove_registry);
+        let final_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
 
         // Reference: the same step in Normal mode.
         registry
             .move_database(0, 1)
             .expect("Moving should succeed");
         assert_eq!(
-            Hash::from_foldable(&registry),
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry),
             final_root,
             "Prove-mode move must produce the Normal-mode final hash"
         );
@@ -2134,7 +2143,7 @@ pub(super) mod tests {
         populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"foo");
         populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"bar");
 
-        let initial_root = Hash::from_foldable(&registry);
+        let initial_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry);
 
         let mut prove_registry = registry
             .try_start_proof()
@@ -2142,14 +2151,14 @@ pub(super) mod tests {
         prove_registry
             .clear_database(1)
             .expect("Clearing should succeed");
-        let final_root = Hash::from_foldable(&prove_registry);
+        let final_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_registry);
 
         // Reference: the same step in Normal mode.
         registry
             .clear_database(1)
             .expect("Clearing should succeed");
         assert_eq!(
-            Hash::from_foldable(&registry),
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&registry),
             final_root,
             "Prove-mode clear must produce the Normal-mode final hash"
         );
@@ -2259,7 +2268,7 @@ pub(super) mod tests {
 #[cfg(test)]
 mod rocksdb_tests {
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_data::serialisation::deserialise;
+    use octez_riscv_data::serialisation::rkyv_deserialise;
 
     use super::Registry;
     use super::RegistryManifest;
@@ -2284,7 +2293,7 @@ mod rocksdb_tests {
         let manifest_path = repo.registry_commit_file(&root_commit);
         let manifest_bytes = std::fs::read(&manifest_path).expect("Manifest should be readable");
         let manifest: RegistryManifest =
-            deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
+            rkyv_deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
         std::fs::remove_dir_all(repo.database_commit_dir(&manifest.database_hashes[0]))
             .expect("Database commit should be removable");
 

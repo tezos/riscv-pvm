@@ -19,7 +19,7 @@ use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::proof::deserialise_proof;
 use octez_riscv_data::merkle_proof::proof::serialise_proof;
-use octez_riscv_data::merkle_proof::proof_tree::ProofPart;
+use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Verify;
@@ -232,7 +232,7 @@ where
     KV: BackgroundKeyValueStore,
     KV::Repo: Clone,
 {
-    let pre_root = Hash::from_foldable(registry);
+    let pre_root = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(registry);
 
     // Pre-operation length, read from the original registry (not the Prove-mode registry)
     // to avoid touching the registry when deciding if an operation should be a no-op.
@@ -253,28 +253,36 @@ where
 
     let bytes = serialise_proof(&proof);
     let (reconstructed, _stream) =
-        deserialise_proof::<Registry<KV, Verify>, _>(bytes.clone().into_iter())
-            .expect("Stream deserialisation of the proof bytes should succeed");
+        deserialise_proof::<octez_riscv_data::codec::Rkyv, Registry<KV, Verify>, _>(
+            bytes.clone().into_iter(),
+        )
+        .expect("Stream deserialisation of the proof bytes should succeed");
     assert_eq!(
         reconstructed, proof,
         "The proof reconstructed from bytes should match the original"
     );
-    let mut verify = Registry::<KV, Verify>::from_proof(ProofPart::Present(reconstructed.tree()))
+    let mut verify = Registry::<KV, Verify>::from_proof(ProofTree::present(reconstructed.tree()))
         .expect("from_proof should succeed")
         .into_result();
 
-    let verify_pre = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
-        .to_hash()
-        .expect("Hashing the Verify registry should succeed");
+    let verify_pre = PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+        Some(reconstructed.tree().clone()),
+        &verify,
+    )
+    .to_hash()
+    .expect("Hashing the Verify registry should succeed");
     assert_eq!(
         verify_pre, pre_root,
         "The Verify-mode registry must start from the pre-operation state hash"
     );
 
     apply_registry_step(&mut verify, op, len);
-    let verify_post = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
-        .to_hash()
-        .expect("Hashing the Verify registry should succeed");
+    let verify_post = PartialHash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+        Some(reconstructed.tree().clone()),
+        &verify,
+    )
+    .to_hash()
+    .expect("Hashing the Verify registry should succeed");
     assert_eq!(
         verify_post,
         proof.final_state_hash(),
@@ -332,7 +340,9 @@ where
                 registry_model[index].observe_hash(new_digest);
 
                 checkout_candidates
-                    .entry(Hash::from_foldable(&registry))
+                    .entry(Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+                        &registry,
+                    ))
                     .or_insert(false);
             }
             RegistryOperation::Database(_, DatabaseOperation::Commit) => {

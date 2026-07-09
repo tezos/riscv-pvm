@@ -32,8 +32,6 @@
 use std::mem::ManuallyDrop;
 use std::path::Path;
 
-use bincode::BorrowDecode;
-use bincode::Encode;
 use rocksdb::ColumnFamilyDescriptor;
 use rocksdb::MergeOperands;
 use rocksdb::checkpoint::Checkpoint;
@@ -50,10 +48,17 @@ use crate::storage::PersistentKeyValueStore;
 /// The name of the column family used for storing blob-keyed data.
 const BLOB_CF: &str = "blob";
 
-#[derive(BorrowDecode, Encode)]
-struct OffsetWriteMergePayload<'a> {
+/// An owned merge-operator payload.
+///
+/// Unlike bincode, an rkyv archive is not self-delimiting from the front, so the merge operator
+/// cannot recover a payload's length by decoding it. Payloads are therefore length-framed on the
+/// wire (an 8-byte little-endian length prefix followed by the archive bytes; see
+/// [`offset_write_full_merge`]) and this record is rkyv-archived owned (the borrowed value is copied
+/// in on the write path).
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+struct OffsetWriteMergePayload {
     offset: usize,
-    value: &'a [u8],
+    value: Vec<u8>,
 }
 
 /// Defines an atomic merge operator used when writing with an offset.
@@ -99,12 +104,20 @@ fn offset_write_full_merge(
 
     for mut op in operands {
         while !op.is_empty() {
-            let decode = octez_riscv_data::serialisation::deserialise_borrowed(op);
-            let (payload, len): (OffsetWriteMergePayload, _) =
-                decode.expect("Should be a valid encoding");
+            // Each operand holds one or more length-framed payloads: an 8-byte little-endian length
+            // prefix followed by that many bytes of rkyv archive. The explicit prefix is required
+            // because an rkyv archive is not self-delimiting from the front.
+            let (len_bytes, rest) = op.split_at(8);
+            let len = u64::from_le_bytes(len_bytes.try_into().expect("length prefix is 8 bytes"))
+                as usize;
+            let (archive, rest) = rest.split_at(len);
 
-            // Advance the slice
-            op = &op[len..];
+            let payload: OffsetWriteMergePayload =
+                octez_riscv_data::serialisation::rkyv_deserialise(archive)
+                    .expect("Should be a valid encoding");
+
+            // Advance past this payload.
+            op = rest;
 
             let offset = payload.offset;
             let data = payload.value;
@@ -386,10 +399,14 @@ impl KeyValueStore for PersistenceLayer {
 
         let payload_struct = OffsetWriteMergePayload {
             offset,
-            value: value.as_ref(),
+            value: value.as_ref().to_vec(),
         };
-        let payload = octez_riscv_data::serialisation::serialise(payload_struct)
+        let archive = octez_riscv_data::serialisation::rkyv_serialise(&payload_struct)
             .expect("Merge operator serialisation should always succeed");
+        // Length-frame the archive so the merge operator can find payload boundaries.
+        let mut payload = Vec::with_capacity(8 + archive.len());
+        payload.extend_from_slice(&(archive.len() as u64).to_le_bytes());
+        payload.extend_from_slice(&archive);
 
         self.db_instance
             .merge(key.as_ref(), payload)

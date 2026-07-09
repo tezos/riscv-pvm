@@ -26,6 +26,10 @@ use perfect_derive::perfect_derive;
 use range_collections::RangeSet2;
 
 use crate::clone::CloneState;
+use crate::codec::LeafCodec;
+use crate::codec::LeafDecode;
+use crate::codec::LeafEncode;
+use crate::codec::Rkyv;
 use crate::foldable::EncodeLeaf;
 use crate::foldable::Fold;
 use crate::foldable::FoldLeaf;
@@ -60,7 +64,6 @@ use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
 use crate::partial_vec::PartialVec;
 use crate::partial_vec::RangeEntry;
-use crate::serialisation::serialise;
 
 /// Byte array state component
 #[perfect_derive(Debug)]
@@ -169,7 +172,11 @@ impl<M: BytesMode> Bytes<M> {
         builder: Build,
         length: usize,
         get_data: F,
-    ) -> <Build as Fold>::Folded {
+    ) -> <Build as Fold>::Folded
+    where
+        u64: LeafEncode<Build::Codec>,
+        for<'x> ChunkedPage<'x>: LeafEncode<Build::Codec>,
+    {
         let length_node = EncodeLeaf::new(length as u64, "Serialising length should not fail.");
 
         let get_item = move |range| {
@@ -179,7 +186,7 @@ impl<M: BytesMode> Bytes<M> {
                     chunks: &[data.borrow()],
                 };
                 builder
-                    .fold_leaf(page)
+                    .fold_leaf(&page)
                     .expect("Serialising page should not fail.")
             })
         };
@@ -314,7 +321,11 @@ impl<M: CloneBytesMode> CloneState for Bytes<M> {
     }
 }
 
-impl<F: FoldLeaf> Foldable<F> for Bytes<Normal> {
+impl<F: FoldLeaf> Foldable<F> for Bytes<Normal>
+where
+    u64: LeafEncode<F::Codec>,
+    for<'x> ChunkedPage<'x>: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         self.fold_with_fold_leaf(builder, self.bytes.len(), |addr_range| {
             &self.bytes[addr_range]
@@ -322,7 +333,11 @@ impl<F: FoldLeaf> Foldable<F> for Bytes<Normal> {
     }
 }
 
-impl<F: FoldLeaf> Foldable<F> for Bytes<Prove<'_>> {
+impl<F: FoldLeaf> Foldable<F> for Bytes<Prove<'_>>
+where
+    u64: LeafEncode<F::Codec>,
+    for<'x> ChunkedPage<'x>: LeafEncode<F::Codec>,
+{
     fn fold(&self, builder: F) -> F::Folded {
         self.fold_with_fold_leaf(builder, self.bytes.unrecorded_len(), |addr_range| {
             let previous_len = self.bytes.previous.len();
@@ -341,13 +356,18 @@ impl<F: FoldLeaf> Foldable<F> for Bytes<Prove<'_>> {
     }
 }
 
-impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
-    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+impl<C: LeafCodec> Foldable<MerkleProofFold<C>> for Bytes<Prove<'_>>
+where
+    u64: LeafEncode<C>,
+    for<'x> ChunkedPage<'x>: LeafEncode<C>,
+{
+    fn fold(&self, builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
         // Reminder: Merkle trees generated in Prove mode capture the state at beginning of proof
         // generation. This means we need to use `previous` state for the length and data.
 
         let length = self.bytes.previous.len();
-        let length_data = serialise(length as u64).expect("Serialising length should not fail");
+        let length_data = LeafEncode::<C>::leaf_encode(&(length as u64))
+            .expect("Serialising length should not fail");
         let is_length_needed = self.bytes.need_length_in_proof();
         let length_constraint = if is_length_needed {
             MinimumPresence::Present
@@ -369,7 +389,8 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
 
             // We need to serialise the data to be able to recover it later, given that it is
             // variably sized.
-            let leaf_data = serialise(page).expect("Serialising leaf data should not fail");
+            let leaf_data =
+                LeafEncode::<C>::leaf_encode(&page).expect("Serialising leaf data should not fail");
 
             MerkleProofFold::new_leaf(constraint, leaf_data)
         };
@@ -378,8 +399,12 @@ impl Foldable<MerkleProofFold> for Bytes<Prove<'_>> {
     }
 }
 
-impl Foldable<PartialHashFold> for Bytes<Verify> {
-    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+impl<C: LeafCodec> Foldable<PartialHashFold<C>> for Bytes<Verify>
+where
+    u64: LeafEncode<C>,
+    for<'x> ChunkedPage<'x>: LeafEncode<C>,
+{
+    fn fold(&self, builder: PartialHashFold<C>) -> PartialHash {
         if self.bytes.is_completely_absent() {
             return builder.previous();
         }
@@ -394,8 +419,10 @@ impl Foldable<PartialHashFold> for Bytes<Verify> {
             return PartialHash::InvalidProof;
         };
 
-        let length_hash =
-            Hash::hash_encodable(length as u64).expect("Hashing length should not fail");
+        let length_hash = Hash::hash_bytes(
+            &LeafEncode::<C>::leaf_encode(&(length as u64))
+                .expect("Hashing length should not fail"),
+        );
         let length_node = PartialHash::Present(length_hash);
 
         let generator = |idx: usize| {
@@ -424,8 +451,10 @@ impl Foldable<PartialHashFold> for Bytes<Verify> {
                     let page = ChunkedPage {
                         chunks: chunks.as_slice(),
                     };
-                    let hash =
-                        Hash::hash_encodable(page).expect("Hashing encoded bytes should not fail");
+                    let hash = Hash::hash_bytes(
+                        &LeafEncode::<C>::leaf_encode(&page)
+                            .expect("Hashing encoded bytes should not fail"),
+                    );
                     PartialHash::Present(hash)
                 }
             }
@@ -472,8 +501,12 @@ impl Unfoldable for Bytes<Normal> {
     }
 }
 
-impl FromProof for Bytes<Verify> {
-    fn from_proof<Proof: Deserialiser>(
+impl<C: LeafCodec> FromProof<C> for Bytes<Verify>
+where
+    u64: LeafDecode<C>,
+    Page: LeafDecode<C>,
+{
+    fn from_proof<Proof: Deserialiser<Codec = C>>(
         proof: Proof,
     ) -> Result<<Proof as Deserialiser>::Suspended<Self>, <Proof as Deserialiser>::Error> {
         sequence_as_tree_from_proof::<u64, Self, _>(
@@ -1068,6 +1101,29 @@ impl<C> Decode<C> for Page {
     }
 }
 
+/// Rkyv leaf codec for [`Page`]: the page's bytes are (de)serialised as a `Vec<u8>` leaf, reusing
+/// the generic rkyv framing/alignment handling, with the same `PAGE_SIZE` validation as the bincode
+/// [`Decode`] impl above.
+impl LeafDecode<Rkyv> for Page {
+    fn leaf_decode(bytes: &[u8]) -> Result<Self, crate::codec::LeafDecodeError> {
+        let (page, _consumed) = <Self as LeafDecode<Rkyv>>::leaf_decode_stream(bytes)?;
+        Ok(page)
+    }
+
+    fn leaf_decode_stream(bytes: &[u8]) -> Result<(Self, usize), crate::codec::LeafDecodeError> {
+        let (data, consumed): (Vec<u8>, usize) =
+            <Vec<u8> as LeafDecode<Rkyv>>::leaf_decode_stream(bytes)?;
+
+        if data.len() > PAGE_SIZE {
+            return Err(crate::codec::LeafDecodeError::Framing(
+                "page length exceeds maximum page size",
+            ));
+        }
+
+        Ok((Page { data }, consumed))
+    }
+}
+
 /// Chunked page capped at [`PAGE_SIZE`] bytes
 ///
 /// This type is useful for hashing and serialising pages from byte slices, or even slices of byte
@@ -1099,6 +1155,27 @@ impl Encode for ChunkedPage<'_> {
         }
 
         Ok(())
+    }
+}
+
+/// Rkyv leaf codec for [`ChunkedPage`]: the concatenated page bytes are serialised as a `Vec<u8>`
+/// leaf (the decode dual is [`Page`]'s [`LeafDecode<Rkyv>`]).
+impl LeafEncode<Rkyv> for ChunkedPage<'_> {
+    fn leaf_encode(&self) -> Result<Vec<u8>, crate::codec::LeafEncodeError> {
+        let length: usize = self.chunks.iter().map(|chunk| chunk.len()).sum();
+
+        if length > PAGE_SIZE {
+            return Err(crate::codec::LeafEncodeError::Invalid(
+                "total chunk length exceeds maximum page size",
+            ));
+        }
+
+        let mut data = Vec::with_capacity(length);
+        for chunk in self.chunks {
+            data.extend_from_slice(chunk);
+        }
+
+        <Vec<u8> as LeafEncode<Rkyv>>::leaf_encode(&data)
     }
 }
 

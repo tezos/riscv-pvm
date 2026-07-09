@@ -16,7 +16,6 @@ unstable-test-utils = [
   "dep:serde_with",
   "dep:anyhow",
   "dep:serde_json",
-  "dep:rkyv",
   "octez-riscv-data/unstable-test-utils",
 ]
 
@@ -31,6 +30,7 @@ hex.workspace = true
 perfect-derive.workspace = true
 octez-riscv-data.workspace = true
 rand.workspace = true
+rkyv.workspace = true
 tempfile.workspace = true
 tezos-smart-rollup-constants.workspace = true
 thiserror.workspace = true
@@ -54,10 +54,6 @@ workspace = true
 optional = true
 
 [dependencies.proptest]
-workspace = true
-optional = true
-
-[dependencies.rkyv]
 workspace = true
 optional = true
 

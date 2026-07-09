@@ -173,7 +173,9 @@ where
 }
 
 impl FromProof for PagePermissions<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         Vector::from_proof(proof).map(|result| result.map(|pages| Self { pages }))
     }
 }

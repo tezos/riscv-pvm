@@ -41,9 +41,7 @@ use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
-use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
-use octez_riscv_data::hash::PartialHashFold;
 use octez_riscv_data::merkle_proof::Deserialiser;
 use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -61,6 +59,8 @@ use trait_set::trait_set;
 use super::node::Node;
 use super::tree::Tree;
 use crate::avl::node::Meta;
+use crate::codec::HashFold;
+use crate::codec::PartialHashFold;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
@@ -461,7 +461,7 @@ impl Foldable<HashFold> for LazyDataId {
             .inner
             .get()
             .expect("ID should be present when the hash is absent");
-        Hash::from_foldable(bytes)
+        Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(bytes)
     }
 }
 
@@ -889,9 +889,10 @@ impl<R> ProveResolver<R> {
                     meta: node.meta().clone(),
                     data: node.data().clone(),
                 };
-                self.deleted_nodes
-                    .borrow_mut()
-                    .insert(Hash::from_foldable(lazy_id), fields);
+                self.deleted_nodes.borrow_mut().insert(
+                    Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(lazy_id),
+                    fields,
+                );
             }
 
             [node.left_id(), node.right_id()]
@@ -912,7 +913,9 @@ impl<R> ProveResolver<R> {
         self.accessed_items
             .borrow_mut()
             .nodes
-            .insert(Hash::from_foldable(id));
+            .insert(Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+                id,
+            ));
         self.inner.resolve(id)
     }
 
@@ -927,7 +930,9 @@ impl<R> ProveResolver<R> {
         self.accessed_items
             .borrow_mut()
             .trees
-            .insert(Hash::from_foldable(id));
+            .insert(Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+                id,
+            ));
         self.inner.resolve(id)
     }
 }
@@ -995,7 +1000,7 @@ where
             // do not need to be tracked, since they are not part of the initial tree.
             return;
         };
-        let hash = Hash::from_foldable(lazy_id);
+        let hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(lazy_id);
         let node = prove_node.as_ref();
         let fields = DeletedNodeFields {
             meta: node.meta().clone(),
@@ -1107,8 +1112,10 @@ impl Foldable<PartialHashFold> for VerifyNodeId {
     }
 }
 
-impl FromProof for VerifyNodeId {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl FromProof<octez_riscv_data::codec::Rkyv> for VerifyNodeId {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Rkyv>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         // Capture the sub-proof BEFORE consuming `proof`; `into_node` moves it.
         let original_proof = proof.capture_owned_proof().map(Arc::new);
         let ctx = proof.into_node()?;
@@ -1148,8 +1155,10 @@ impl Foldable<PartialHashFold> for VerifyTreeId {
     }
 }
 
-impl FromProof for VerifyTreeId {
-    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+impl FromProof<octez_riscv_data::codec::Rkyv> for VerifyTreeId {
+    fn from_proof<Proof: Deserialiser<Codec = octez_riscv_data::codec::Rkyv>>(
+        proof: Proof,
+    ) -> SuspendedResult<Proof, Self> {
         let ctx = proof.into_node()?;
         let (ctx, partial) = Tree::from_branches(ctx)?;
         let tree_id = match partial {
@@ -1252,7 +1261,6 @@ mod tests {
     use octez_riscv_data::components::bytes::Bytes;
     use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::hash::Hash;
-    use octez_riscv_data::hash::HashFold;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::NotFound;
@@ -1273,6 +1281,7 @@ mod tests {
     use crate::avl::node::Node;
     use crate::avl::resolver::AvlResolver;
     use crate::avl::tree::Tree;
+    use crate::codec::HashFold;
     use crate::errors::Error;
     use crate::errors::OperationalError;
     use crate::key::Key;
@@ -1406,7 +1415,9 @@ mod tests {
             .expect("set should succeed");
 
         let tree_hash = tree.hash();
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+        let root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+            tree.root().expect("tree should have a root node"),
+        );
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
@@ -1415,7 +1426,10 @@ mod tests {
         let lazy_tree: LazyTreeId = LazyTreeId::from(tree_hash);
 
         assert_eq!(persistence_layer.blob_get_calls(), 0);
-        assert_eq!(Hash::from_foldable(&lazy_tree), tree_hash);
+        assert_eq!(
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&lazy_tree),
+            tree_hash
+        );
         assert_eq!(
             persistence_layer.blob_get_calls(),
             0,
@@ -1433,7 +1447,10 @@ mod tests {
 
         let lazy_root = loaded_tree.root().expect("tree should have a root");
         assert!(lazy_root.0.inner.get().is_none());
-        assert_eq!(Hash::from_foldable(&lazy_root), root_hash);
+        assert_eq!(
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&lazy_root),
+            root_hash
+        );
         assert_eq!(
             persistence_layer.blob_get_calls(),
             1,
@@ -1514,7 +1531,9 @@ mod tests {
         tree.set(&root_key, b"root", &mut eager_resolver)
             .expect("set should succeed");
 
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+        let root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+            tree.root().expect("tree should have a root node"),
+        );
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
@@ -1547,7 +1566,9 @@ mod tests {
         tree.set(&root_key, b"root", &mut eager_resolver)
             .expect("set should succeed");
 
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+        let root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+            tree.root().expect("tree should have a root node"),
+        );
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
@@ -1641,8 +1662,9 @@ mod tests {
 
         let initial_tree_hash: Hash = original_tree.hash();
 
-        let persisted_root_hash =
-            Hash::from_foldable(original_tree.root().expect("tree should have a root node"));
+        let persisted_root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+            original_tree.root().expect("tree should have a root node"),
+        );
 
         let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
         persist_tree(
@@ -1690,7 +1712,9 @@ mod tests {
         tree.set(&left_key, b"left", &mut resolver)
             .expect("set should succeed");
 
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+        let root_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(
+            tree.root().expect("tree should have a root node"),
+        );
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, &resolver, persistence_layer.as_ref());
@@ -1721,13 +1745,13 @@ mod tests {
         let lazy_resolver = LazyResolver::new(persistence_layer);
         let lazy_root = lazy_tree.root().expect("tree should have a root");
 
-        let expected_hash = Hash::from_foldable(lazy_root);
+        let expected_hash = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(lazy_root);
 
         let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_id = lazy_root.clone().into_proof();
 
         // Hash before resolve (delegates to lazy path).
-        let hash_before = Hash::from_foldable(&prove_id);
+        let hash_before = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_id);
         assert_eq!(
             hash_before, expected_hash,
             "prove hash before resolve should match lazy hash"
@@ -1738,7 +1762,7 @@ mod tests {
             .resolve(&prove_id)
             .expect("resolve should succeed");
 
-        let hash_after = Hash::from_foldable(&prove_id);
+        let hash_after = Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(&prove_id);
         assert_eq!(
             hash_after, expected_hash,
             "prove hash after resolve should still match lazy hash"
@@ -1850,7 +1874,8 @@ mod tests {
         let lazy_left_id = lazy_left_tree
             .root()
             .expect("left subtree should have a root");
-        let lazy_left_node_hash = Hash::from_foldable(lazy_left_id);
+        let lazy_left_node_hash =
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(lazy_left_id);
 
         // Now get the same hash via the prove resolver path.
         let prove_resolver = ProveResolver::start(lazy_resolver);
@@ -1867,7 +1892,8 @@ mod tests {
             .expect("left subtree should have a root");
 
         // Hash via the node resolver.
-        let prove_left_node_hash = Hash::from_foldable(left_prove_node_arc);
+        let prove_left_node_hash =
+            Hash::from_foldable_with::<octez_riscv_data::codec::Rkyv>(left_prove_node_arc);
 
         assert_eq!(
             prove_left_node_hash, lazy_left_node_hash,

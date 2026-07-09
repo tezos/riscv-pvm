@@ -72,7 +72,9 @@ impl<B: BuddyConfig> BuddyConfig for BuddyBranch2Config<B> {
         }
     }
 
-    fn buddy_from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self::Buddy<Verify>> {
+    fn buddy_from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self::Buddy<Verify>> {
         let proof = proof.into_node()?;
 
         let (proof, free_info) = proof.next_branch()?;

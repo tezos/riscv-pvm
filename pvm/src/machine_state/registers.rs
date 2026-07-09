@@ -301,7 +301,9 @@ impl Unfoldable for XRegisters<Normal> {
 }
 
 impl FromProof for XRegisters<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let result = Atom::from_proof(proof)?;
         let result = result.map(|registers| XRegisters { registers });
         Ok(result)
@@ -706,7 +708,9 @@ impl Unfoldable for FRegisters<Normal> {
 }
 
 impl FromProof for FRegisters<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let result = Atom::from_proof(proof)?;
         let result = result.map(|registers| Self { registers });
         Ok(result)

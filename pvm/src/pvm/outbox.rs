@@ -136,6 +136,7 @@ impl OutboxProof {
     pub fn deserialise(mut bytes: &[u8]) -> Result<Self, ProofError> {
         let info: OutputInfo = deserialise_from(&mut bytes)?;
         let (_pvm, proof_tree) = proof_binary::deserialise::<
+            octez_riscv_data::codec::Bincode,
             Pvm<NodePvmMemConfig, EmptyPageCache, DurableStorageDummy, Verify>,
         >(bytes)?;
 
@@ -250,7 +251,9 @@ impl Unfoldable for Outbox<Normal> {
 }
 
 impl FromProof for Outbox<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
         let (proof, levels) = proof.next_branch()?;
         proof.done(Outbox { levels })
@@ -452,7 +455,9 @@ impl Unfoldable for OutboxLevel<Normal> {
 }
 
 impl FromProof for OutboxLevel<Verify> {
-    fn from_proof<D: Deserialiser>(proof: D) -> SuspendedResult<D, Self> {
+    fn from_proof<D: Deserialiser<Codec = octez_riscv_data::codec::Bincode>>(
+        proof: D,
+    ) -> SuspendedResult<D, Self> {
         let proof = proof.into_node()?;
         let (proof, messages) = proof.next_branch()?;
         let (proof, level) = proof.next_branch()?;
