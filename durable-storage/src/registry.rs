@@ -12,8 +12,6 @@ use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use bincode::Decode;
-use bincode::Encode;
 use octez_riscv_data::components::vector::Vector;
 use octez_riscv_data::components::vector::VectorMode;
 use octez_riscv_data::foldable::Fold;
@@ -31,8 +29,6 @@ use octez_riscv_data::mode::Normal;
 use octez_riscv_data::mode::ProvableExt;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
 use tokio::runtime::Runtime;
 
 use crate::avl::tree::Tree;
@@ -44,9 +40,11 @@ use crate::errors::OperationalError;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::repo::RegistryRepo;
+use crate::rkyv_codec::rkyv_deserialise;
+use crate::rkyv_codec::rkyv_serialise;
 use crate::storage::KeyValueStore;
 
-#[derive(Debug, Encode, Decode)]
+#[derive(Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 /// Structure to store the result of serialising a registry.
 struct RegistryManifest {
     database_hashes: Vec<CommitId>,
@@ -157,7 +155,7 @@ where
         commit_id: &CommitId,
     ) -> Result<RegistryManifest, OperationalError> {
         let commit_bytes = repo.read_registry_commit(commit_id)?;
-        deserialise(&commit_bytes).map_err(OperationalError::from)
+        rkyv_deserialise(&commit_bytes).map_err(OperationalError::from)
     }
 
     fn checkout_databases(
@@ -189,7 +187,7 @@ where
 
         let manifest = RegistryManifest { database_hashes };
         let encoded =
-            serialise(&manifest).expect("Serialising the registry manifest should not fail");
+            rkyv_serialise(&manifest).expect("Serialising the registry manifest should not fail");
 
         self.inner
             .repo
@@ -617,7 +615,8 @@ pub(super) mod tests {
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::catch_not_found;
-    use octez_riscv_data::serialisation::deserialise;
+    // `serialise` is still used to snapshot bincode-encoded Merkle *proofs* (the
+    // proof envelope stays on bincode); the registry manifest itself is rkyv.
     use octez_riscv_data::serialisation::serialise;
 
     use super::ProveImpl;
@@ -632,6 +631,8 @@ pub(super) mod tests {
     use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::repo::RegistryRepo;
+    use crate::rkyv_codec::rkyv_deserialise;
+    use crate::rkyv_codec::rkyv_serialise;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
@@ -944,7 +945,7 @@ pub(super) mod tests {
                 .repo
                 .read_registry_commit(commit_id)
                 .expect("Manifest should be readable");
-            deserialise(&bytes).expect("Manifest should be deserialisable")
+            rkyv_deserialise(&bytes).expect("Manifest should be deserialisable")
         }
 
         /// Assert that the manifest written for `commit_id` contains the expected database commit IDs.
@@ -1104,7 +1105,7 @@ pub(super) mod tests {
 
         let fake_commit = CommitId::from(Hash::hash_bytes(b"fake-registry-commit"));
         let fake_manifest_bytes =
-            serialise(&manifest).expect("Manifest should be serialisable");
+            rkyv_serialise(&manifest).expect("Manifest should be serialisable");
         repo.write_registry_commit(&fake_commit, &fake_manifest_bytes)
             .expect("Writing the fake manifest should succeed");
 
@@ -2259,7 +2260,6 @@ pub(super) mod tests {
 #[cfg(test)]
 mod rocksdb_tests {
     use octez_riscv_data::mode::Normal;
-    use octez_riscv_data::serialisation::deserialise;
 
     use super::Registry;
     use super::RegistryManifest;
@@ -2267,6 +2267,7 @@ mod rocksdb_tests {
     use super::tests::setup_registry;
     use crate::errors::Error;
     use crate::errors::OperationalError;
+    use crate::rkyv_codec::rkyv_deserialise;
     use crate::storage::TestKeyValueStore;
     use crate::storage::setup_repo;
 
@@ -2284,7 +2285,7 @@ mod rocksdb_tests {
         let manifest_path = repo.registry_commit_file(&root_commit);
         let manifest_bytes = std::fs::read(&manifest_path).expect("Manifest should be readable");
         let manifest: RegistryManifest =
-            deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
+            rkyv_deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
         std::fs::remove_dir_all(repo.database_commit_dir(&manifest.database_hashes[0]))
             .expect("Database commit should be removable");
 

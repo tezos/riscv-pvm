@@ -21,6 +21,7 @@ memmap2.workspace = true
 range-collections.workspace = true
 bytes.workspace = true
 unty.workspace = true
+rkyv.workspace = true
 
 [dependencies.serde]
 workspace = true

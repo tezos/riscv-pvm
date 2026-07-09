@@ -5,13 +5,13 @@
 //! Implementation of commit identifiers for the durable storage.
 //! A [`CommitId`] uniquely identifies a prior, immutable state.
 
-use bincode::Decode;
-use bincode::Encode;
 use octez_riscv_data::hash::Hash;
 
 /// [`CommitId`]'s are used to generate commits & to checkout specific commits
 /// from a `DirectoryManager`.
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Encode, Decode, Hash)]
+#[derive(
+    Debug, PartialEq, Eq, Clone, Copy, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 #[cfg_attr(
     test_utils,
     derive(serde::Serialize, serde::Deserialize),

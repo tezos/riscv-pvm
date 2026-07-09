@@ -25,8 +25,6 @@ use octez_riscv_data::merkle_proof::DeserialiserNode;
 use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::resolver::LazyDataId;
@@ -39,13 +37,21 @@ use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
+use crate::rkyv_codec::rkyv_deserialise;
+use crate::rkyv_codec::rkyv_serialise;
 use crate::storage::KeyValueStore;
 use crate::storage::Loadable;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
 
 /// Metadata of a [`Node`] needed for accesses.
-#[derive(Clone, Default, Debug, Encode, Decode)]
+///
+/// `Meta` is serialised through two codecs: bincode (as a Merkle leaf, via the
+/// shared `data` crate's fold machinery, which keeps the Merkle hashes and
+/// proofs byte-identical) and rkyv (as part of the on-disk [`StoredNode`] blob).
+#[derive(
+    Clone, Default, Debug, Encode, Decode, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
+)]
 pub(crate) struct Meta {
     key: Key,
 
@@ -54,7 +60,7 @@ pub(crate) struct Meta {
 }
 
 /// This type is a compact serialised form of a [`Node`] with metadata and child subtree hashes.
-#[derive(Encode, Decode)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct StoredNode {
     meta: Meta,
     data: Hash,
@@ -869,7 +875,7 @@ where
         };
 
         let &id = self.hash();
-        let bytes = serialise(repr)?;
+        let bytes = rkyv_serialise(&repr)?;
         store.blob_set(id, bytes)?;
 
         // Are we in charge of writing the value data to the KV store?
@@ -903,7 +909,7 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
                         root: id,
                         source: Box::new(error),
                     })?;
-            deserialise(bytes.as_ref())?
+            rkyv_deserialise(bytes.as_ref())?
         };
 
         let meta = Atom::new(meta);
