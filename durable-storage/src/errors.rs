@@ -116,11 +116,8 @@ pub enum OperationalError {
     #[error("Encountered a poisoned lock")]
     LockPoisoned,
 
-    #[error("Error during decoding.")]
-    Decoding(#[from] bincode::error::DecodeError),
-
-    #[error("Error during encoding.")]
-    Encoding(#[from] bincode::error::EncodeError),
+    #[error("Error during rkyv (de)serialisation: {0}")]
+    Serialisation(#[from] rkyv::rancor::Error),
 }
 
 /// Errors that occur because of incorrect usage

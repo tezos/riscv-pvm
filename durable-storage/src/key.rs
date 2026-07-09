@@ -15,7 +15,23 @@ use crate::errors::InvalidArgumentError;
 pub const KEY_MAX_SIZE: usize = 256;
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
-#[derive(Clone, Debug, Default, Encode, Eq, Hash, Ord, PartialEq, PartialOrd)]
+///
+/// `Key` is serialised through two codecs: bincode (as a Merkle leaf, via the
+/// shared `data` crate's fold machinery) and rkyv (as part of the on-disk
+/// `StoredNode` blob). Both decode paths preserve the [`KEY_MAX_SIZE`] check.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Encode,
+    Eq,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    rkyv::Archive,
+    rkyv::Serialize,
+)]
 pub struct Key(Vec<u8>);
 
 impl Key {
@@ -64,6 +80,22 @@ impl<'de, Context> BorrowDecode<'de, Context> for Key {
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         Key::decode(decoder)
+    }
+}
+
+// Manual implementation of rkyv's `Deserialize` to ensure that, as with bincode,
+// we never reconstruct a key that is formed of invalid bytes.
+impl<D> rkyv::Deserialize<Key, D> for ArchivedKey
+where
+    D: rkyv::rancor::Fallible + ?Sized,
+    D::Error: rkyv::rancor::Source,
+{
+    fn deserialize(&self, _deserializer: &mut D) -> Result<Key, D::Error> {
+        let bytes = self.0.as_slice().to_vec();
+
+        Key::check_bytes_validity(&bytes).map_err(rkyv::rancor::Source::new)?;
+
+        Ok(Key(bytes))
     }
 }
 
@@ -117,6 +149,42 @@ mod tests {
 
             assert_eq!(key, key_decoded_slice, "encode then borrow decode must produce the same key");
         }
+    }
+
+    proptest! {
+        #[test]
+        fn key_rkyv_encode_decode_ok(key_len in 0..=KEY_MAX_SIZE) {
+            use crate::rkyv_codec::rkyv_deserialise;
+            use crate::rkyv_codec::rkyv_serialise;
+
+            let bytes = vec![0; key_len];
+            let key = Key::new(&bytes).expect("Key is valid");
+
+            let serialised = rkyv_serialise(&key)
+                .expect("rkyv serialisation of a key should succeed");
+
+            let key_decoded: Key = rkyv_deserialise(&serialised)
+                .expect("rkyv decoding of a valid encoded key should succeed");
+
+            assert_eq!(key, key_decoded, "rkyv encode then decode must produce the same key");
+        }
+    }
+
+    #[test]
+    fn key_rkyv_decode_protects_key_too_large() {
+        use crate::rkyv_codec::rkyv_deserialise;
+        use crate::rkyv_codec::rkyv_serialise;
+
+        // NB the public api does not allow for such an invalid key.
+        let key = Key(vec![0; KEY_MAX_SIZE + 1]);
+
+        let bytes = rkyv_serialise(&key).expect("rkyv serialisation of a key should succeed");
+
+        let res: Result<Key, _> = rkyv_deserialise(&bytes);
+        assert!(
+            res.is_err(),
+            "rkyv decoding of a key that's too large should fail"
+        );
     }
 
     #[test]

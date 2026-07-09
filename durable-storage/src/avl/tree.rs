@@ -7,9 +7,6 @@
 use std::cmp::Ordering;
 use std::sync::LazyLock;
 
-use bincode::Decode;
-use bincode::de::Decoder;
-use bincode::error::DecodeError;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
@@ -28,8 +25,6 @@ use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::ProofError;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::utils::not_found;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
@@ -42,6 +37,8 @@ use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
+use crate::rkyv_codec::rkyv_deserialise;
+use crate::rkyv_codec::rkyv_serialise;
 use crate::storage::KeyValueStore;
 use crate::storage::Loadable;
 use crate::storage::Storable;
@@ -373,13 +370,6 @@ impl<NodeId> Tree<NodeId> {
     }
 }
 
-impl<C> Decode<C> for Tree<LazyNodeId> {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let root_hash: Option<Hash> = Decode::decode(decoder)?;
-        Ok(Tree::from(root_hash.map(LazyNodeId::from)))
-    }
-}
-
 impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
     fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
         let mut node = builder.into_node_fold();
@@ -452,7 +442,7 @@ impl<NodeId: Storable> Storable for Tree<NodeId> {
         }
 
         let id = self.hash();
-        let bytes = serialise(repr)?;
+        let bytes = rkyv_serialise(&repr)?;
         store.blob_set(id, bytes)?;
 
         if let Some(node) = &self.0
@@ -481,7 +471,7 @@ impl<NodeId: Loadable> Loadable for Tree<NodeId> {
                         root: id,
                         source: Box::new(error),
                     })?;
-            deserialise(bytes.as_ref())?
+            rkyv_deserialise(bytes.as_ref())?
         };
 
         repr.map(|node_id| NodeId::load(node_id, store))

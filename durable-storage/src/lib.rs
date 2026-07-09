@@ -42,5 +42,6 @@ mod merkle_worker;
 pub mod persistence_layer;
 pub mod registry;
 pub mod repo;
+mod rkyv_codec;
 pub mod storage;
 pub mod test_helpers;
