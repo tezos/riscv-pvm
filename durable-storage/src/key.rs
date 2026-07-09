@@ -8,14 +8,17 @@ use bincode::BorrowDecode;
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::BorrowDecoder;
+use bincode::de::read::Reader;
+use bincode::enc::Encoder;
+use bincode::enc::write::Writer;
 
 use crate::errors::InvalidArgumentError;
 
 /// Maximum size of a key in bytes
-pub const KEY_MAX_SIZE: usize = 256;
+pub const KEY_MAX_SIZE: usize = u8::MAX as usize;
 
 /// A unique key used to store, retrieve and mutate data in durable storage.
-#[derive(Clone, Debug, Default, Encode, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Key(Vec<u8>);
 
 impl Key {
@@ -42,18 +45,30 @@ impl AsRef<[u8]> for Key {
     }
 }
 
-// Manual implementation of Decode to ensure that we do not decode a key that is formed of
-// invalid bytes.
+// Manual implementation of Encode to allow the smaller prefix size to be used.
+impl Encode for Key {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
+        let bytes = self.0.as_slice();
+        let len = u8::try_from(bytes.len()).expect("KEY_MAX_SIZE is precisely u8::MAX");
+
+        Encode::encode(&len, encoder)?;
+        encoder.writer().write(bytes)?;
+
+        Ok(())
+    }
+}
+
+// Manual implementation of Decode to allow the smaller prefix size to be used.
 impl<Context> Decode<Context> for Key {
     fn decode<D: bincode::de::Decoder<Context = Context>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
-        let bytes = Vec::decode(decoder)?;
+        let len = u8::decode(decoder)? as usize;
+        let mut key = vec![0; len];
 
-        Self::check_bytes_validity(&bytes)
-            .map_err(|err| bincode::error::DecodeError::OtherString(err.to_string()))?;
+        decoder.reader().read(key.as_mut_slice())?;
 
-        Ok(Key(bytes))
+        Ok(Key(key))
     }
 }
 
@@ -117,31 +132,5 @@ mod tests {
 
             assert_eq!(key, key_decoded_slice, "encode then borrow decode must produce the same key");
         }
-    }
-
-    #[test]
-    fn key_decode_protects_key_too_large() {
-        // NB the public api does not allow for such an invalid key.
-        let key = Key(vec![0; KEY_MAX_SIZE + 1]);
-
-        let bytes = octez_riscv_data::serialisation::serialise(&key)
-            .expect("serialisation of a key should succeed");
-
-        let res: Result<Key, _> = octez_riscv_data::serialisation::deserialise(&bytes);
-        assert!(
-            res.is_err(),
-            "Decoding of a key that's too large should fail"
-        );
-
-        // TODO: RV-838: introduce and use a direct helper from `octez_riscv_data::deserialisation`
-        //               for borrow-decode
-        let res: Result<(Key, usize), _> = bincode::borrow_decode_from_slice(
-            &bytes,
-            octez_riscv_data::serialisation::bincode_default_config(),
-        );
-        assert!(
-            res.is_err(),
-            "Decoding of a key that's too large should fail"
-        );
     }
 }
