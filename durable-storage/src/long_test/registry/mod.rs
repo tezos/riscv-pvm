@@ -26,7 +26,6 @@ mod strategy;
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
-use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -83,7 +82,7 @@ pub fn run_long_test(
     let ops_per_epoch = config.ops_per_epoch;
     let cases_per_epoch = config.cases_per_epoch;
     let keep_epochs = config.keep_epochs;
-    let out_dir = match config.out_dir {
+    let out_dir = match config.out_dir.clone() {
         Some(dir) => {
             fs::create_dir_all(&dir)
                 .with_context(|| format!("creating directory {}", dir.display()))?;
@@ -126,23 +125,9 @@ pub fn run_long_test(
     let in_memory_repo = InMemoryRepo::default();
 
     let mut base = initial_base(&in_memory_repo, &persistent_repo, permanent);
-    let mut epoch = 0u64;
     let mut recent_commits = VecDeque::from([base.commit]);
 
-    let start = Instant::now();
-    loop {
-        if let Some(max) = max_epochs {
-            if epoch >= max {
-                break;
-            }
-        }
-        if let Some(budget) = config.time_budget {
-            if start.elapsed() >= budget {
-                eprintln!("time budget reached after {epoch} epochs");
-                break;
-            }
-        }
-
+    config.timed_epoch_loop(|epoch| {
         let mut runner = epoch_runner(seed, epoch, cases_per_epoch);
 
         // Advance and commit the base by a generated sequence (no proofs).
@@ -201,6 +186,8 @@ pub fn run_long_test(
                         keep_epochs,
                     )?;
                 }
+
+                Ok(())
             }
             Err(TestError::Fail(reason, ops)) => {
                 let meta = FailureMeta {
@@ -229,12 +216,7 @@ pub fn run_long_test(
                 bail!("epoch {epoch} aborted: {reason}");
             }
         }
-
-        epoch += 1;
-    }
-
-    eprintln!("completed {epoch} epochs");
-    Ok(())
+    })
 }
 
 /// Write the failure artifacts: metadata, the shrunk operation sequence, the
