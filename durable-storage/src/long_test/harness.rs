@@ -11,6 +11,7 @@ use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -42,6 +43,34 @@ pub struct LongTestConfig {
     pub keep_epochs: Option<NonZeroUsize>,
     /// Directory for run state and failure artifacts. `None` uses a tempdir.
     pub out_dir: Option<PathBuf>,
+}
+
+impl LongTestConfig {
+    pub fn timed_epoch_loop(&self, mut do_epoch: impl FnMut(u64) -> Result<()>) -> Result<()> {
+        let mut epoch = 0u64;
+        let start = Instant::now();
+
+        loop {
+            if let Some(max) = self.epochs {
+                if epoch >= max {
+                    break;
+                }
+            }
+            if let Some(budget) = self.time_budget {
+                if start.elapsed() >= budget {
+                    eprintln!("time budget reached after {epoch} epochs")
+                }
+            }
+
+            do_epoch(epoch)?;
+
+            epoch += 1;
+        }
+
+        eprintln!("complete {epoch} epochs");
+
+        Ok(())
+    }
 }
 
 /// The committed starting state shared by every case in a test epoch.
