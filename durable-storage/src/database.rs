@@ -8,6 +8,7 @@
 //! This module provides a database type to unify operations between the Merkle layer and the
 //! key-value store.
 
+mod traced_database;
 pub(crate) mod value_ref;
 
 use std::convert::Infallible;
@@ -37,6 +38,10 @@ use perfect_derive::perfect_derive;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
+#[cfg(test)]
+pub(crate) use self::traced_database::Trace;
+#[cfg(any(test, rocksdb_test_utils))]
+pub(crate) use self::traced_database::TracedDatabase;
 use crate::avl::resolver::ProveNodeId;
 use crate::avl::tree::Tree;
 use crate::commit::CommitId;
@@ -620,13 +625,6 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         assert_eq!(stored.as_slice(), expected);
     }
 }
-
-mod traced_database;
-
-#[cfg(test)]
-pub(crate) use self::traced_database::Trace;
-#[cfg(any(test, rocksdb_test_utils))]
-pub(crate) use self::traced_database::TracedDatabase;
 
 #[cfg(test)]
 pub(crate) mod tests {
