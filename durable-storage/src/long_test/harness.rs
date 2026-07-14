@@ -58,7 +58,8 @@ impl LongTestConfig {
             }
             if let Some(budget) = self.time_budget {
                 if start.elapsed() >= budget {
-                    eprintln!("time budget reached after {epoch} epochs")
+                    eprintln!("time budget reached after {epoch} epochs");
+                    break;
                 }
             }
 
