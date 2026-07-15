@@ -68,15 +68,20 @@ jobs:
           - { ops: 8000,  cases: 64 }
           - { ops: 16000, cases: 32 }
         test: [database, registry-stable]
-        replica: [1, 2]
+        replica: [1, 2, 3, 4]
         include:
           - test: database
             args: database test
           - test: registry-stable
             args: registry test --keep-stable-size
+        # Only run database tests on the first replica
         exclude:
           - test: database
             replica: 2
+          - test: database
+            replica: 3
+          - test: database
+            replica: 4
 
     steps:
       - name: Checkout
