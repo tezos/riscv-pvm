@@ -80,6 +80,8 @@ impl<NodeId: FromProof> Tree<NodeId> {
             }
             Partial::Blinded(hash) => Ok((ctx, Partial::Blinded(hash))),
             Partial::Present(()) => {
+                // TODO (RV-996): leverage <bool> as a union tag to allow future versioning
+                //                of the database/merkle layer in a backwards-compatible way
                 let (ctx, present) = ctx.next_branch_with(|proof| proof.into_leaf::<bool>())?;
                 match present {
                     Partial::Present(true) => {
