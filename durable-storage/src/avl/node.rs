@@ -44,19 +44,15 @@ use crate::storage::Loadable;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
 
-/// Metadata of a [`Node`] needed for accesses.
-#[derive(Clone, Default, Debug, Encode, Decode)]
-pub(crate) struct Meta {
-    key: Key,
-
-    /// The difference in heights between child branches (right - left).
-    balance_factor: i64,
-}
-
 /// This type is a compact serialised form of a [`Node`] with metadata and child subtree hashes.
 #[derive(Encode, Decode)]
 struct StoredNode {
-    meta: Meta,
+    /// The difference in heights between child branches (right - left).
+    balance_factor: i64,
+
+    /// The [`Key`] used to locate this [`Node`] within the AVL tree.
+    key: Key,
+
     data: Hash,
     left: Hash,
     right: Hash,
@@ -65,7 +61,12 @@ struct StoredNode {
 /// A node that supports rebalancing and Merklisation.
 #[perfect_derive(Clone, Default, Debug)]
 pub struct Node<TreeId, DataId, M: Mode> {
-    meta: Atom<Meta, M>,
+    /// The difference in heights between child branches (right - left).
+    balance_factor: Atom<i64, M>,
+
+    /// The [`Key`] used to locate this [`Node`] within the AVL tree.
+    key: Atom<Key, M>,
+
     data: DataId,
     left: TreeId,
     right: TreeId,
@@ -81,7 +82,8 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
     /// Converts the [`Node`] to prove mode.
     pub fn into_proof(self) -> ProveNode {
         Node {
-            meta: self.meta.into_proof(),
+            balance_factor: self.balance_factor.into_proof(),
+            key: self.key.into_proof(),
             data: self.data.into_proof(),
             left: self.left.into_proof(),
             right: self.right.into_proof(),
@@ -94,7 +96,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
         &self,
         resolver: &impl AvlResolver<super::resolver::LazyNodeId, LazyDataId, LazyTreeId, Normal>,
     ) -> Result<&Bytes<Normal>, OperationalError> {
-        resolver.resolve_bytes(&self.data, &self.meta.key)
+        resolver.resolve_bytes(&self.data, &self.key)
     }
 }
 
@@ -192,10 +194,8 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         TreeId: Default,
     {
         Node {
-            meta: Atom::new(Meta {
-                key,
-                balance_factor: 0,
-            }),
+            balance_factor: Atom::new(0),
+            key: Atom::new(key),
             data: data.into(),
             left: TreeId::default(),
             right: TreeId::default(),
@@ -208,17 +208,20 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         ctx: D,
     ) -> Result<(D, Self), <D::Parent as Deserialiser>::Error>
     where
-        Atom<Meta, M>: FromProof,
+        Atom<i64, M>: FromProof,
+        Atom<Key, M>: FromProof,
         DataId: FromProof,
         TreeId: FromProof,
     {
-        let (ctx, meta) = ctx.next_branch::<Atom<Meta, M>>()?;
+        let (ctx, balance_factor) = ctx.next_branch::<Atom<i64, M>>()?;
+        let (ctx, key) = ctx.next_branch::<Atom<Key, M>>()?;
         let (ctx, data) = ctx.next_branch::<DataId>()?;
         let (ctx, left) = ctx.next_branch::<TreeId>()?;
         let (ctx, right) = ctx.next_branch::<TreeId>()?;
 
         let node = Node {
-            meta,
+            balance_factor,
+            key,
             data,
             left,
             right,
@@ -234,35 +237,42 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     /// cached.
     pub(crate) fn hash(&self) -> &Hash
     where
-        Atom<Meta, M>: Foldable<HashFold>,
+        Atom<i64, M>: Foldable<HashFold>,
+        Atom<Key, M>: Foldable<HashFold>,
         DataId: Foldable<HashFold>,
         TreeId: Foldable<HashFold>,
     {
         self.hash.get_or_init(|| Hash::from_foldable(self))
     }
 
-    /// The metadata of this [`Node`].
+    /// The [`Atom`] holding the balance factor of this [`Node`].
     #[inline]
-    pub(crate) fn meta(&self) -> &Atom<Meta, M> {
-        &self.meta
+    pub(crate) fn balance_factor_atom(&self) -> &Atom<i64, M> {
+        &self.balance_factor
+    }
+
+    /// The [`Atom`] holding the [`Key`] of this [`Node`].
+    #[inline]
+    pub(crate) fn key_atom(&self) -> &Atom<Key, M> {
+        &self.key
     }
 
     /// The difference in heights between child branches.
     #[inline]
     pub(crate) fn balance_factor(&self) -> i64 {
-        self.meta.balance_factor
+        self.balance_factor.read()
     }
 
     /// A mutable reference to the difference in heights between child branches.
     #[inline]
     pub(super) fn balance_factor_mut(&mut self) -> &mut i64 {
-        &mut self.meta.balance_factor
+        &mut self.balance_factor
     }
 
     /// The [`Key`] used for determining the [`Node`].
     #[inline]
     pub(crate) fn key(&self) -> &Key {
-        &self.meta.key
+        &self.key
     }
 
     /// Retrieve the value associated with this node.
@@ -368,7 +378,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
 
         let successor_mut = resolver.resolve_mut(&mut successor)?;
 
-        successor_mut.meta.balance_factor = node_mut.balance_factor() - if shrank { 1 } else { 0 };
+        *successor_mut.balance_factor = node_mut.balance_factor() - if shrank { 1 } else { 0 };
         successor_mut.left = std::mem::take(&mut node_mut.left);
         successor_mut.right = std::mem::take(&mut node_mut.right);
 
@@ -403,9 +413,9 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         if right.root().is_some() {
             let target_node_left = node_mut.left_mut(resolver)?;
             *target_node_left = right;
-            node_mut.meta.balance_factor += 1;
+            *node_mut.balance_factor += 1;
         } else if left_shrank {
-            node_mut.meta.balance_factor += 1;
+            *node_mut.balance_factor += 1;
         };
 
         Node::rebalance(node, resolver)?;
@@ -452,10 +462,10 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         //  - more nodes than 64-bit systems can address.
         //  - more disk space than has ever been produced.
         //  - inserting 2 billion nodes every second since the dawn of the universe.
-        match self.meta.key.cmp(key) {
+        match self.key.cmp(key) {
             // The key already exists and should be updated.
             Ordering::Equal => {
-                let bytes = resolver.resolve_mut_bytes(&mut self.data, &self.meta.key)?;
+                let bytes = resolver.resolve_mut_bytes(&mut self.data, &self.key)?;
                 data(bytes)?;
                 self.invalidate_hash();
                 Ok(false)
@@ -465,7 +475,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
                     .left_mut(resolver)?
                     .upsert(key, offset, data, resolver)?;
                 if grew {
-                    self.meta.balance_factor -= 1;
+                    *self.balance_factor -= 1;
                 }
                 Ok(grew)
             }
@@ -474,7 +484,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
                     .right_mut(resolver)?
                     .upsert(key, offset, data, resolver)?;
                 if grew {
-                    self.meta.balance_factor += 1;
+                    *self.balance_factor += 1;
                 }
                 Ok(grew)
             }
@@ -528,8 +538,8 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         // For inserting a node, this will always be zero, however deletion allows for rotation cases
         // where the balance factor of A is -1
         let new_node_bf =
-            node_mut.meta.balance_factor - 1 + std::cmp::min(-right_mut.meta.balance_factor, 0);
-        node_mut.meta.balance_factor = new_node_bf;
+            *node_mut.balance_factor - 1 + std::cmp::min(-*right_mut.balance_factor, 0);
+        *node_mut.balance_factor = new_node_bf;
 
         // new_A_bf = C.height() - node.height()
         //          = C.height - (1 + std::cmp::max(node.left.height(), A.height()))
@@ -542,8 +552,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         //                                            B.height() - B.height())
         //
         //          = old_node_bf - 1 + std::cmp::min(new_node_bf, 0)
-        right_mut.meta.balance_factor =
-            right_mut.meta.balance_factor - 1 + std::cmp::min(new_node_bf, 0);
+        *right_mut.balance_factor = *right_mut.balance_factor - 1 + std::cmp::min(new_node_bf, 0);
 
         let target_right_left = right_mut.left_mut(resolver)?;
         *target_right_left = Tree::from(Some(node.clone()));
@@ -595,7 +604,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         // As this function assumes old_A_bf is +1:
         //   new_A_bf_1 = std::cmp::min(-A.right.balance_factor, 0)
         // The second rotation doesn't mutate A's subtree, so the final balance factor is:
-        left_mut.meta.balance_factor = std::cmp::min(-left_right_mut.meta.balance_factor, 0);
+        *left_mut.balance_factor = std::cmp::min(-*left_right_mut.balance_factor, 0);
 
         // B's right child is between B and B, it's moved to node's left
         let target_node_left = node_mut.left_mut(resolver)?;
@@ -611,14 +620,14 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
 
         // If B is 0 or 1, the new node balance factor will be 0
         // If B is -1, the new node balance factor will be 1
-        node_mut.meta.balance_factor = std::cmp::max(0, -left_right_mut.meta.balance_factor);
+        *node_mut.balance_factor = std::cmp::max(0, -*left_right_mut.balance_factor);
 
         // Set node
         let target_left_right_right = left_right_mut.right_mut(resolver)?;
         *target_left_right_right = Tree::from(Some(node.clone()));
 
         // The new root will always be balanced
-        left_right_mut.meta.balance_factor = 0;
+        *left_right_mut.balance_factor = 0;
         *node = left_right;
         Ok(())
     }
@@ -667,8 +676,8 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         //
         //             = old_node_bf + 1 + std::cmp::max(0, -A.balance_factor)
         let new_node_bf =
-            node_mut.meta.balance_factor + 1 + std::cmp::max(0, -left_mut.meta.balance_factor);
-        node_mut.meta.balance_factor = new_node_bf;
+            *node_mut.balance_factor + 1 + std::cmp::max(0, -*left_mut.balance_factor);
+        *node_mut.balance_factor = new_node_bf;
 
         // new_A_bf = node.height() - B.height()
         //          = (1 + std::cmp::max(node.right.height(), C.height())) - B.height()
@@ -684,8 +693,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         //
         // For inserting a node, this will always be zero, however deletion allows for rotation cases
         // where the balance factor of A is 1
-        left_mut.meta.balance_factor =
-            left_mut.meta.balance_factor + 1 + std::cmp::max(new_node_bf, 0);
+        *left_mut.balance_factor = *left_mut.balance_factor + 1 + std::cmp::max(new_node_bf, 0);
 
         let target_left_right = left_mut.right_mut(resolver)?;
         *target_left_right = Tree::from(Some(node.clone()));
@@ -736,7 +744,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         // As this function assumes old_A_bf is -1:
         //   new_A_bf_1 = std::cmp::max(0, -A.left.balance_factor)
         // The second rotation doesn't mutate A's subtree, so the final balance factor is:
-        right_mut.meta.balance_factor = std::cmp::max(0, -right_left_mut.meta.balance_factor);
+        *right_mut.balance_factor = std::cmp::max(0, -*right_left_mut.balance_factor);
 
         // B's left child is between node and B, it's moved to node's right
         let target_node_right = node_mut.right_mut(resolver)?;
@@ -752,14 +760,14 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
 
         // If B is 0 or -1, the new node balance factor will be 0
         // If B is 1, the new node balance factor will be -1
-        node_mut.meta.balance_factor = -std::cmp::max(0, right_left_mut.meta.balance_factor);
+        *node_mut.balance_factor = -std::cmp::max(0, *right_left_mut.balance_factor);
 
         // Set node
         let target_right_left_left = right_left_mut.left_mut(resolver)?;
         *target_right_left_left = Tree::from(Some(node.clone()));
 
         // The new root will always be balanced
-        right_left_mut.meta.balance_factor = 0;
+        *right_left_mut.balance_factor = 0;
         *node = right_left;
         Ok(())
     }
@@ -776,7 +784,8 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         NodeId: std::fmt::Debug,
         TreeId: std::fmt::Debug,
         DataId: std::fmt::Debug,
-        Atom<Meta, M>: std::fmt::Debug,
+        Atom<i64, M>: std::fmt::Debug,
+        Atom<Key, M>: std::fmt::Debug,
     {
         let left_height = self.left_ref(resolver)?.height(resolver)?;
         let right_height = self.right_ref(resolver)?.height(resolver)?;
@@ -862,7 +871,8 @@ where
         // The stored representation is more compact. We don't include the `data` field, as that
         // should be written to the KV store separately.
         let repr = StoredNode {
-            meta: self.meta.deref().clone(),
+            balance_factor: self.balance_factor.read(),
+            key: self.key.deref().clone(),
             data: Hash::from_foldable(&self.data),
             left: Hash::from_foldable(&self.left),
             right: Hash::from_foldable(&self.right),
@@ -874,7 +884,7 @@ where
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {
-            let key: &[u8] = self.meta.key.as_ref();
+            let key: &[u8] = self.key.as_ref();
             let value: &[u8] = self.data.borrow();
             store.set(key, value)?;
         }
@@ -891,7 +901,8 @@ where
 impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, Normal> {
     fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
         let StoredNode {
-            meta,
+            balance_factor,
+            key,
             left,
             right,
             data,
@@ -906,17 +917,18 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
             deserialise(bytes.as_ref())?
         };
 
-        let meta = Atom::new(meta);
+        let key = Atom::new(key);
 
         // The stored representation does not include the `data` field, so we need to load it
         // separately from the KV store.
-        let data = DataId::load(data, &meta.key, store)?;
+        let data = DataId::load(data, &key, store)?;
 
         let left = TreeId::load(left, store)?;
         let right = TreeId::load(right, store)?;
 
         Ok(Self {
-            meta,
+            balance_factor: Atom::new(balance_factor),
+            key,
             data,
             left,
             right,
@@ -929,13 +941,15 @@ impl<F, TreeId, DataId, M> Foldable<F> for Node<TreeId, DataId, M>
 where
     F: Fold,
     M: Mode,
-    Atom<Meta, M>: Foldable<F>,
+    Atom<i64, M>: Foldable<F>,
+    Atom<Key, M>: Foldable<F>,
     DataId: Foldable<F>,
     TreeId: Foldable<F>,
 {
     fn fold(&self, builder: F) -> <F as Fold>::Folded {
         let mut node = builder.into_node_fold();
-        node.add(&self.meta);
+        node.add(&self.balance_factor);
+        node.add(&self.key);
         node.add(&self.data);
         node.add(&self.left);
         node.add(&self.right);

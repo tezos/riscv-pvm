@@ -693,8 +693,12 @@ impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
         //    is a different node in the working tree and is irrelevant to the initial fold.
         // 2. Otherwise search the working tree by key.
         let deleted_map = self.prove_impl.resolver.deleted_nodes();
-        let (meta, data) = if let Some(deleted_node) = deleted_map.get(&hash) {
-            (&deleted_node.meta, &deleted_node.data)
+        let (balance_factor, key, data) = if let Some(deleted_node) = deleted_map.get(&hash) {
+            (
+                &deleted_node.balance_factor,
+                &deleted_node.key,
+                &deleted_node.data,
+            )
         } else {
             let key = initial_node.key();
             let cached_only_resolver = CachedOnlyResolver;
@@ -707,12 +711,18 @@ impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
             let cached = cached_only_resolver
                 .resolve(cached_id)
                 .expect("Working-tree lookup should not fail for an accessed node.");
-            (cached.meta(), cached.data())
+            (
+                cached.balance_factor_atom(),
+                cached.key_atom(),
+                cached.data(),
+            )
         };
 
-        // Fold meta + data from the prove-mode node (they carry per-field read flags).
+        // Fold balance_factor + key + data from the prove-mode node (they carry per-field read
+        // flags).
         let mut node_fold = builder.into_node_fold();
-        node_fold.add(meta);
+        node_fold.add(balance_factor);
+        node_fold.add(key);
         node_fold.add(data);
 
         // Fold left + right from the initial tree's children.
