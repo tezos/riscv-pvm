@@ -457,9 +457,7 @@ impl<NodeId: Storable> Storable for Tree<NodeId> {
         let bytes = serialise(repr)?;
         store.blob_set(id, bytes)?;
 
-        if let Some(node) = &self.0
-            && options.deep()
-        {
+        if let Some(node) = &self.0 {
             node.store(store, options)?;
         }
 

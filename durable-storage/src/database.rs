@@ -140,7 +140,7 @@ impl<KV> Database<KV, Normal> {
     where
         KV: PersistentKeyValueStore,
     {
-        let commit_options = StoreOptions::default().with_deep().without_node_data();
+        let commit_options = StoreOptions::default().without_node_data();
         let commit_id = self.inner.merkle.commit(commit_options)?;
         self.inner.persistent.commit(repo, &commit_id)?;
 

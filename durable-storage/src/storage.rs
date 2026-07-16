@@ -351,42 +351,20 @@ cfg_if::cfg_if! {
 }
 
 /// Options for storing MAVL values in a [`KeyValueStore`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StoreOptions {
     /// Persist the key-value pairs from MAVL nodes
     node_data: bool,
-
-    /// Persist nested items
-    deep: bool,
 }
 
 impl StoreOptions {
-    /// When this is set, recursive child values will not be persisted.
-    pub fn with_shallow(self) -> Self {
-        Self {
-            node_data: self.node_data,
-            deep: false,
-        }
-    }
-
-    /// Also stores nested nodes and trees.
-    pub fn with_deep(self) -> Self {
-        Self {
-            node_data: self.node_data,
-            deep: true,
-        }
-    }
-
     /// Persists the key-value data of nodes.
     ///
     /// Turning this option on ensures the nodes are persisted completely. When using the
     /// [`crate::merkle_layer::MerkleLayer`] in isolation, this is necessary as there is no other
     /// component that will be writing the key-value data to the store.
     pub fn with_node_data(self) -> Self {
-        Self {
-            node_data: true,
-            deep: self.deep,
-        }
+        Self { node_data: true }
     }
 
     /// Do not persist key-value data of nodes.
@@ -396,29 +374,12 @@ impl StoreOptions {
     /// mutates the store directly ahead of commitments. At commitment time, you only need to
     /// persist the remaining tree and node structures.
     pub fn without_node_data(self) -> Self {
-        Self {
-            node_data: false,
-            deep: self.deep,
-        }
+        Self { node_data: false }
     }
 
     /// Returns whether node key-value data should be persisted.
     pub fn node_data(&self) -> bool {
         self.node_data
-    }
-
-    /// Returns whether nested values should be persisted recursively.
-    pub fn deep(&self) -> bool {
-        self.deep
-    }
-}
-
-impl Default for StoreOptions {
-    fn default() -> Self {
-        Self {
-            node_data: false,
-            deep: true,
-        }
     }
 }
 
