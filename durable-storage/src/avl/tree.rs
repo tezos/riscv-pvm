@@ -7,9 +7,6 @@
 use std::cmp::Ordering;
 use std::sync::LazyLock;
 
-use bincode::Decode;
-use bincode::de::Decoder;
-use bincode::error::DecodeError;
 use octez_riscv_data::components::atom::AtomMode;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::components::bytes::BytesMode;
@@ -28,8 +25,6 @@ use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::ProofError;
 use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::utils::not_found;
-use octez_riscv_data::serialisation::deserialise;
-use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
 use super::node::Node;
@@ -214,6 +209,15 @@ impl<NodeId> Tree<NodeId> {
         Hash::from_foldable(self)
     }
 
+    /// The hash of a non-empty [`Tree`] whose root [`Node`] hashes to `node_hash`.
+    ///
+    /// A present tree folds as `H(present_flag, node_hash)`, so this reuses the
+    /// [`Foldable<HashFold>`] implementation (via a throwaway `Tree<Hash>`) to stay in
+    /// lock-step with it. This is the storage key under which the node body is persisted.
+    pub(crate) fn present_hash(node_hash: Hash) -> Hash {
+        Tree::<Hash>::from(Some(node_hash)).hash()
+    }
+
     /// Take the root [`Node`] out of this tree, leaving the [`Tree`] empty.
     pub(crate) const fn take(&mut self) -> Option<NodeId> {
         self.0.take()
@@ -375,13 +379,6 @@ impl<NodeId> Tree<NodeId> {
     }
 }
 
-impl<C> Decode<C> for Tree<LazyNodeId> {
-    fn decode<D: Decoder<Context = C>>(decoder: &mut D) -> Result<Self, DecodeError> {
-        let root_hash: Option<Hash> = Decode::decode(decoder)?;
-        Ok(Tree::from(root_hash.map(LazyNodeId::from)))
-    }
-}
-
 impl<NodeId: Foldable<HashFold>> Foldable<HashFold> for Tree<NodeId> {
     fn fold(&self, builder: HashFold) -> <HashFold as Fold>::Folded {
         let mut node = builder.into_node_fold();
@@ -444,24 +441,18 @@ impl<NodeId: Storable> Storable for Tree<NodeId> {
         store: &impl KeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
-        let repr = self.0.as_ref().map(Hash::from_foldable);
-
-        // We don't store empty trees. All leaf nodes contain two empty trees. Adding two more
-        // redundant writes to all leaves is not desirable.
-        // The empty tree can be recovered during loading, as the hash of the empty tree is known.
-        if repr.is_none() {
-            return Ok(());
+        // We don't store empty trees. All leaf nodes contain two empty trees. Adding
+        // redundant writes to all leaves is not desirable. The empty tree can be recovered
+        // during loading, as the hash of the empty tree is known.
+        //
+        // A non-empty tree's root node persists its body *directly under this tree's hash*
+        // (see the `Storable` impl for `Node`). Storing the node by the parent tree hash
+        // removes the intermediate tree->node pointer that previously had to be read before
+        // the node itself, saving a lookup per level when resolving.
+        match &self.0 {
+            None => Ok(()),
+            Some(node) => node.store(store, options),
         }
-
-        let id = self.hash();
-        let bytes = serialise(repr)?;
-        store.blob_set(id, bytes)?;
-
-        if let Some(node) = &self.0 {
-            node.store(store, options)?;
-        }
-
-        Ok(())
     }
 }
 
@@ -473,20 +464,10 @@ impl<NodeId: Loadable> Loadable for Tree<NodeId> {
             return Ok(Self(None));
         }
 
-        let repr: Option<Hash> = {
-            let bytes =
-                store
-                    .blob_get(id)
-                    .map_err(|error| OperationalError::CommitDataMissing {
-                        root: id,
-                        source: Box::new(error),
-                    })?;
-            deserialise(bytes.as_ref())?
-        };
-
-        repr.map(|node_id| NodeId::load(node_id, store))
-            .transpose()
-            .map(Self)
+        // The root node's body is stored directly under this tree's hash. Hand the tree hash
+        // to the node loader: for `LazyNodeId` this reads the body in a single lookup and
+        // materialises the children lazily; for `ArcNodeId` it eagerly loads the whole subtree.
+        NodeId::load(id, store).map(|node| Self(Some(node)))
     }
 }
 

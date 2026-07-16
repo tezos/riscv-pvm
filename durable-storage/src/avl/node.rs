@@ -869,7 +869,8 @@ where
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         // The stored representation is more compact. We don't include the `data` field, as that
-        // should be written to the KV store separately.
+        // should be written to the KV store separately. `left`/`right` are the hashes of the
+        // child *trees* (the same values folded into this node's hash).
         let repr = StoredNode {
             balance_factor: self.balance_factor.read(),
             key: self.key.deref().clone(),
@@ -878,9 +879,14 @@ where
             right: Hash::from_foldable(&self.right),
         };
 
-        let &id = self.hash();
+        // Persist the node body under the hash of the *tree* that holds it, rather than under
+        // the node's own hash. A present tree hashes as `H(present_flag, node_hash)`, so a
+        // resolver descending from a parent's child-tree hash reaches this body in a single
+        // lookup instead of first reading a tree->node pointer. The hashes themselves are
+        // unchanged, so commitments and proofs are unaffected.
+        let tree_hash = Tree::<Hash>::present_hash(*self.hash());
         let bytes = serialise(repr)?;
-        store.blob_set(id, bytes)?;
+        store.blob_set(tree_hash, bytes)?;
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {

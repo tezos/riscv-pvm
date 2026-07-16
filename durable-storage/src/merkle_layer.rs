@@ -1961,8 +1961,12 @@ mod tests {
             )
             .expect("Storing node should succeed");
 
+            // The node body is persisted under the hash of the tree that holds it, not under
+            // the node's own hash.
+            let node_tree_hash =
+                Tree::<octez_riscv_data::hash::Hash>::present_hash(*node.hash());
             let loaded_node: Node<LazyTreeId, Bytes<Normal>, Normal> =
-                Node::load(*node.hash(), merkle_layer.inner.persistence.as_ref())
+                Node::load(node_tree_hash, merkle_layer.inner.persistence.as_ref())
                     .expect("Loading node should succeed");
 
             assert_eq!(node.hash(), loaded_node.hash());
