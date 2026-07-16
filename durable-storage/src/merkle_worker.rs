@@ -504,9 +504,7 @@ mod tests {
 
                 #[cfg(rocksdb)]
                 Self::Commit => {
-                    let options = crate::storage::StoreOptions::default()
-                        .with_deep()
-                        .with_node_data();
+                    let options = crate::storage::StoreOptions::default().with_node_data();
                     let commit2 = layer.commit(&options).expect("Commit should succeed");
                     let commit1 = worker.commit(options).expect("Commit should succeed");
                     assert_eq!(commit1, commit2);

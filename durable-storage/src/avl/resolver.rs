@@ -1245,17 +1245,13 @@ impl DataResolver<Bytes<Verify>, Verify> for VerifyResolver {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Borrow;
     use std::sync::Arc;
     use std::sync::OnceLock;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
     use octez_riscv_data::components::bytes::Bytes;
-    use octez_riscv_data::foldable::Foldable;
     use octez_riscv_data::hash::Hash;
-    use octez_riscv_data::hash::HashFold;
-    use octez_riscv_data::mode::Normal;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::NotFound;
     use octez_riscv_data::mode::utils::catch_not_found;
@@ -1273,7 +1269,6 @@ mod tests {
     use super::VerifyResolver;
     use super::VerifyTreeId;
     use crate::avl::node::Node;
-    use crate::avl::resolver::AvlResolver;
     use crate::avl::tree::Tree;
     use crate::errors::Error;
     use crate::errors::OperationalError;
@@ -1354,45 +1349,17 @@ mod tests {
         }
     }
 
-    fn persist_tree<NodeId, DataId, TreeId, Res, KV>(
+    fn persist_tree<NodeId, KV>(
         tree: &Tree<NodeId>,
-        resolver: &Res,
         persistence_layer: &KV,
     ) where
         NodeId: Storable,
-        TreeId: Storable,
-        DataId: Foldable<HashFold> + Borrow<[u8]>,
         KV: KeyValueStore,
-        Res: AvlResolver<NodeId, DataId, TreeId, Normal>,
     {
-        let store_options = StoreOptions::default().with_shallow().with_node_data();
+        let store_options = StoreOptions::default().with_node_data();
 
         tree.store(persistence_layer, &store_options)
             .expect("persisting tree should succeed");
-
-        let Some(node_id) = tree.root() else {
-            return;
-        };
-
-        let node = resolver
-            .resolve(node_id)
-            .expect("resolving nodes should succeed");
-
-        node.store(persistence_layer, &store_options)
-            .expect("persisting node should succeed");
-
-        persist_tree(
-            node.left_ref(resolver)
-                .expect("left subtree should resolve"),
-            resolver,
-            persistence_layer,
-        );
-        persist_tree(
-            node.right_ref(resolver)
-                .expect("right subtree should resolve"),
-            resolver,
-            persistence_layer,
-        );
     }
 
     #[test]
@@ -1411,7 +1378,7 @@ mod tests {
         let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
-        persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
+        persist_tree(&tree, persistence_layer.as_ref());
 
         let lazy_resolver = LazyResolver::new(persistence_layer.clone());
         let lazy_tree: LazyTreeId = LazyTreeId::from(tree_hash);
@@ -1519,7 +1486,7 @@ mod tests {
         let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
-        persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
+        persist_tree(&tree, persistence_layer.as_ref());
 
         let mut node_id: LazyNodeId = LazyNodeId::from(root_hash);
         let mut lazy_resolver = LazyResolver::new(persistence_layer.clone());
@@ -1552,7 +1519,7 @@ mod tests {
         let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
-        persist_tree(&tree, &eager_resolver, persistence_layer.as_ref());
+        persist_tree(&tree, persistence_layer.as_ref());
 
         let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
         let mut lazy_resolver = LazyResolver::new(persistence_layer.clone());
@@ -1595,7 +1562,7 @@ mod tests {
         assert_eq!(data.as_slice(), b"root-mutated");
 
         let persisted_tree_hash = lazy_tree.hash();
-        persist_tree(&lazy_tree, &lazy_resolver, persistence_layer.as_ref());
+        persist_tree(&lazy_tree, persistence_layer.as_ref());
         assert_eq!(
             persistence_layer.blob_get_calls(),
             1,
@@ -1649,7 +1616,6 @@ mod tests {
         let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
         persist_tree(
             &original_tree,
-            &original_resolver,
             persistence_layer.as_ref(),
         );
 
@@ -1695,7 +1661,7 @@ mod tests {
         let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
-        persist_tree(&tree, &resolver, persistence_layer.as_ref());
+        persist_tree(&tree, persistence_layer.as_ref());
 
         (root_hash, tree, persistence_layer)
     }

@@ -889,10 +889,8 @@ where
             store.set(key, value)?;
         }
 
-        if options.deep() {
-            self.left.store(store, options)?;
-            self.right.store(store, options)?;
-        }
+        self.left.store(store, options)?;
+        self.right.store(store, options)?;
 
         Ok(())
     }

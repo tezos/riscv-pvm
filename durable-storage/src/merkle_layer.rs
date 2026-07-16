@@ -1878,7 +1878,7 @@ mod tests {
         }
 
         let expected_hash = merkle_layer.hash();
-        let commit_opts = crate::storage::StoreOptions::default().with_deep().with_node_data();
+        let commit_opts = crate::storage::StoreOptions::default().with_node_data();
         let commit_id = merkle_layer.commit(&commit_opts).expect("Commit operation should succeed");
 
         let lazy_loaded = MerkleLayer::checkout(persistence, commit_id)
@@ -1946,7 +1946,7 @@ mod tests {
                 .expect("setting node should succeed");
         }
 
-        let commit_opts = StoreOptions::default().with_deep().with_node_data();
+        let commit_opts = StoreOptions::default().with_node_data();
         let commit_id = merkle_layer
             .commit(&commit_opts)
             .expect("The commit operation should not fail");
@@ -1957,7 +1957,7 @@ mod tests {
 
             node.store(
                 merkle_layer.inner.persistence.as_ref(),
-                &StoreOptions::default().with_shallow().with_node_data(),
+                &StoreOptions::default().with_node_data(),
             )
             .expect("Storing node should succeed");
 
