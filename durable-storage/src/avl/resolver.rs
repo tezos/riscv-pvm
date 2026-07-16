@@ -60,7 +60,6 @@ use trait_set::trait_set;
 
 use super::node::Node;
 use super::tree::Tree;
-use crate::avl::node::Meta;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::KeyValueStore;
@@ -779,11 +778,12 @@ impl ProveTreeId {
 
 /// Captured prove-mode fields of a node unlinked from the working tree during a step.
 ///
-/// Only `meta` and `data` carry the per-field read flags consumed by the
+/// Only `balance_factor`, `key` and `data` carry the per-field read flags consumed by the
 /// `MerkleLayer`-level fold; subtree IDs and the hash cache are unnecessary.
 #[derive(Debug)]
 pub(crate) struct DeletedNodeFields {
-    pub(crate) meta: Atom<Meta, Prove<'static>>,
+    pub(crate) balance_factor: Atom<i64, Prove<'static>>,
+    pub(crate) key: Atom<Key, Prove<'static>>,
     pub(crate) data: Bytes<Prove<'static>>,
 }
 
@@ -886,7 +886,8 @@ impl<R> ProveResolver<R> {
 
             if let Some(lazy_id) = &id.lazy_id {
                 let fields = DeletedNodeFields {
-                    meta: node.meta().clone(),
+                    balance_factor: node.balance_factor_atom().clone(),
+                    key: node.key_atom().clone(),
                     data: node.data().clone(),
                 };
                 self.deleted_nodes
@@ -998,7 +999,8 @@ where
         let hash = Hash::from_foldable(lazy_id);
         let node = prove_node.as_ref();
         let fields = DeletedNodeFields {
-            meta: node.meta().clone(),
+            balance_factor: node.balance_factor_atom().clone(),
+            key: node.key_atom().clone(),
             data: node.data().clone(),
         };
 

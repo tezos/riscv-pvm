@@ -505,7 +505,6 @@ mod tests {
     use proptest::test_runner::TestCaseError;
 
     use super::*;
-    use crate::avl::node::Meta;
     use crate::avl::resolver::ArcNodeId;
     use crate::avl::resolver::ArcResolver;
     use crate::avl::resolver::ArcTreeId;
@@ -524,7 +523,8 @@ mod tests {
             NodeId: std::fmt::Debug,
             TreeId: std::fmt::Debug,
             DataId: std::fmt::Debug,
-            Atom<Meta, M>: std::fmt::Debug,
+            Atom<i64, M>: std::fmt::Debug,
+            Atom<Key, M>: std::fmt::Debug,
         {
             let inorder = self.is_inorder(resolver)?;
             let is_balanced = self.is_balanced(resolver)?;
@@ -562,7 +562,8 @@ mod tests {
             NodeId: std::fmt::Debug,
             TreeId: std::fmt::Debug,
             DataId: std::fmt::Debug,
-            Atom<Meta, M>: std::fmt::Debug,
+            Atom<i64, M>: std::fmt::Debug,
+            Atom<Key, M>: std::fmt::Debug,
         {
             match self.root() {
                 None => Ok(true),
