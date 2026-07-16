@@ -87,6 +87,10 @@ name = "avl_tree"
 harness = false
 
 [[bench]]
+name = "avl_storage"
+harness = false
+
+[[bench]]
 name = "database"
 harness = false
 required-features = ["rocksdb"]
