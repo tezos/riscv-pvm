@@ -95,6 +95,23 @@ impl MerkleProof {
     pub fn from_foldable(foldable: &impl Foldable<MerkleProofFold>) -> Self {
         foldable.fold(MerkleProofFold::new()).tree
     }
+
+    /// Blind the tree as much as feasible. In general, this will fully blind the tree.
+    ///
+    /// If the tree is a 'short leaf' (ie, the size of the data is less than [Hash::DIGEST_SIZE])
+    /// then the tree will not be blinded, to save proof space. A parent node that is blinded
+    /// subsequently will still omit the leaf.
+    fn blind(&self) -> Self {
+        match self {
+            Self::Leaf(MerkleProofLeaf::Read(data)) if data.len() < Hash::DIGEST_SIZE => {
+                Self::Leaf(MerkleProofLeaf::Read(data.clone()))
+            }
+            tree => {
+                let hash = tree.root_hash();
+                Self::leaf_blind(hash)
+            }
+        }
+    }
 }
 
 impl From<&MerkleProof> for Tag {
@@ -223,8 +240,7 @@ impl CompressibleMerkleProof {
 
         // If the leaf does not need to be present, we can compress it into a blinded tree already.
         if constraint < MinimumPresence::Present {
-            let hash = tree.root_hash();
-            tree = MerkleProof::leaf_blind(hash);
+            tree = tree.blind()
         }
 
         CompressibleMerkleProof { constraint, tree }
@@ -237,15 +253,11 @@ impl Foldable<MerkleProofFold> for CompressibleMerkleProof {
             return self.clone();
         }
 
-        // Here we know the presence constraint is not `Present`, so the tree can be compressed
-        // into a blinded tree if it is not already.
-
-        let hash = self.tree.root_hash();
-        let tree = MerkleProof::leaf_blind(hash);
-
         CompressibleMerkleProof {
             constraint: self.constraint,
-            tree,
+            // Here we know the presence constraint is not `Present`, so the tree can be compressed
+            // into a blinded tree if it is not already.
+            tree: self.tree.blind(),
         }
     }
 }
@@ -760,7 +772,7 @@ mod tests {
 
     #[test]
     fn proof_tree_leaf_blindable() {
-        static DATA: &[u8] = b"hello";
+        static DATA: &[u8] = &[17; Hash::DIGEST_SIZE];
         let hash = Hash::hash_bytes(DATA);
 
         assert_eq!(
@@ -774,7 +786,7 @@ mod tests {
 
     #[test]
     fn proof_tree_leaf_omittable() {
-        static DATA: &[u8] = b"hello";
+        static DATA: &[u8] = &[19; Hash::DIGEST_SIZE];
         let hash = Hash::hash_bytes(DATA);
 
         assert_eq!(
@@ -783,6 +795,18 @@ mod tests {
                 data: DATA
             }),
             MerkleProof::leaf_blind(hash)
+        );
+    }
+
+    #[test]
+    fn proof_tree_leaf_omittable_short() {
+        static DATA: &[u8] = b"hello";
+        assert_eq!(
+            MerkleProof::from_foldable(&Leaf {
+                constraint: MinimumPresence::MayOmit,
+                data: DATA
+            }),
+            MerkleProof::leaf_read(DATA.to_vec())
         );
     }
 
@@ -827,6 +851,31 @@ mod tests {
 
     #[test]
     fn proof_tree_node_present_child_omittable_child() {
+        static DATA_OMIT: &[u8] = &[129; Hash::DIGEST_SIZE];
+
+        let node = Node {
+            children: vec![
+                Leaf {
+                    constraint: MinimumPresence::Present,
+                    data: b"hello",
+                },
+                Leaf {
+                    constraint: MinimumPresence::MayOmit,
+                    data: DATA_OMIT,
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_read(b"hello".to_vec()),
+            MerkleProof::leaf_blind(Hash::hash_bytes(DATA_OMIT)),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
+    fn proof_tree_node_present_child_omittable_child_short() {
         let node = Node {
             children: vec![
                 Leaf {
@@ -842,7 +891,7 @@ mod tests {
 
         let expected = Tree::node_without_data(vec![
             MerkleProof::leaf_read(b"hello".to_vec()),
-            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+            MerkleProof::leaf_read(b"world".to_vec()),
         ]);
 
         assert_eq!(MerkleProof::from_foldable(&node), expected);
@@ -858,6 +907,29 @@ mod tests {
                 },
                 Leaf {
                     constraint: MinimumPresence::MayBlind,
+                    data: &[15; Hash::DIGEST_SIZE],
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_read(b"hello".to_vec()),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[15; Hash::DIGEST_SIZE])),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
+    fn proof_tree_node_present_child_blindable_child_short() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    constraint: MinimumPresence::Present,
+                    data: b"hello",
+                },
+                Leaf {
+                    constraint: MinimumPresence::MayBlind,
                     data: b"world",
                 },
             ],
@@ -865,7 +937,7 @@ mod tests {
 
         let expected = Tree::node_without_data(vec![
             MerkleProof::leaf_read(b"hello".to_vec()),
-            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+            MerkleProof::leaf_read(b"world".to_vec()),
         ]);
 
         assert_eq!(MerkleProof::from_foldable(&node), expected);
@@ -877,7 +949,7 @@ mod tests {
             children: vec![
                 Leaf {
                     constraint: MinimumPresence::MayBlind,
-                    data: b"hello",
+                    data: &[81; Hash::DIGEST_SIZE + 5],
                 },
                 Leaf {
                     constraint: MinimumPresence::MayBlind,
@@ -887,8 +959,8 @@ mod tests {
         };
 
         let expected = Tree::node_without_data(vec![
-            MerkleProof::leaf_blind(Hash::hash_bytes(b"hello")),
-            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[81; Hash::DIGEST_SIZE + 5])),
+            MerkleProof::leaf_read(b"world".to_vec()),
         ]);
 
         assert_eq!(MerkleProof::from_foldable(&node), expected);
@@ -896,6 +968,29 @@ mod tests {
 
     #[test]
     fn proof_tree_node_blindable_child_omittable_child() {
+        let node = Node {
+            children: vec![
+                Leaf {
+                    constraint: MinimumPresence::MayBlind,
+                    data: &[29; Hash::DIGEST_SIZE],
+                },
+                Leaf {
+                    constraint: MinimumPresence::MayOmit,
+                    data: &[36; Hash::DIGEST_SIZE + 1],
+                },
+            ],
+        };
+
+        let expected = Tree::node_without_data(vec![
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[29; Hash::DIGEST_SIZE])),
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[36; Hash::DIGEST_SIZE + 1])),
+        ]);
+
+        assert_eq!(MerkleProof::from_foldable(&node), expected);
+    }
+
+    #[test]
+    fn proof_tree_node_blindable_child_omittable_child_short() {
         let node = Node {
             children: vec![
                 Leaf {
@@ -910,8 +1005,8 @@ mod tests {
         };
 
         let expected = Tree::node_without_data(vec![
-            MerkleProof::leaf_blind(Hash::hash_bytes(b"hello")),
-            MerkleProof::leaf_blind(Hash::hash_bytes(b"world")),
+            MerkleProof::leaf_read(b"hello".to_vec()),
+            MerkleProof::leaf_read(b"world".to_vec()),
         ]);
 
         assert_eq!(MerkleProof::from_foldable(&node), expected);
