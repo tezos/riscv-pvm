@@ -297,9 +297,10 @@ impl From<Node<LazyTreeId, LazyDataId, Normal>> for LazyNodeId {
     }
 }
 
+#[cfg(test)]
 impl From<Hash> for LazyNodeId {
     fn from(hash: Hash) -> LazyNodeId {
-        LazyNodeId(hash.into())
+        LazyNodeId(LazyId::from(hash))
     }
 }
 
@@ -333,8 +334,12 @@ impl Storable for LazyNodeId {
 }
 
 impl Loadable for LazyNodeId {
-    fn load(id: Hash, _store: &impl KeyValueStore) -> Result<Self, OperationalError> {
-        Ok(Self::from(id))
+    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+        // `id` is the tree hash under which the node body is stored. Read it eagerly so that
+        // resolving the containing tree yields a fully-materialised node — with its children
+        // still lazy — in a single lookup, instead of deferring a second lookup for the body.
+        let node = Node::<LazyTreeId, LazyDataId, Normal>::load(id, store)?;
+        Ok(Self(LazyId::new(Arc::new(node))))
     }
 }
 
@@ -1349,10 +1354,8 @@ mod tests {
         }
     }
 
-    fn persist_tree<NodeId, KV>(
-        tree: &Tree<NodeId>,
-        persistence_layer: &KV,
-    ) where
+    fn persist_tree<NodeId, KV>(tree: &Tree<NodeId>, persistence_layer: &KV)
+    where
         NodeId: Storable,
         KV: KeyValueStore,
     {
@@ -1397,16 +1400,22 @@ mod tests {
         assert_eq!(
             persistence_layer.blob_get_calls(),
             1,
-            "resolving tree should load only the tree payload"
+            "resolving the tree reads the root node body (stored under the tree hash) \
+             in a single lookup"
         );
 
         let lazy_root = loaded_tree.root().expect("tree should have a root");
-        assert!(lazy_root.0.inner.get().is_none());
+        // The node body lives under the tree hash, so resolving the tree already materialised
+        // the root node. (Previously this required a second lookup keyed by the node hash.)
+        assert!(
+            lazy_root.0.inner.get().is_some(),
+            "resolving the tree eagerly materialises the root node"
+        );
         assert_eq!(Hash::from_foldable(&lazy_root), root_hash);
         assert_eq!(
             persistence_layer.blob_get_calls(),
             1,
-            "resolving tree should not eagerly load the root node payload"
+            "the root node is already loaded; folding it needs no further lookup"
         );
 
         let _ = lazy_resolver
@@ -1414,8 +1423,9 @@ mod tests {
             .expect("resolving root node should succeed");
         assert_eq!(
             persistence_layer.blob_get_calls(),
-            2,
-            "node payload should be loaded only when node is accessed"
+            1,
+            "the node was already materialised when its tree was resolved \
+             (this took a second lookup before storing nodes under the tree hash)"
         );
     }
 
@@ -1483,12 +1493,14 @@ mod tests {
         tree.set(&root_key, b"root", &mut eager_resolver)
             .expect("set should succeed");
 
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+        // The node body is stored under the containing tree's hash, so a lazy node reference
+        // into storage is keyed by the tree hash.
+        let tree_hash = tree.hash();
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, persistence_layer.as_ref());
 
-        let mut node_id: LazyNodeId = LazyNodeId::from(root_hash);
+        let mut node_id: LazyNodeId = LazyNodeId::from(tree_hash);
         let mut lazy_resolver = LazyResolver::new(persistence_layer.clone());
 
         let _ = lazy_resolver
@@ -1516,12 +1528,13 @@ mod tests {
         tree.set(&root_key, b"root", &mut eager_resolver)
             .expect("set should succeed");
 
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+        // Lazy references into storage are keyed by the tree hash (the node body lives there).
+        let tree_hash = tree.hash();
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, persistence_layer.as_ref());
 
-        let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(tree_hash)).into();
         let mut lazy_resolver = LazyResolver::new(persistence_layer.clone());
 
         {
@@ -1583,7 +1596,9 @@ mod tests {
         let reloaded_node = lazy_resolver
             .resolve(reloaded_root)
             .expect("resolving persisted mutated root node should succeed");
-        assert_eq!(persistence_layer.blob_get_calls(), 3);
+        // The root node was already materialised when its tree was resolved above, so no
+        // further lookup is needed here (this was a third lookup before the refactor).
+        assert_eq!(persistence_layer.blob_get_calls(), 2);
 
         let reloaded_node_data = reloaded_node
             .resolve_data(&lazy_resolver)
@@ -1610,16 +1625,14 @@ mod tests {
 
         let initial_tree_hash: Hash = original_tree.hash();
 
-        let persisted_root_hash =
-            Hash::from_foldable(original_tree.root().expect("tree should have a root node"));
+        // The node body is stored under the tree hash, so a lazy reference into storage is
+        // keyed by the tree hash.
+        let persisted_tree_hash = original_tree.hash();
 
         let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
-        persist_tree(
-            &original_tree,
-            persistence_layer.as_ref(),
-        );
+        persist_tree(&original_tree, persistence_layer.as_ref());
 
-        let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(persisted_root_hash)).into();
+        let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(persisted_tree_hash)).into();
         let mut lazy_resolver = LazyResolver::new(persistence_layer);
 
         lazy_tree
@@ -1658,12 +1671,14 @@ mod tests {
         tree.set(&left_key, b"left", &mut resolver)
             .expect("set should succeed");
 
-        let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
+        // A lazy reference into persisted storage is keyed by the *tree* hash, since the node
+        // body is now stored directly under it.
+        let tree_hash = tree.hash();
 
         let persistence_layer = Arc::new(CountingKeyValueStore::default());
         persist_tree(&tree, persistence_layer.as_ref());
 
-        (root_hash, tree, persistence_layer)
+        (tree_hash, tree, persistence_layer)
     }
 
     #[test]
@@ -1684,32 +1699,40 @@ mod tests {
 
     #[test]
     fn prove_resolver_hash_matches_lazy_resolver() {
-        let (root_hash, _, persistence_layer) = setup_prove_fixture();
-        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(root_hash)).into();
+        let (tree_hash, _, persistence_layer) = setup_prove_fixture();
+        let lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(tree_hash)).into();
         let lazy_resolver = LazyResolver::new(persistence_layer);
         let lazy_root = lazy_tree.root().expect("tree should have a root");
-
-        let expected_hash = Hash::from_foldable(lazy_root);
 
         let prove_resolver = ProveResolver::start(lazy_resolver);
         let prove_id = lazy_root.clone().into_proof();
 
-        // Hash before resolve (delegates to lazy path).
+        // Before resolve, both the prove id and the (unresolved) lazy id fold to the tree hash
+        // they were created from - the prove path delegates to the lazy path.
         let hash_before = Hash::from_foldable(&prove_id);
         assert_eq!(
-            hash_before, expected_hash,
-            "prove hash before resolve should match lazy hash"
+            hash_before,
+            Hash::from_foldable(lazy_root),
+            "prove hash before resolve should match the unresolved lazy hash"
         );
+        assert_eq!(hash_before, tree_hash);
 
-        // Resolve, then hash again (now computed from prove-mode inner).
+        // After resolve, the prove id folds to the resolved node's hash. Resolving the same
+        // node through the underlying lazy resolver must produce the same hash.
         prove_resolver
             .resolve(&prove_id)
             .expect("resolve should succeed");
-
         let hash_after = Hash::from_foldable(&prove_id);
+
+        let lazy_node_hash = Hash::from_foldable(
+            prove_resolver
+                .inner()
+                .resolve(lazy_root)
+                .expect("resolving the lazy node should succeed"),
+        );
         assert_eq!(
-            hash_after, expected_hash,
-            "prove hash after resolve should still match lazy hash"
+            hash_after, lazy_node_hash,
+            "prove hash after resolve should match the resolved lazy node hash"
         );
     }
 
