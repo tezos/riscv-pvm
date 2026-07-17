@@ -65,6 +65,8 @@ pub struct RegistryProofStep {
     step: RegistryOperation,
     #[serde_as(as = "serde_with::hex::Hex")]
     proof: Vec<u8>,
+    /// The operation's observable outcome, asserted equal across Normal, Prove and Verify mode.
+    outcome: StepOutcome,
 }
 
 #[derive(Debug, Clone)]
@@ -237,11 +239,14 @@ where
 }
 
 /// Generate and verify a proof for a single [`RegistryOperation`] applied to `registry`.
-/// Returns the serialised proof, or `None` if `op` is not a provable step.
+///
+/// Returns the serialised proof together with the operation's observable [`StepOutcome`], or
+/// `None` if `op` is not a provable step. The Prove- and Verify-mode outcomes are asserted to
+/// be equal before returning; the returned outcome is the (identical) Prove-mode one.
 pub(crate) fn prove_and_verify_registry_operation<KV>(
     registry: &Registry<KV, Normal>,
     op: &RegistryOperation,
-) -> Option<Vec<u8>>
+) -> Option<(Vec<u8>, StepOutcome)>
 where
     KV: BackgroundKeyValueStore,
     KV::Repo: Clone,
@@ -255,12 +260,8 @@ where
     let mut prover = registry
         .try_start_proof()
         .expect("Starting a proof should succeed");
-    if apply_registry_step(&mut prover, op, len)
-        .expect("applying a step should succeed")
-        .is_none()
-    {
-        return None;
-    }
+    let prove_outcome =
+        apply_registry_step(&mut prover, op, len).expect("applying a step should succeed")?;
     let proof = prover.produce_proof();
     assert_eq!(
         proof.initial_state_hash(),
@@ -288,7 +289,13 @@ where
         "The Verify-mode registry must start from the pre-operation state hash"
     );
 
-    apply_registry_step(&mut verify, op, len).expect("applying a step should succeed");
+    let verify_outcome = apply_registry_step(&mut verify, op, len)
+        .expect("applying a step should succeed")
+        .expect("a provable step in Prove mode must be provable in Verify mode");
+    assert_eq!(
+        prove_outcome, verify_outcome,
+        "Prove- and Verify-mode operations must produce the same observable result"
+    );
     let verify_post = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
         .to_hash()
         .expect("Hashing the Verify registry should succeed");
@@ -298,7 +305,7 @@ where
         "Replaying the step in Verify mode must reach the proof's final state hash"
     );
 
-    Some(bytes)
+    Some((bytes, prove_outcome))
 }
 
 /// Initialises a Normal-mode [`Registry`] in the given `repo` and applies
@@ -331,34 +338,32 @@ where
     grow_registry_with_model(&mut registry, &mut registry_model);
 
     for operation in operations {
-        // The size bound is computed over the pre-operation model.
-        let bound = registry_operation_proof_size_bound(&registry_model, &operation);
-        if let Some(proof) = prove_and_verify_registry_operation(&registry, &operation) {
-            let bound = bound.expect("provable operations have a size bound");
-            assert_proof_size(&operation, proof.len(), bound, false);
-            proof_steps.push(RegistryProofStep {
-                step: operation.clone(),
-                proof,
-            });
-        }
+        // Prove and verify over the pre-operation state; also yields the (identical) prove/verify
+        // outcome to compare against the Normal-mode outcome below.
+        let proof_and_outcome = prove_and_verify_registry_operation(&registry, &operation);
 
-        match operation {
+        // Apply the operation to the Normal-mode registry, keeping the model in sync, and capture
+        // its observable outcome. Structural operations have no return value; their effect is
+        // state (checked via the proof's state hashes), so their outcome is `Unit`.
+        let normal_outcome: Option<StepOutcome> = match &operation {
             RegistryOperation::Database(index, DatabaseOperation::Hash) => {
                 let new_digest = registry
-                    .database(index)
+                    .database(*index)
                     .expect("The index is in bounds")
                     .hash()
                     .expect("Hash should succeed");
 
-                registry_model[index].observe_hash(new_digest);
+                registry_model[*index].observe_hash(new_digest);
 
                 checkout_candidates
                     .entry(Hash::from_foldable(&registry))
                     .or_insert(false);
+                Some(StepOutcome::Hash(Ok(new_digest)))
             }
             RegistryOperation::Database(_, DatabaseOperation::Commit) => {
                 let commit_id = registry.commit().expect("Committing should succeed");
                 checkout_candidates.insert(*commit_id.as_hash(), true);
+                None
             }
             RegistryOperation::Database(_, DatabaseOperation::Checkout) => {
                 if !checkout_candidates.is_empty() {
@@ -378,60 +383,64 @@ where
                         "Checkout result did not match whether the commit id was committed"
                     );
                 }
+                None
             }
             RegistryOperation::Database(index, op) => {
                 let handle = registry.handle().clone();
                 apply_database_operation_with_model::<KV, _>(
                     registry
-                        .database_mut(index)
+                        .database_mut(*index)
                         .expect("The index is in bounds"),
-                    &mut registry_model[index],
-                    &op,
+                    &mut registry_model[*index],
+                    op,
                     &handle,
                     &checkout_repo,
                     &mut checkout_candidates,
-                );
+                )
             }
             RegistryOperation::GrowRegistry => {
-                grow_registry_with_model(&mut registry, &mut registry_model)
+                grow_registry_with_model(&mut registry, &mut registry_model);
+                Some(StepOutcome::Unit(Ok(())))
             }
             RegistryOperation::ShrinkRegistry => {
-                // Never shrink to an empty registry. This case becomes a no-op.
-                if registry.len() <= 1 {
-                    continue;
+                // Never shrink to an empty registry; that case is a provable no-op.
+                if registry.len() > 1 {
+                    let new_size = registry.len() - 1;
+                    registry
+                        .resize_tick(new_size)
+                        .expect("Resizing the registry should succeed");
+
+                    registry_model.truncate(new_size);
                 }
-
-                let new_size = registry.len() - 1;
-                registry
-                    .resize_tick(new_size)
-                    .expect("Resizing the registry should succeed");
-
-                registry_model.truncate(new_size);
+                Some(StepOutcome::Unit(Ok(())))
             }
             RegistryOperation::ClearDatabase(index) => {
                 registry
-                    .clear_database(index)
+                    .clear_database(*index)
                     .expect("Clearing the database should be successful");
 
-                registry_model[index] = DatabaseModel::default();
+                registry_model[*index] = DatabaseModel::default();
+                Some(StepOutcome::Unit(Ok(())))
             }
             RegistryOperation::CopyDatabase(src, dst) => {
                 registry
-                    .copy_database(src, dst)
+                    .copy_database(*src, *dst)
                     .expect("Copying the database should be successful");
 
                 if src != dst {
-                    registry_model[dst] = registry_model[src].clone();
+                    registry_model[*dst] = registry_model[*src].clone();
                 }
+                Some(StepOutcome::Unit(Ok(())))
             }
             RegistryOperation::MoveDatabase(src, dst) => {
                 registry
-                    .move_database(src, dst)
+                    .move_database(*src, *dst)
                     .expect("Moving the database should be successful");
 
                 if src != dst {
-                    registry_model[dst] = std::mem::take(&mut registry_model[src]);
+                    registry_model[*dst] = std::mem::take(&mut registry_model[*src]);
                 }
+                Some(StepOutcome::Unit(Ok(())))
             }
             RegistryOperation::CommitCheckoutRoundtrip => {
                 let commit_id = registry.commit().expect("Committing should succeed");
@@ -439,7 +448,27 @@ where
                     .expect("Checking out the just-committed registry should succeed");
                 // State is preserved, so `registry_model` is left unchanged.
                 checkout_candidates.insert(*commit_id.as_hash(), true);
+                None
             }
+        };
+
+        if let Some((proof, prove_outcome)) = proof_and_outcome {
+            // The size bound is computed over the pre-operation model.
+            let bound = registry_operation_proof_size_bound(&registry_model, &operation)
+                .expect("provable operations have a size bound");
+            assert_proof_size(&operation, proof.len(), bound, false);
+
+            let normal_outcome =
+                normal_outcome.expect("a provable operation must produce a Normal-mode outcome");
+            assert_eq!(
+                prove_outcome, normal_outcome,
+                "Prove/Verify-mode result must match the Normal-mode result"
+            );
+            proof_steps.push(RegistryProofStep {
+                step: operation.clone(),
+                proof,
+                outcome: prove_outcome,
+            });
         }
     }
 

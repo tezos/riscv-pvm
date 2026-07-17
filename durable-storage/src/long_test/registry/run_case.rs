@@ -120,7 +120,7 @@ fn apply_sequence(
         if prove {
             let bound = registry_operation_proof_size_bound(&targets.model.databases, op);
             let proof = prove_and_verify_registry_operation(&targets.persistent, op);
-            if let Some(proof) = proof {
+            if let Some((proof, _proof_outcome)) = proof {
                 let bound = bound.expect("provable operations have a size bound");
                 assert_proof_size(op, proof.len(), bound, fail_on_warning);
             }
