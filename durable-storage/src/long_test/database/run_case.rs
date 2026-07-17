@@ -73,13 +73,27 @@ fn checkout_targets(
 fn apply_sequence(targets: &mut Targets, ops: &[DatabaseOperation], prove: bool) {
     for op in ops {
         // Proofs are taken over the pre-operation state, so prove first.
-        if prove {
-            prove_and_verify_database_operation(&targets.persistent_db, op);
-        }
+        let proof_verify_out = if prove {
+            prove_and_verify_database_operation(targets.persistent_db.inner(), op)
+                .map(|(_proof, outcome)| outcome)
+        } else {
+            None
+        };
 
-        check_and_apply_value_operation(&mut targets.in_memory_db, &targets.model, op);
+        let in_mem_out =
+            check_and_apply_value_operation(&mut targets.in_memory_db, &targets.model, op);
         check_and_apply_value_operation(&mut targets.persistent_db, &targets.model, op);
         check_and_apply_value_operation(&mut targets.production_db, &targets.model, op);
+
+        if prove {
+            // NB - all the three normal-modes are checked against the model, so we only need to check proof/verify
+            // outcome against one of the above.
+            assert_eq!(
+                proof_verify_out, in_mem_out,
+                "proof_verify step outcome should match normal-mode application"
+            );
+        }
+
         targets.model.apply(op);
     }
 }

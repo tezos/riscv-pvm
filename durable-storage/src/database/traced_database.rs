@@ -44,7 +44,6 @@ use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 #[cfg(test)]
 use crate::storage::TestKeyValueStoreSetup;
-use crate::test_helpers::database::DatabaseOperation;
 
 /// A sequence of recorded [`Database`] operations
 pub(crate) type Trace = Vec<TraceEntry>;
@@ -97,11 +96,6 @@ pub(crate) enum TraceEntry {
     Commit {
         result: Result<CommitId, String>,
     },
-    Proof {
-        step: DatabaseOperation,
-        #[serde_as(as = "serde_with::hex::Hex")]
-        proof: Vec<u8>,
-    },
 }
 
 /// A [`Database`] wrapper which can record execution traces
@@ -151,12 +145,10 @@ impl<KV: BackgroundKeyValueStore> TracedDatabase<KV, Normal> {
         &mut self.inner
     }
 
-    /// Record a [`TraceEntry::Proof`] for the proof of `step`.
-    #[cfg(test)]
-    pub(crate) fn record_proof(&self, step: DatabaseOperation, proof: Vec<u8>) {
-        self.trace
-            .borrow_mut()
-            .push(TraceEntry::Proof { step, proof });
+    /// Immutable access to the inner database, bypassing tracing.
+    #[cfg(any(test, rocksdb_test_utils))]
+    pub(crate) fn inner(&self) -> &Database<KV, Normal> {
+        &self.inner
     }
 }
 
