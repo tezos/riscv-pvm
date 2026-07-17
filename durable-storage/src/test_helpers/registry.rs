@@ -35,6 +35,7 @@ use super::database::apply_database_step;
 use super::database::make_database_operation;
 use crate::commit::CommitId;
 use crate::database::DatabaseMode;
+use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
@@ -42,6 +43,7 @@ use crate::registry::Registry;
 use crate::registry::RegistryMode;
 use crate::repo::RegistryRepo;
 use crate::test_helpers::OperationView;
+use crate::test_helpers::StepOutcome;
 use crate::test_helpers::proof_size::assert_proof_size;
 use crate::test_helpers::proof_size::registry_operation_proof_size_bound;
 
@@ -168,63 +170,71 @@ fn grow_registry_with_model<KV>(
     registry_model.push(Default::default());
 }
 
-/// Apply a single [`RegistryOperation`] to `registry`.
+/// Apply a single [`RegistryOperation`] to `registry`, capturing its observable outcome.
 ///
-/// Returns `true` if the step was provable. A no-op (e.g., a `ShrinkRegistry` when
-/// `registry` has size 1) is a provable step: a proof which fully blinds the registry
-/// is expected to be produced for it.
+/// Returns `None` if the step was not provable, and `Some(outcome)` otherwise. A no-op (e.g.
+/// a `ShrinkRegistry` when `registry` has size 1) is a provable step: a proof which fully
+/// blinds the registry is expected to be produced for it.
+///
+/// Structural operations (grow/shrink/clear/copy/move) have no return value; their observable
+/// effect is state, which is checked separately via the pre/post state hashes, so their
+/// outcome is [`StepOutcome::Unit`]. Database operations reuse [`apply_database_step`].
 fn apply_registry_step<KV, M>(
     registry: &mut Registry<KV, M>,
     op: &RegistryOperation,
     len: usize,
-) -> bool
+) -> Result<Option<StepOutcome>, OperationalError>
 where
     KV: BackgroundKeyValueStore,
     M: RegistryMode + DatabaseMode,
 {
-    match op {
+    let outcome = match op {
         RegistryOperation::Database(
             _,
             DatabaseOperation::Commit
             | DatabaseOperation::Checkout
             | DatabaseOperation::CommitCheckoutRoundtrip,
-        ) => return false,
-        RegistryOperation::CommitCheckoutRoundtrip => return false,
+        ) => return Ok(None),
+        RegistryOperation::CommitCheckoutRoundtrip => return Ok(None),
         RegistryOperation::Database(index, db_op) => {
             let database = registry
                 .database_mut(*index)
                 .expect("The index is in bounds");
-            return apply_database_step(database, db_op)
-                .expect("applying a step should succeed")
-                .is_some();
+            return apply_database_step(database, db_op);
         }
-        RegistryOperation::GrowRegistry => grow_registry(registry),
+        RegistryOperation::GrowRegistry => {
+            grow_registry(registry);
+            StepOutcome::Unit(Ok(()))
+        }
         RegistryOperation::ShrinkRegistry => {
-            if len <= 1 {
-                return true;
+            if len > 1 {
+                registry
+                    .resize_tick(len - 1)
+                    .expect("Resizing the registry should succeed");
             }
-            registry
-                .resize_tick(len - 1)
-                .expect("Resizing the registry should succeed");
+            StepOutcome::Unit(Ok(()))
         }
         RegistryOperation::ClearDatabase(index) => {
             registry
                 .clear_database(*index)
                 .expect("Clearing the database should be successful");
+            StepOutcome::Unit(Ok(()))
         }
         RegistryOperation::CopyDatabase(src, dst) => {
             registry
                 .copy_database(*src, *dst)
                 .expect("Copying the database should be successful");
+            StepOutcome::Unit(Ok(()))
         }
         RegistryOperation::MoveDatabase(src, dst) => {
             registry
                 .move_database(*src, *dst)
                 .expect("Moving the database should be successful");
+            StepOutcome::Unit(Ok(()))
         }
-    }
+    };
 
-    true
+    Ok(Some(outcome))
 }
 
 /// Generate and verify a proof for a single [`RegistryOperation`] applied to `registry`.
@@ -246,7 +256,10 @@ where
     let mut prover = registry
         .try_start_proof()
         .expect("Starting a proof should succeed");
-    if !apply_registry_step(&mut prover, op, len) {
+    if apply_registry_step(&mut prover, op, len)
+        .expect("applying a step should succeed")
+        .is_none()
+    {
         return None;
     }
     let proof = prover.produce_proof();
@@ -276,7 +289,7 @@ where
         "The Verify-mode registry must start from the pre-operation state hash"
     );
 
-    apply_registry_step(&mut verify, op, len);
+    apply_registry_step(&mut verify, op, len).expect("applying a step should succeed");
     let verify_post = PartialHash::from_foldable(Some(reconstructed.tree().clone()), &verify)
         .to_hash()
         .expect("Hashing the Verify registry should succeed");
