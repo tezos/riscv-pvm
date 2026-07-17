@@ -445,116 +445,105 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for TracedDatabase<K
     }
 }
 
-/// Apply a single operation to `database` and assert its observable
-/// result matches that of applying it to `model`. The model itself is
-/// not mutated. Callers need to advance it separately via
-/// [`DatabaseReferenceModel::apply`]. This is in order to allow callers to
-/// check and apply the same operation to multiple databases at the same time.
-/// Commits and checkouts are not handled.
+/// Apply a single operation to `database` and assert its observable outcome matches what the
+/// reference `model` predicts. The model itself is not mutated. Callers need to advance it
+/// separately via [`DatabaseReferenceModel::apply`]. This is in order to allow callers to check
+/// and apply the same operation to multiple databases at the same time.
+///
+/// Returns the observable [`StepOutcome`] for provable operations (so callers can additionally
+/// compare it against a prove/verify-mode outcome), and `None` for the persistence operations,
+/// which are not handled here.
+///
+/// The operation is applied via [`apply_database_step`] so that the captured outcome is
+/// constructed identically to the one produced in Prove/Verify mode, making the two directly
+/// comparable.
 pub(crate) fn check_and_apply_value_operation<D, M>(
     database: &mut D,
     model: &M,
     op: &DatabaseOperation,
-) -> Option<Hash>
+) -> Option<StepOutcome>
 where
     D: DatabaseValueOps,
     M: DatabaseReferenceModel,
 {
-    match op {
-        DatabaseOperation::Set(key, bytes) => {
-            let data = Bytes::copy_from_slice(bytes);
-            let result = database.set(key.clone(), data);
+    let outcome = apply_database_step(database, op).expect("applying a step should succeed")?;
+    assert_outcome_matches_model(&outcome, model, op);
+    Some(outcome)
+}
 
+/// Assert that an operation's observable [`StepOutcome`] agrees with the reference `model`.
+fn assert_outcome_matches_model<M: DatabaseReferenceModel>(
+    outcome: &StepOutcome,
+    model: &M,
+    op: &DatabaseOperation,
+) {
+    match (op, outcome) {
+        (DatabaseOperation::Set(_, bytes), StepOutcome::Unit(result)) => {
             if bytes.len() <= MAX_FILE_CHUNK_SIZE {
-                assert!(
-                    result.is_ok(),
-                    "Set should have succeeded but failed: {:?}",
-                    result.err()
-                );
+                assert!(result.is_ok(), "Set should have succeeded: {result:?}");
             } else {
                 assert!(result.is_err(), "Set should have failed but succeeded");
             }
         }
-        DatabaseOperation::Write(key, offset, bytes) => {
-            let data = Bytes::copy_from_slice(bytes);
-            let result = database.write(key.clone(), *offset, data);
-
+        (DatabaseOperation::Write(key, offset, bytes), StepOutcome::Length(result)) => {
             let should_succeed = model.write_outcome(key, *offset, bytes).is_some();
+            assert_eq!(
+                should_succeed,
+                result.is_ok(),
+                "Write outcome disagrees with the model: {result:?}"
+            );
 
-            if should_succeed {
-                assert!(
-                    result.is_ok(),
-                    "Write should have succeeded but failed: {:?}",
-                    result.err()
+            if let Ok(length) = result {
+                assert_eq!(
+                    *length,
+                    bytes.len(),
+                    "num bytes_written disagreement between model and application"
                 );
-            } else {
-                assert!(result.is_err(), "Write should have failed but succeeded");
             }
         }
-        DatabaseOperation::Read(key, offset, len) => {
-            let mut database_value = vec![0; *len];
-
-            let mut cursor = 0;
-            let mut result = database.read(key, offset + cursor, &mut database_value[cursor..]);
-
-            while let Ok(read) = result {
-                if read == 0 {
-                    break;
-                }
-                cursor += read;
-                result = database.read(key, offset + cursor, &mut database_value[cursor..])
-            }
-
+        (DatabaseOperation::Read(key, offset, len), StepOutcome::Read(result)) => {
             if let Some(map_value) = model.data().get(key) {
                 if *offset > map_value.len() || *len > MAX_FILE_CHUNK_SIZE {
-                    assert!(result.is_err());
+                    assert!(result.is_err(), "Read should have failed but succeeded");
                 } else {
+                    let bytes = result.as_ref().expect("Read should have succeeded");
                     let expected_len = std::cmp::min(*len, map_value.len() - offset);
-                    assert!(cursor >= expected_len);
+                    assert!(bytes.len() >= expected_len);
                     assert_eq!(
-                        &database_value[..expected_len],
+                        &bytes[..expected_len],
                         &map_value[*offset..*offset + expected_len]
                     );
                 }
             } else {
-                assert!(result.is_err());
+                assert!(result.is_err(), "Read of a missing key should have failed");
             }
         }
-        DatabaseOperation::Delete(key) => {
-            database
-                .delete(key.clone())
-                .expect("Deleting should succeed");
+        (DatabaseOperation::Delete(_), StepOutcome::Unit(result)) => {
+            assert!(result.is_ok(), "Delete should have succeeded: {result:?}");
         }
-        DatabaseOperation::Exists(key) => {
-            let in_database = database.exists(key).expect("Writing should succeed");
-            let in_map = model.data().contains_key(key);
-            assert_eq!(in_database, in_map);
+        (DatabaseOperation::Exists(key), StepOutcome::Exists(result)) => {
+            let in_database = *result.as_ref().expect("Exists should have succeeded");
+            assert_eq!(in_database, model.data().contains_key(key));
         }
-        DatabaseOperation::ValueLength(key) => {
-            let database_length = database.value_length(key);
-            let map_value = model.data().get(key);
-
-            match (database_length, map_value) {
-                (Ok(database_length), Some(map_value)) => {
-                    assert_eq!(database_length, map_value.len())
-                }
+        (DatabaseOperation::ValueLength(key), StepOutcome::Length(result)) => {
+            match (result, model.data().get(key)) {
+                (Ok(length), Some(map_value)) => assert_eq!(*length, map_value.len()),
                 (Err(_), None) => (),
                 _ => panic!("The value exists in one map but not the other"),
             }
         }
-        DatabaseOperation::Hash => {
-            return Some(database.hash().expect("Hash should succeed"));
+        (DatabaseOperation::Hash, StepOutcome::Hash(result)) => {
+            assert!(result.is_ok(), "Hash should have succeeded: {result:?}");
         }
-        DatabaseOperation::Commit
-        | DatabaseOperation::Checkout
-        | DatabaseOperation::CommitCheckoutRoundtrip => {
-            unimplemented!("commit and checkout operations are not handled")
-        }
+        _ => panic!("outcome {outcome:?} does not correspond to operation {op:?}"),
     }
-
-    None
 }
 
+/// Apply `op` to `database`, keeping `model` and `checkout_candidates` in sync and asserting
+/// observable results against the model.
+///
+/// Returns the observable [`StepOutcome`] for provable operations (so callers can compare it
+/// against a prove/verify-mode outcome), and `None` for the persistence operations.
 pub(crate) fn apply_database_operation_with_model<KV, D>(
     database: &mut D,
     model: &mut DatabaseModel,
@@ -562,20 +551,26 @@ pub(crate) fn apply_database_operation_with_model<KV, D>(
     handle: &Handle,
     repo: &KV::Repo,
     checkout_candidates: &mut HashMap<Hash, bool>,
-) where
+) -> Option<StepOutcome>
+where
     KV: BackgroundPersistentKeyValueStore,
     D: DatabaseOps<KV>,
 {
     match op {
         DatabaseOperation::Hash => {
-            let new_digest = check_and_apply_value_operation(database, model, op)
-                .expect("Hash operations produce a digest");
+            let outcome = check_and_apply_value_operation(database, model, op)
+                .expect("Hash operations produce an outcome");
+            let StepOutcome::Hash(Ok(new_digest)) = outcome else {
+                panic!("Hash operation should produce a hash outcome, got {outcome:?}");
+            };
             model.observe_hash(new_digest);
             checkout_candidates.entry(new_digest).or_insert(false);
+            Some(StepOutcome::Hash(Ok(new_digest)))
         }
         DatabaseOperation::Commit => {
             let commit_id = database.commit(repo).expect("Committing should succeed");
             checkout_candidates.insert(*commit_id.as_hash(), true);
+            None
         }
         DatabaseOperation::Checkout => {
             if !checkout_candidates.is_empty() {
@@ -592,6 +587,7 @@ pub(crate) fn apply_database_operation_with_model<KV, D>(
                     "Checkout result did not match whether the commit id was committed"
                 );
             }
+            None
         }
         DatabaseOperation::CommitCheckoutRoundtrip => {
             let commit_id = database
@@ -600,10 +596,12 @@ pub(crate) fn apply_database_operation_with_model<KV, D>(
             // Register the resulting commit so a later `Checkout` operation
             // does not see an unexpected success against this hash.
             checkout_candidates.insert(*commit_id.as_hash(), true);
+            None
         }
         op => {
-            check_and_apply_value_operation(database, model, op);
+            let outcome = check_and_apply_value_operation(database, model, op);
             model.apply(op);
+            outcome
         }
     }
 }
@@ -700,12 +698,15 @@ pub(crate) fn apply_database_step<D: DatabaseValueOps>(
 }
 
 /// Generate and verify a proof for a single [`DatabaseOperation`] applied to `database`.
-/// Returns the serialised proof or `None` if `operation` is not a provable step.
+///
+/// Returns the serialised proof together with the operation's observable [`StepOutcome`], or
+/// `None` if `operation` is not a provable step. The Prove- and Verify-mode outcomes are
+/// asserted to be equal before returning; the returned outcome is the (identical) Prove-mode one.
 #[cfg(any(test, rocksdb_test_utils))]
 pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
     database: &TracedDatabase<KV, Normal>,
     operation: &DatabaseOperation,
-) -> Option<Vec<u8>> {
+) -> Option<(Vec<u8>, StepOutcome)> {
     use octez_riscv_data::hash::PartialHash;
 
     let pre_root_hash = Hash::from_foldable(database);
@@ -716,7 +717,8 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
         .expect("starting a proof should succeed");
 
     // Nothing to record or compare if the step was not provable
-    apply_database_step(&mut prover, operation).expect("applying a step should succeed")?;
+    let prove_outcome =
+        apply_database_step(&mut prover, operation).expect("applying a step should succeed")?;
 
     let post_root_hash = Hash::from_foldable(&prover);
     let proof = MerkleProof::from_foldable(&prover);
@@ -738,12 +740,18 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
         pre_root_hash,
         "the proof must reconstruct the pre-operation root hash"
     );
-    apply_database_step(&mut verify_db, operation).expect("applying a step should succeed");
+    let verify_outcome = apply_database_step(&mut verify_db, operation)
+        .expect("applying a step should succeed")
+        .expect("a provable step in Prove mode must be provable in Verify mode");
     let verify_post_root_hash = PartialHash::from_foldable(None, &verify_db)
         .to_hash()
         .expect("hashing the Verify database should succeed");
     let verify_step_trace = verify_db.into_trace();
 
+    assert_eq!(
+        prove_outcome, verify_outcome,
+        "Prove- and Verify-mode operations must produce the same observable result"
+    );
     assert_eq!(
         verify_step_trace, proof_step_trace,
         "Prove- and Verify-mode execution traces should match"
@@ -753,7 +761,7 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
         "Prove- and Verify-mode root hashes should match"
     );
 
-    Some(proof_bytes)
+    Some((proof_bytes, prove_outcome))
 }
 
 /// Like [`run_database_operations`], but additionally generates and verifies a proof for
@@ -781,13 +789,17 @@ where
     operations.push(DatabaseOperation::Hash);
 
     for operation in operations {
-        // Provable operations are proven over their pre-operation state, so prove before applying,
-        // recording the serialised proof in the database's trace.
-        if let Some(proof_bytes) = prove_and_verify_database_operation(&database, &operation) {
-            database.record_proof(operation.clone(), proof_bytes)
-        }
+        // Provable operations are proven over their pre-operation state, so prove before applying.
+        // Record the serialised proof in the database's trace before applying, so the trace keeps
+        // its proof-then-operation ordering.
+        let prove_outcome = prove_and_verify_database_operation(&database, &operation).map(
+            |(proof_bytes, outcome)| {
+                database.record_proof(operation.clone(), proof_bytes);
+                outcome
+            },
+        );
 
-        apply_database_operation_with_model::<KV, _>(
+        let normal_outcome = apply_database_operation_with_model::<KV, _>(
             &mut database,
             &mut model,
             &operation,
@@ -795,6 +807,17 @@ where
             repo,
             &mut checkout_candidates,
         );
+
+        // The proof is generated over the pre-operation state, so the Prove/Verify-mode result
+        // must match the result the same operation produces in Normal mode.
+        if let Some(prove_outcome) = prove_outcome {
+            let normal_outcome =
+                normal_outcome.expect("a provable operation must produce a Normal-mode outcome");
+            assert_eq!(
+                prove_outcome, normal_outcome,
+                "Prove/Verify-mode result must match the Normal-mode result"
+            );
+        }
     }
 
     database.into_trace()
