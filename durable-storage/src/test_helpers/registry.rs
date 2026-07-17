@@ -191,7 +191,9 @@ where
             let database = registry
                 .database_mut(*index)
                 .expect("The index is in bounds");
-            return apply_database_step(database, db_op).expect("applying a step should succeed");
+            return apply_database_step(database, db_op)
+                .expect("applying a step should succeed")
+                .is_some();
         }
         RegistryOperation::GrowRegistry => grow_registry(registry),
         RegistryOperation::ShrinkRegistry => {

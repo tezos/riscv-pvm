@@ -41,6 +41,8 @@ use crate::key::Key;
 use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::test_helpers::OperationView;
+use crate::test_helpers::StepOutcome;
+use crate::test_helpers::outcome_from_value;
 
 /// Maximum size for the value argument of a sampled operation
 pub(crate) const VALUE_MAX_SIZE: usize = 10_000;
@@ -644,63 +646,57 @@ where
     database.into_trace()
 }
 
-/// Apply a value `operation` to `database`, propagating operational errors and
-/// ignoring invalid-argument failures.
+/// Apply a value `operation` to `database`, capturing its observable outcome.
 ///
-/// Returns `true` if the operation was a provable step (everything except the
-/// persistence operations).
+/// Operational errors are propagated (they indicate a harness or implementation bug, not an
+/// observable result); invalid-argument failures and `Ok` values are captured in the returned
+/// [`StepOutcome`]. Returns `None` for the persistence operations, which are not provable
+/// steps.
 pub(crate) fn apply_database_step<D: DatabaseValueOps>(
     database: &mut D,
     operation: &DatabaseOperation,
-) -> Result<bool, OperationalError> {
-    fn result_operational<T>(result: Result<T, Error>) -> Result<(), OperationalError> {
-        match result {
-            Ok(_) | Err(Error::InvalidArgument(_)) => Ok(()),
-            Err(Error::Operational(e)) => Err(e),
-        }
-    }
-
-    match operation {
+) -> Result<Option<StepOutcome>, OperationalError> {
+    let outcome = match operation {
         DatabaseOperation::Set(key, data) => {
-            result_operational(database.set(key.clone(), data.clone()))?;
+            outcome_from_value(database.set(key.clone(), data.clone()), StepOutcome::Unit)?
         }
-        DatabaseOperation::Write(key, offset, data) => {
-            result_operational(database.write(key.clone(), *offset, data.clone()))?;
-        }
+        DatabaseOperation::Write(key, offset, data) => outcome_from_value(
+            database.write(key.clone(), *offset, data.clone()),
+            StepOutcome::Length,
+        )?,
         DatabaseOperation::Read(key, offset, len) => {
             let mut buffer = vec![0; *len];
             let mut cursor = 0;
             loop {
                 match database.read(key, offset + cursor, &mut buffer[cursor..]) {
-                    Ok(0) => break,
+                    Ok(0) => break StepOutcome::Read(Ok(buffer[..cursor].to_vec())),
                     Ok(read) => cursor += read,
-                    Err(e) => {
-                        result_operational::<()>(Err(e))?;
-                        break;
+                    Err(Error::InvalidArgument(error)) => {
+                        break StepOutcome::Read(Err(format!("{error:?}")));
                     }
+                    Err(Error::Operational(error)) => return Err(error),
                 }
             }
         }
         DatabaseOperation::Delete(key) => {
             database.delete(key.clone())?;
+            StepOutcome::Unit(Ok(()))
         }
         DatabaseOperation::Exists(key) => {
-            result_operational(database.exists(key))?;
+            outcome_from_value(database.exists(key), StepOutcome::Exists)?
         }
         DatabaseOperation::ValueLength(key) => {
-            result_operational(database.value_length(key))?;
+            outcome_from_value(database.value_length(key), StepOutcome::Length)?
         }
-        DatabaseOperation::Hash => {
-            database.hash()?;
-        }
+        DatabaseOperation::Hash => StepOutcome::Hash(Ok(database.hash()?)),
         DatabaseOperation::Commit
         | DatabaseOperation::Checkout
         | DatabaseOperation::CommitCheckoutRoundtrip => {
-            return Ok(false);
+            return Ok(None);
         }
-    }
+    };
 
-    Ok(true)
+    Ok(Some(outcome))
 }
 
 /// Generate and verify a proof for a single [`DatabaseOperation`] applied to `database`.
@@ -720,9 +716,7 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
         .expect("starting a proof should succeed");
 
     // Nothing to record or compare if the step was not provable
-    if !apply_database_step(&mut prover, operation).expect("applying a step should succeed") {
-        return None;
-    }
+    apply_database_step(&mut prover, operation).expect("applying a step should succeed")?;
 
     let post_root_hash = Hash::from_foldable(&prover);
     let proof = MerkleProof::from_foldable(&prover);
