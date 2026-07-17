@@ -704,17 +704,20 @@ pub(crate) fn apply_database_step<D: DatabaseValueOps>(
 /// asserted to be equal before returning; the returned outcome is the (identical) Prove-mode one.
 #[cfg(any(test, rocksdb_test_utils))]
 pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
-    database: &TracedDatabase<KV, Normal>,
+    database: &Database<KV, Normal>,
     operation: &DatabaseOperation,
 ) -> Option<(Vec<u8>, StepOutcome)> {
     use octez_riscv_data::hash::PartialHash;
 
     let pre_root_hash = Hash::from_foldable(database);
 
-    // Produce a proof and record the trace of applying `operation`
-    let mut prover = database
-        .try_start_proof()
-        .expect("starting a proof should succeed");
+    // Produce a proof and record the trace of applying `operation`. The prover is wrapped in a
+    // `TracedDatabase` so its per-step trace can be compared against the Verify-mode replay below.
+    let mut prover = TracedDatabase::from(
+        database
+            .try_start_proof()
+            .expect("starting a proof should succeed"),
+    );
 
     // Nothing to record or compare if the step was not provable
     let prove_outcome =
@@ -764,13 +767,30 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
     Some((proof_bytes, prove_outcome))
 }
 
-/// Like [`run_database_operations`], but additionally generates and verifies a proof for
-/// every supported operation, recording the serialised proof in the trace.
+/// A proof recorded for a single provable [`DatabaseOperation`], together with the operation's
+/// observable outcome (asserted equal across Normal, Prove and Verify mode).
+#[cfg(test)]
+#[serde_with::serde_as]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DatabaseProofStep {
+    step: DatabaseOperation,
+    #[serde_as(as = "serde_with::hex::Hex")]
+    proof: Vec<u8>,
+    outcome: StepOutcome,
+}
+
+/// Like [`run_database_operations`], but additionally generates and verifies a proof for every
+/// provable operation, returning the sequence of recorded proofs and their observable outcomes.
+///
+/// Unlike the interleaved [`Trace`] returned by [`run_database_operations`], each provable
+/// operation contributes a single [`DatabaseProofStep`] carrying the operation, its proof and its
+/// outcome — so the operation is recorded once rather than duplicated alongside a separate proof
+/// entry.
 #[cfg(test)]
 pub(crate) fn run_and_prove_database_operations<KV>(
     repo: &KV::Repo,
     mut operations: Vec<DatabaseOperation>,
-) -> Trace
+) -> Vec<DatabaseProofStep>
 where
     KV: BackgroundPersistentKeyValueStore,
 {
@@ -780,24 +800,18 @@ where
         .expect("Building the runtime should succeed");
     let handle = runtime.handle();
 
-    let mut database = TracedDatabase::<KV, Normal>::try_new(handle, repo)
+    let mut database = Database::<KV, Normal>::try_new(handle, repo)
         .expect("Creating the database should succeed");
     let mut model = DatabaseModel::default();
     let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
+    let mut proof_steps = Vec::new();
 
-    // Force a final hash to be recorded in the trace
+    // Force a final hash so a proof is generated for the terminal state.
     operations.push(DatabaseOperation::Hash);
 
     for operation in operations {
         // Provable operations are proven over their pre-operation state, so prove before applying.
-        // Record the serialised proof in the database's trace before applying, so the trace keeps
-        // its proof-then-operation ordering.
-        let prove_outcome = prove_and_verify_database_operation(&database, &operation).map(
-            |(proof_bytes, outcome)| {
-                database.record_proof(operation.clone(), proof_bytes);
-                outcome
-            },
-        );
+        let proof_and_outcome = prove_and_verify_database_operation(&database, &operation);
 
         let normal_outcome = apply_database_operation_with_model::<KV, _>(
             &mut database,
@@ -810,15 +824,20 @@ where
 
         // The proof is generated over the pre-operation state, so the Prove/Verify-mode result
         // must match the result the same operation produces in Normal mode.
-        if let Some(prove_outcome) = prove_outcome {
+        if let Some((proof, prove_outcome)) = proof_and_outcome {
             let normal_outcome =
                 normal_outcome.expect("a provable operation must produce a Normal-mode outcome");
             assert_eq!(
                 prove_outcome, normal_outcome,
                 "Prove/Verify-mode result must match the Normal-mode result"
             );
+            proof_steps.push(DatabaseProofStep {
+                step: operation.clone(),
+                proof,
+                outcome: prove_outcome,
+            });
         }
     }
 
-    database.into_trace()
+    proof_steps
 }
