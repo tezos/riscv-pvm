@@ -74,6 +74,7 @@ optional = true
 [dev-dependencies]
 proptest.workspace = true
 criterion.workspace = true
+blake3.workspace = true
 octez-riscv-durable-storage = { path = ".", features = ["unstable-test-utils"] }
 octez-riscv-test-utils.workspace = true
 serde.workspace = true
@@ -95,6 +96,10 @@ harness = false
 
 [[bench]]
 name = "avl_storage"
+harness = false
+
+[[bench]]
+name = "avl_hashing"
 harness = false
 
 [[bench]]
