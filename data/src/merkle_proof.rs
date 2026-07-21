@@ -18,6 +18,7 @@ use crate::codec::Bincode;
 use crate::codec::LeafCodec;
 use crate::codec::LeafDecode;
 use crate::codec::LeafDecodeError;
+use crate::components::blake3_bytes::Blake3Proof;
 use crate::foldable::Foldable;
 use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
@@ -113,6 +114,9 @@ pub enum ProofError {
     #[error("Encountered a node where a leaf was expected")]
     UnexpectedNode,
 
+    #[error("Encountered a leaf of the wrong kind for the expected schema position")]
+    LeafKindMismatch,
+
     #[error("Custom error: {0}")]
     Custom(Box<dyn std::error::Error>),
 }
@@ -160,6 +164,17 @@ pub trait Deserialiser {
 
     /// It is expected for the proof to be a leaf. Parse the raw bytes of that leaf into a type `T`.
     fn into_leaf<T: LeafDecode<Self::Codec>>(self) -> SuspendedResult<Self, Partial<T>>;
+
+    /// It is expected for the proof to be a BLAKE3 within-value proof leaf (tag
+    /// [`crate::merkle_proof::tag::TAG_BLAKE3`]) — the length-committed value proof carried in the
+    /// `data` slot of an AVL node by [`crate::components::blake3_bytes::Blake3Bytes`]. A blinded or
+    /// absent value node yields [`Partial::Blinded`] / [`Partial::Absent`]; any other leaf kind is a
+    /// schema mismatch ([`ProofError::LeafKindMismatch`]).
+    ///
+    /// This is kept distinct from [`Deserialiser::into_leaf`] so the two encodings stay structurally
+    /// disjoint (invariant I7): only `Blake3Bytes` ever parses a leaf as a `Blake3Proof`, and the
+    /// wire tag decides which decoder runs.
+    fn into_blake3_leaf(self) -> SuspendedResult<Self, Partial<Blake3Proof>>;
 
     /// It is expected for the proof to be a node. Obtain the deserialiser for the branch case.
     fn into_node(self) -> Result<Self::DeserialiserNode, Self::Error>;

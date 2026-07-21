@@ -29,6 +29,7 @@ use criterion::Criterion;
 use criterion::Throughput;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use octez_riscv_data::components::blake3_bytes::hash_value;
 use octez_riscv_data::components::bytes::Bytes;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::mode::Normal;
@@ -36,10 +37,10 @@ use octez_riscv_durable_storage::avl::resolver::LazyNodeId;
 use octez_riscv_durable_storage::avl::resolver::LazyResolver;
 use octez_riscv_durable_storage::avl::tree::Tree;
 use octez_riscv_durable_storage::key::Key;
-use octez_riscv_durable_storage::storage::KeyValueStore;
 use octez_riscv_durable_storage::storage::Loadable;
 use octez_riscv_durable_storage::storage::Storable;
 use octez_riscv_durable_storage::storage::StoreOptions;
+use octez_riscv_durable_storage::storage::WriteableKeyValueStore;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use random::generate_keys;
@@ -71,7 +72,7 @@ const LARGE_SIZES: &[usize] = &[2_048, 8_192, 16_384];
 /// `LARGE_EVERY`-th is a multi-kilobyte value (cycling `LARGE_SIZES`). Deterministic so the
 /// per-run work — and the number of large values hashed — is stable.
 fn value_for(i: usize) -> Vec<u8> {
-    let len = if i % LARGE_EVERY == 0 {
+    let len = if i.is_multiple_of(LARGE_EVERY) {
         LARGE_SIZES[(i / LARGE_EVERY) % LARGE_SIZES.len()]
     } else {
         8
@@ -113,9 +114,16 @@ fn bench_value_hash(c: &mut Criterion) {
             b.iter(|| std::hint::black_box(Hash::from_foldable(bytes)))
         });
 
-        // Target: raw BLAKE3 of the same bytes (what the BLAKE3-direct scheme computes).
+        // Reference: raw BLAKE3 of the same bytes — the dominant term of the new value hash.
         group.bench_with_input(BenchmarkId::new("raw_blake3", size), &data, |b, data| {
             b.iter(|| std::hint::black_box(blake3::hash(data)))
+        });
+
+        // The implemented length-committed value hash: `combine(H_len, blake3::hash(bytes))`
+        // (`data/docs/blake3-bytes-length-committed.md` §2). Tracks `raw_blake3` plus two
+        // negligible fixed hashes (an 8-byte length hash and one 64-byte combine).
+        group.bench_with_input(BenchmarkId::new("hash_value", size), &data, |b, data| {
+            b.iter(|| std::hint::black_box(hash_value(data)))
         });
     }
     group.finish();
@@ -126,7 +134,7 @@ fn bench_value_hash(c: &mut Criterion) {
 /// Build an AVL tree with `keys` (expected pre-sorted for reproducibility), persist it
 /// (including value data) into `store`, and return the tree's root hash. Values follow
 /// [`value_for`] so most are tiny but roughly one in `LARGE_EVERY` is multi-kilobyte.
-fn build_and_persist<KV: KeyValueStore>(store: &Arc<KV>, keys: &[Key]) -> Hash {
+fn build_and_persist<KV: WriteableKeyValueStore>(store: &Arc<KV>, keys: &[Key]) -> Hash {
     let mut resolver = LazyResolver::new(store.clone());
     let mut tree: Tree<LazyNodeId> = Tree::default();
     for (i, key) in keys.iter().enumerate() {
