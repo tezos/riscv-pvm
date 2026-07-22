@@ -15,6 +15,7 @@
 //! [`Registry`]: crate::registry::Registry
 
 pub mod database;
+pub(crate) mod proof_size;
 pub mod registry;
 
 use bytes::Bytes;

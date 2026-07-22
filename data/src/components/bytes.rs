@@ -1109,10 +1109,10 @@ fn clamp_range(total_len: usize, start: usize, len: usize) -> Range<usize> {
 }
 
 /// Arity of internal nodes in the Merkle tree that holds the pages
-pub(crate) const NODE_ARITY: usize = 4;
+pub const NODE_ARITY: usize = 4;
 
 /// Size of a page in bytes
-pub(crate) const PAGE_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 4096;
 
 #[cfg(test)]
 pub(crate) mod tests;

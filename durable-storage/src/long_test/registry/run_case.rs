@@ -25,6 +25,8 @@ use crate::repo::DirectoryManager;
 use crate::storage::in_memory::InMemoryKeyValueStore;
 use crate::storage::in_memory::InMemoryRepo;
 use crate::test_helpers::database::check_and_apply_value_operation;
+use crate::test_helpers::proof_size::assert_proof_size;
+use crate::test_helpers::proof_size::registry_operation_proof_size_bound;
 use crate::test_helpers::registry::RegistryOperation;
 use crate::test_helpers::registry::grow_registry;
 use crate::test_helpers::registry::prove_and_verify_registry_operation;
@@ -107,9 +109,15 @@ fn checkout_targets(
 /// producing and verifying a proof for every provable operation.
 fn apply_sequence(targets: &mut Targets, ops: &[RegistryOperation], prove: bool) {
     for op in ops {
-        // Proofs are taken over the pre-operation state, so prove first.
+        // Proofs are taken over the pre-operation state, so prove first. The
+        // size bound is likewise computed over the pre-operation model.
         if prove {
-            prove_and_verify_registry_operation(&targets.persistent, op);
+            let bound = registry_operation_proof_size_bound(&targets.model.databases, op);
+            let proof = prove_and_verify_registry_operation(&targets.persistent, op);
+            if let Some(proof) = proof {
+                let bound = bound.expect("provable operations have a size bound");
+                assert_proof_size(op, proof.len(), bound);
+            }
         }
 
         apply_op_checked(&mut targets.in_memory, &targets.model, op);

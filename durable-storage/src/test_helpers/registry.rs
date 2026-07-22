@@ -41,6 +41,8 @@ use crate::registry::Registry;
 use crate::registry::RegistryMode;
 use crate::repo::RegistryRepo;
 use crate::test_helpers::OperationView;
+use crate::test_helpers::proof_size::assert_proof_size;
+use crate::test_helpers::proof_size::registry_operation_proof_size_bound;
 
 /// Operations on a [`Registry`]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -316,7 +318,11 @@ where
     grow_registry_with_model(&mut registry, &mut registry_model);
 
     for operation in operations {
+        // The size bound is computed over the pre-operation model.
+        let bound = registry_operation_proof_size_bound(&registry_model, &operation);
         if let Some(proof) = prove_and_verify_registry_operation(&registry, &operation) {
+            let bound = bound.expect("provable operations have a size bound");
+            assert_proof_size(&operation, proof.len(), bound);
             proof_steps.push(RegistryProofStep {
                 step: operation.clone(),
                 proof,
@@ -394,9 +400,7 @@ where
                     .clear_database(index)
                     .expect("Clearing the database should be successful");
 
-                registry_model[index].data.clear();
-                registry_model[index].ambiguous_hash = false;
-                registry_model[index].last = None;
+                registry_model[index] = DatabaseModel::default();
             }
             RegistryOperation::CopyDatabase(src, dst) => {
                 registry
