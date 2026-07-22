@@ -43,6 +43,9 @@ pub struct LongTestConfig {
     pub keep_epochs: Option<NonZeroUsize>,
     /// Directory for run state and failure artifacts. `None` uses a tempdir.
     pub out_dir: Option<PathBuf>,
+    /// Fail the test when a proof size exceeds the maximum, instead of printing
+    /// a warning.
+    pub fail_on_warning: bool,
 }
 
 impl LongTestConfig {
@@ -94,6 +97,8 @@ pub(crate) struct FailureMeta {
     pub ops_per_epoch: usize,
     /// Test cases per epoch.
     pub cases_per_epoch: u32,
+    /// Whether warnings are escalated to failures.
+    pub fail_on_warning: bool,
     /// The commit identifying the failing epoch's starting state.
     pub base_commit: CommitId,
     /// Short description of the failure.

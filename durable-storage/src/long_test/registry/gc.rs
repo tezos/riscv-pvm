@@ -181,6 +181,7 @@ mod tests {
                 time_budget: None,
                 keep_epochs: Some(NonZeroUsize::new(1).expect("non-zero")),
                 out_dir: Some(out_dir.clone()),
+                fail_on_warning: false,
             },
             2,
             false,

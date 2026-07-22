@@ -82,6 +82,7 @@ pub fn run_long_test(
     let ops_per_epoch = config.ops_per_epoch;
     let cases_per_epoch = config.cases_per_epoch;
     let keep_epochs = config.keep_epochs;
+    let fail_on_warning = config.fail_on_warning;
     let out_dir = match config.out_dir.clone() {
         Some(dir) => {
             fs::create_dir_all(&dir)
@@ -110,6 +111,9 @@ pub fn run_long_test(
     }
     if keep_stable_size {
         rerun.push_str(" --keep-stable-size");
+    }
+    if config.fail_on_warning {
+        rerun.push_str(" --fail-on-warning");
     }
     eprintln!(
         "test directory: {} | ops/epoch: {ops_per_epoch} | cases/epoch: {cases_per_epoch} | \
@@ -152,7 +156,13 @@ pub fn run_long_test(
             ops_per_epoch,
         );
         let result = runner.run(&strategy, |ops| {
-            run_case(&in_memory_repo, &persistent_repo, &base, &ops);
+            run_case(
+                &in_memory_repo,
+                &persistent_repo,
+                &base,
+                &ops,
+                fail_on_warning,
+            );
             Ok(())
         });
 
@@ -195,6 +205,7 @@ pub fn run_long_test(
                     epoch,
                     ops_per_epoch,
                     cases_per_epoch,
+                    fail_on_warning,
                     base_commit: base.commit,
                     reason: reason.to_string(),
                     git_sha: std::env::var("GITHUB_SHA").unwrap_or_else(|_| "unknown".to_string()),
@@ -371,7 +382,13 @@ pub fn replay_failure(dir: &Path) -> Result<()> {
     let ops: Vec<RegistryOperation> = read_failure_file(dir, REGRESSION_FILE)?;
 
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        run_case(&in_memory_repo, &persistent_repo, &base, &ops);
+        run_case(
+            &in_memory_repo,
+            &persistent_repo,
+            &base,
+            &ops,
+            meta.fail_on_warning,
+        );
     }));
 
     match outcome {
@@ -418,6 +435,7 @@ mod tests {
             time_budget: None,
             keep_epochs: Some(NonZeroUsize::new(2).expect("non-zero")),
             out_dir: None,
+            fail_on_warning: false,
         }
     }
 
@@ -481,6 +499,7 @@ mod tests {
             epoch: 0,
             ops_per_epoch: 1,
             cases_per_epoch: 1,
+            fail_on_warning: false,
             base_commit,
             reason: "test".to_string(),
             git_sha: "test".to_string(),

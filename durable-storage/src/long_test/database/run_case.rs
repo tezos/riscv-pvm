@@ -71,8 +71,14 @@ fn checkout_targets(
 }
 
 /// Apply `ops` to all targets in lockstep, optionally producing and verifying a
-/// proof for every provable operation.
-fn apply_sequence(targets: &mut Targets, ops: &[DatabaseOperation], prove: bool) {
+/// proof for every provable operation. `fail_on_warning` escalates proof size
+/// warnings into failures.
+fn apply_sequence(
+    targets: &mut Targets,
+    ops: &[DatabaseOperation],
+    prove: bool,
+    fail_on_warning: bool,
+) {
     for op in ops {
         // Proofs are taken over the pre-operation state, so prove first. The
         // size bound is likewise computed over the pre-operation model.
@@ -81,7 +87,7 @@ fn apply_sequence(targets: &mut Targets, ops: &[DatabaseOperation], prove: bool)
             prove_and_verify_database_operation(targets.persistent_db.inner(), op).map(
                 |(proof, outcome)| {
                     let bound = bound.expect("provable operations have a size bound");
-                    assert_proof_size(op, proof.len(), bound);
+                    assert_proof_size(op, proof.len(), bound, fail_on_warning);
                     outcome
                 },
             )
@@ -148,9 +154,10 @@ pub fn run_case(
     persistent_repo: &DirectoryManager,
     base: &Base<LongTestModel>,
     ops: &[DatabaseOperation],
+    fail_on_warning: bool,
 ) {
     let mut targets = checkout_targets(handle, in_memory_repo, persistent_repo, base);
-    apply_sequence(&mut targets, ops, true);
+    apply_sequence(&mut targets, ops, true, fail_on_warning);
     check_consistency(targets);
 }
 
@@ -164,7 +171,7 @@ pub fn advance_base(
     ops: &[DatabaseOperation],
 ) -> Base<LongTestModel> {
     let mut targets = checkout_targets(handle, in_memory_repo, persistent_repo, base);
-    apply_sequence(&mut targets, ops, false);
+    apply_sequence(&mut targets, ops, false, false);
 
     let in_memory_commit = targets
         .in_memory_db
