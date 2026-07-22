@@ -846,7 +846,7 @@ impl<T: CloneState> CloneState for VerifyImpl<T> {
 }
 
 /// Arity of internal nodes in the Merkle tree
-const NODE_ARITY: usize = 4;
+pub const NODE_ARITY: usize = 4;
 
 #[cfg(test)]
 mod tests;

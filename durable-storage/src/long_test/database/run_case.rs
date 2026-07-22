@@ -31,6 +31,8 @@ use crate::test_helpers::database::DatabaseOperation;
 use crate::test_helpers::database::DatabaseReferenceModel;
 use crate::test_helpers::database::check_and_apply_value_operation;
 use crate::test_helpers::database::prove_and_verify_database_operation;
+use crate::test_helpers::proof_size::assert_proof_size;
+use crate::test_helpers::proof_size::database_operation_proof_size_bound;
 
 /// State carried while applying a sequence of operations to all targets.
 struct Targets {
@@ -72,10 +74,17 @@ fn checkout_targets(
 /// proof for every provable operation.
 fn apply_sequence(targets: &mut Targets, ops: &[DatabaseOperation], prove: bool) {
     for op in ops {
-        // Proofs are taken over the pre-operation state, so prove first.
+        // Proofs are taken over the pre-operation state, so prove first. The
+        // size bound is likewise computed over the pre-operation model.
         let proof_verify_out = if prove {
-            prove_and_verify_database_operation(targets.persistent_db.inner(), op)
-                .map(|(_proof, outcome)| outcome)
+            let bound = database_operation_proof_size_bound(&targets.model, op);
+            prove_and_verify_database_operation(targets.persistent_db.inner(), op).map(
+                |(proof, outcome)| {
+                    let bound = bound.expect("provable operations have a size bound");
+                    assert_proof_size(op, proof.len(), bound);
+                    outcome
+                },
+            )
         } else {
             None
         };

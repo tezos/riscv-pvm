@@ -43,6 +43,10 @@ use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::test_helpers::OperationView;
 use crate::test_helpers::StepOutcome;
 use crate::test_helpers::outcome_from_value;
+#[cfg(test)]
+use crate::test_helpers::proof_size::assert_proof_size;
+#[cfg(test)]
+use crate::test_helpers::proof_size::database_operation_proof_size_bound;
 
 /// Maximum size for the value argument of a sampled operation
 pub(crate) const VALUE_MAX_SIZE: usize = 10_000;
@@ -811,7 +815,13 @@ where
 
     for operation in operations {
         // Provable operations are proven over their pre-operation state, so prove before applying.
+        // The size bound is likewise computed over the pre-operation model.
+        let bound = database_operation_proof_size_bound(&model, &operation);
         let proof_and_outcome = prove_and_verify_database_operation(&database, &operation);
+        if let Some((proof, _)) = &proof_and_outcome {
+            let bound = bound.expect("provable operations have a size bound");
+            assert_proof_size(&operation, proof.len(), bound);
+        }
 
         let normal_outcome = apply_database_operation_with_model::<KV, _>(
             &mut database,
