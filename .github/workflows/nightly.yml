@@ -104,6 +104,7 @@ jobs:
             --cases-per-epoch ${{ matrix.config.cases }} \
             --keep-epochs 1 \
             --max-minutes ${{ env.MAX_MINUTES }} \
+            --fail-on-warning \
             --out-dir '${{ github.workspace }}/run-${{ matrix.test }}-${{ matrix.config.ops }}-${{ matrix.config.cases }}-${{ matrix.replica }}'
 
       - name: Upload failure artifacts

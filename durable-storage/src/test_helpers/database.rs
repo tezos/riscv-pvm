@@ -820,7 +820,7 @@ where
         let proof_and_outcome = prove_and_verify_database_operation(&database, &operation);
         if let Some((proof, _)) = &proof_and_outcome {
             let bound = bound.expect("provable operations have a size bound");
-            assert_proof_size(&operation, proof.len(), bound);
+            assert_proof_size(&operation, proof.len(), bound, false);
         }
 
         let normal_outcome = apply_database_operation_with_model::<KV, _>(

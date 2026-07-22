@@ -322,7 +322,7 @@ where
         let bound = registry_operation_proof_size_bound(&registry_model, &operation);
         if let Some(proof) = prove_and_verify_registry_operation(&registry, &operation) {
             let bound = bound.expect("provable operations have a size bound");
-            assert_proof_size(&operation, proof.len(), bound);
+            assert_proof_size(&operation, proof.len(), bound, false);
             proof_steps.push(RegistryProofStep {
                 step: operation.clone(),
                 proof,

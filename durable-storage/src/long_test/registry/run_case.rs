@@ -107,7 +107,13 @@ fn checkout_targets(
 
 /// Apply `ops` to both registries and the model in lockstep, optionally
 /// producing and verifying a proof for every provable operation.
-fn apply_sequence(targets: &mut Targets, ops: &[RegistryOperation], prove: bool) {
+/// `fail_on_warning` escalates proof size warnings into failures.
+fn apply_sequence(
+    targets: &mut Targets,
+    ops: &[RegistryOperation],
+    prove: bool,
+    fail_on_warning: bool,
+) {
     for op in ops {
         // Proofs are taken over the pre-operation state, so prove first. The
         // size bound is likewise computed over the pre-operation model.
@@ -116,7 +122,7 @@ fn apply_sequence(targets: &mut Targets, ops: &[RegistryOperation], prove: bool)
             let proof = prove_and_verify_registry_operation(&targets.persistent, op);
             if let Some(proof) = proof {
                 let bound = bound.expect("provable operations have a size bound");
-                assert_proof_size(op, proof.len(), bound);
+                assert_proof_size(op, proof.len(), bound, fail_on_warning);
             }
         }
 
@@ -133,9 +139,10 @@ pub fn run_case(
     persistent_repo: &DirectoryManager,
     base: &Base<RegistryLongTestModel>,
     ops: &[RegistryOperation],
+    fail_on_warning: bool,
 ) {
     let mut targets = checkout_targets(in_memory_repo, persistent_repo, base);
-    apply_sequence(&mut targets, ops, true);
+    apply_sequence(&mut targets, ops, true, fail_on_warning);
 
     let in_memory_root = Hash::from_foldable(&targets.in_memory);
     let persistent_root = Hash::from_foldable(&targets.persistent);
@@ -154,7 +161,7 @@ pub fn advance_base(
     ops: &[RegistryOperation],
 ) -> Base<RegistryLongTestModel> {
     let mut targets = checkout_targets(in_memory_repo, persistent_repo, base);
-    apply_sequence(&mut targets, ops, false);
+    apply_sequence(&mut targets, ops, false, false);
 
     let in_memory_commit = targets
         .in_memory

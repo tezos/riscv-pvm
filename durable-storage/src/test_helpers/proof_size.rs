@@ -169,12 +169,40 @@ fn value_byte_ranges(op: &DatabaseOperation, value_len: usize) -> [Range<usize>;
     }
 }
 
+/// Ceiling on serialised proof sizes. Proofs above it are reported by
+/// [`assert_proof_size`].
+const MAXIMUM_PROOF_SIZE: usize = 16 * 1024;
+
+/// Print a warning, or panic when `fail_on_warning` is set.
+fn report_over_maximum(fail_on_warning: bool, message: String) {
+    if fail_on_warning {
+        panic!("{message}");
+    }
+    eprintln!("warning: {message}");
+}
+
 /// Assert an actual serialised proof size is within the modelled bound.
-pub(crate) fn assert_proof_size(op: &impl std::fmt::Debug, actual: usize, bound: usize) {
+/// Sizes above [`MAXIMUM_PROOF_SIZE`] are reported as warnings, or as test
+/// failures when `fail_on_warning` is set.
+pub(crate) fn assert_proof_size(
+    op: &impl std::fmt::Debug,
+    actual: usize,
+    bound: usize,
+    fail_on_warning: bool,
+) {
     assert!(
         actual <= bound,
         "proof size {actual} exceeds the modelled bound {bound} for {op:?}"
     );
+
+    if actual > MAXIMUM_PROOF_SIZE {
+        report_over_maximum(
+            fail_on_warning,
+            format!(
+                "proof size {actual} exceeds MAXIMUM_PROOF_SIZE {MAXIMUM_PROOF_SIZE} for {op:?}"
+            ),
+        );
+    }
 }
 
 /// Bound on the serialised proof size of a database operation: the worst-case

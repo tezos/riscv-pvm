@@ -73,6 +73,11 @@ struct TestArgs {
     /// Directory for run state and failure artifacts (default: a fresh tempdir).
     #[arg(long)]
     out_dir: Option<PathBuf>,
+
+    /// Fail the test when a proof size exceeds the maximum, instead of printing
+    /// a warning.
+    #[arg(long)]
+    fail_on_warning: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -131,6 +136,7 @@ fn config(args: TestArgs) -> Result<LongTestConfig> {
         epochs: args.epochs,
         keep_epochs: args.keep_epochs,
         out_dir: args.out_dir,
+        fail_on_warning: args.fail_on_warning,
     })
 }
 
