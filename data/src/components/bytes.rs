@@ -1146,7 +1146,7 @@ pub const NODE_ARITY: usize = 4;
 /// Size of a page in bytes
 ///
 /// Kept to half that of the maximum read-size: ensuring that at most
-/// two pages are pulled in on each test.
+/// three pages are pulled in on each read.
 pub const PAGE_SIZE: usize = 1024;
 
 #[cfg(test)]
