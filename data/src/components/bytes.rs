@@ -1144,7 +1144,10 @@ fn clamp_range(total_len: usize, start: usize, len: usize) -> Range<usize> {
 pub const NODE_ARITY: usize = 4;
 
 /// Size of a page in bytes
-pub const PAGE_SIZE: usize = 4096;
+///
+/// Kept to half that of the maximum read-size: ensuring that at most
+/// two pages are pulled in on each test.
+pub const PAGE_SIZE: usize = 1024;
 
 #[cfg(test)]
 pub(crate) mod tests;
