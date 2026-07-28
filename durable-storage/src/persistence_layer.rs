@@ -49,7 +49,10 @@ use crate::storage::ReadableKeyValueStore;
 use crate::storage::WriteableKeyValueStore;
 
 /// The name of the column family used for storing blob-keyed data.
-const BLOB_CF: &str = "blob";
+pub(crate) const BLOB_CF: &str = "blob";
+
+/// The name of the column family used for storing 'plain key'-ed data.
+pub(crate) const KV_CF: &str = "default";
 
 #[derive(BorrowDecode, Encode)]
 struct OffsetWriteMergePayload<'a> {
@@ -206,6 +209,71 @@ pub(crate) fn rocksdb_checkpoint_options() -> rocksdb::Options {
     options
 }
 
+/// The column family holding blob-keyed data.
+///
+/// Panics if the handle does not have it, which would mean it was not opened by this module.
+fn blob_cf_of(db: &rocksdb::DB) -> &rocksdb::ColumnFamily {
+    db.cf_handle(BLOB_CF)
+        .expect("the rocksdb instance should always contain the data cf")
+}
+
+/// Retrieve the data associated with a blob key from `db`.
+fn blob_get_from<'db>(
+    db: &'db rocksdb::DB,
+    key: &[u8],
+) -> Result<rocksdb::DBPinnableSlice<'db>, Error> {
+    let entry =
+        db.get_pinned_cf(blob_cf_of(db), key)
+            .map_err(|error| OperationalError::GetFailed {
+                column: BLOB_CF.to_string(),
+                key: key.to_owned(),
+                error,
+            })?;
+
+    match entry {
+        Some(value) => Ok(value),
+        None => Err(InvalidArgumentError::KeyNotFound)?,
+    }
+}
+
+/// Retrieve the value associated with a key from `db`.
+fn get_from<'db>(db: &'db rocksdb::DB, key: &[u8]) -> Result<rocksdb::DBPinnableSlice<'db>, Error> {
+    let value = db
+        .get_pinned(key)
+        .map_err(|error| OperationalError::GetFailed {
+            column: KV_CF.to_owned(),
+            key: key.to_owned(),
+            error,
+        })?;
+
+    match value {
+        Some(value) => Ok(value),
+        None => Err(InvalidArgumentError::KeyNotFound)?,
+    }
+}
+
+/// Open the database committed at `commit_path` in read-only mode.
+///
+/// A read-only instance does not acquire the directory's lock, replay its write-ahead log or
+/// rewrite its manifest, so the committed state is left exactly as it is found on disk - and the
+/// same directory can be opened this way any number of times over.
+///
+/// As a consequence such an instance only observes state that has been flushed to the commit; in
+/// practice that is all of it, as commits are created through [`Checkpoint::create_checkpoint`],
+/// which flushes first.
+fn open_committed_read_only(commit_path: &Path) -> Result<rocksdb::DB, OperationalError> {
+    rocksdb::DB::open_cf_descriptors_read_only(
+        &rocksdb_checkpoint_options(),
+        commit_path,
+        [
+            ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
+            ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
+        ],
+        false,
+    )
+    .map_err(|error| OperationalError::OpenRocksDbFailed { error })
+}
+
 /// Whether `commit_path` holds a published commit.
 ///
 /// A commit is published by renaming a complete checkpoint into place, so the `CURRENT` file that
@@ -290,7 +358,7 @@ impl PersistenceLayer {
             &rocksdb_checkpoint_options(),
             &checkpoint_path,
             [
-                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
                 ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
             ],
         )
@@ -303,9 +371,7 @@ impl PersistenceLayer {
     }
 
     fn blob_cf(&self) -> &rocksdb::ColumnFamily {
-        self.db_instance
-            .cf_handle(BLOB_CF)
-            .expect("the rocksdb instance should always contain the data cf")
+        blob_cf_of(&self.db_instance)
     }
 }
 
@@ -313,35 +379,11 @@ impl ReadableKeyValueStore for PersistenceLayer {
     type Repo = DirectoryManager;
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-        let key = key.as_ref();
-        let entry = self
-            .db_instance
-            .get_pinned_cf(self.blob_cf(), key)
-            .map_err(|error| OperationalError::GetFailed {
-                column: BLOB_CF.to_string(),
-                key: key.to_owned(),
-                error,
-            })?;
-
-        match entry {
-            Some(value) => Ok(value),
-            None => Err(InvalidArgumentError::KeyNotFound)?,
-        }
+        blob_get_from(&self.db_instance, key.as_ref())
     }
 
     fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-        let value = self.db_instance.get_pinned(key.as_ref()).map_err(|error| {
-            OperationalError::GetFailed {
-                column: "default".to_owned(),
-                key: key.as_ref().to_owned(),
-                error,
-            }
-        })?;
-
-        match value {
-            Some(value) => Ok(value),
-            None => Err(InvalidArgumentError::KeyNotFound)?,
-        }
+        get_from(&self.db_instance, key.as_ref())
     }
 }
 
@@ -398,7 +440,7 @@ impl WriteableKeyValueStore for PersistenceLayer {
         self.db_instance
             .put(key.as_ref(), value.as_ref())
             .map_err(|error| OperationalError::PutFailed {
-                column: "default".to_owned(),
+                column: KV_CF.to_owned(),
                 key: key.as_ref().to_owned(),
                 error,
             })
@@ -453,7 +495,7 @@ impl WriteableKeyValueStore for PersistenceLayer {
         self.db_instance
             .delete(key.as_ref())
             .map_err(|error| OperationalError::DeleteFailed {
-                column: "default".to_owned(),
+                column: KV_CF.to_owned(),
                 key: key.as_ref().to_owned(),
                 error,
             })
@@ -564,16 +606,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
         };
 
         // Open the previous commitment from the given source path in read-only mode
-        let read_only_database = rocksdb::DB::open_cf_descriptors_read_only(
-            &rocksdb_checkpoint_options(),
-            commit_path,
-            [
-                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
-                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
-            ],
-            false,
-        )
-        .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
+        let read_only_database = open_committed_read_only(commit_path)?;
 
         // Make a copy to ensure we're not modifying the commitment path's contents
         let checkpoint = Checkpoint::new(&read_only_database)
@@ -587,7 +620,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
             &rocksdb_checkpoint_options(),
             &checkpoint_path,
             [
-                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
                 ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
             ],
         )
@@ -657,14 +690,17 @@ mod tests {
         std::fs::create_dir_all(path).expect("Should be able to create dir");
     }
 
-    fn assert_blob_value<Data: AsRef<[u8]>>(db: &PersistenceLayer, blob: &HashedData<Data>) {
+    fn assert_blob_value<Data: AsRef<[u8]>>(
+        db: &impl ReadableKeyValueStore,
+        blob: &HashedData<Data>,
+    ) {
         let retrieved = db
             .blob_get(blob.hash())
             .expect("Expected blob to exist in persistence layer");
         assert_eq!(retrieved.as_ref(), blob.data());
     }
 
-    fn assert_blob_missing(db: &PersistenceLayer, hash: Hash) {
+    fn assert_blob_missing(db: &impl ReadableKeyValueStore, hash: Hash) {
         assert!(matches!(
             db.blob_get(hash),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
@@ -715,7 +751,7 @@ mod tests {
         contents
     }
 
-    fn assert_key_missing(db: &PersistenceLayer, key: impl AsRef<[u8]>) {
+    fn assert_key_missing(db: &impl ReadableKeyValueStore, key: impl AsRef<[u8]>) {
         assert!(matches!(
             db.get(key),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))

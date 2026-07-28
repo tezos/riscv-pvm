@@ -1039,6 +1039,8 @@ pub(crate) mod tests {
         use super::Database;
         use crate::errors::Error;
         use crate::errors::OperationalError;
+        use crate::persistence_layer::BLOB_CF;
+        use crate::persistence_layer::KV_CF;
         use crate::persistence_layer::PersistenceLayer;
         use crate::persistence_layer::rocksdb_checkpoint_options;
 
@@ -1058,14 +1060,14 @@ pub(crate) mod tests {
             &rocksdb_checkpoint_options(),
             &commit_path,
             [
-                ColumnFamilyDescriptor::new("blob", rocksdb_checkpoint_options()),
-                ColumnFamilyDescriptor::new("default", rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
             ],
         )
         .expect("Opening committed RocksDB should succeed");
 
         let blob_cf = commit_db
-            .cf_handle("blob")
+            .cf_handle(BLOB_CF)
             .expect("Committed RocksDB should contain the blob column family");
         commit_db
             .delete_cf(blob_cf, commit_id.as_hash().as_ref())
