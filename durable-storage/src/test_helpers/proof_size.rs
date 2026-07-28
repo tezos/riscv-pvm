@@ -15,6 +15,14 @@
 //! The bounds mirror the proof encoding: pre-order tree with a one-byte tag per
 //! node or leaf, a `Blind` leaf carrying a hash and a `Read` leaf carrying raw
 //! bytes (see the `Encode` impl in `octez_riscv_data::merkle_proof::proof_tree`).
+//!
+//! Compression makes [`BLIND_LEAF`] an upper bound rather than an exact cost for
+//! every subtree the model treats as blinded. `MerkleProof::blind` leaves a leaf
+//! shorter than [`Hash::DIGEST_SIZE`] inlined as a `Read` leaf instead of
+//! replacing it by its hash, and a subtree that was resolved but holds no data
+//! (an empty AVL child) is emitted as a present node rather than being blinded.
+//! Both encodings are shorter than a tag plus a digest, so the model stays
+//! conservative when it charges [`BLIND_LEAF`] for them.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -34,7 +42,9 @@ use crate::test_helpers::registry::RegistryOperation;
 /// `Encode` impl of `octez_riscv_data::merkle_proof::proof_tree::MerkleProof`.
 const TAG_BYTES: usize = 1;
 
-/// A `Blind` leaf: tag plus [`Hash::DIGEST_SIZE`] bytes.
+/// A `Blind` leaf: tag plus [`Hash::DIGEST_SIZE`] bytes. Also used as the charge
+/// for any subtree the model considers blindable, which the encoder may in fact
+/// emit in a shorter form (see the note in the module documentation).
 const BLIND_LEAF: usize = TAG_BYTES + Hash::DIGEST_SIZE;
 
 /// An accessed AVL tree wrapper: proof node tag plus a `Read` leaf holding the
@@ -284,7 +294,9 @@ pub(crate) fn database_operation_proof_size_bound(
 /// A registry proof is prefixed with the final state hash (see `serialise_proof`
 /// in `octez_riscv_data::merkle_proof::proof`) and folds as a node of a `u64`
 /// length leaf and a slot tree of arity [`VECTOR_NODE_ARITY`]; each touched slot
-/// costs one branch of blinded siblings per layer plus its blinded content.
+/// costs one branch of blinded siblings per layer plus its blinded content. The
+/// length leaf is charged at [`BLIND_LEAF`], which bounds the [`LEN_LEAF`] form
+/// the encoder actually emits for it.
 pub(crate) fn registry_operation_proof_size_bound<M: DatabaseReferenceModel>(
     databases: &[M],
     op: &RegistryOperation,

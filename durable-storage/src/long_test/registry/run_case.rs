@@ -8,6 +8,9 @@
 //! the model and, at the end of each case, the registry root hash between the
 //! two backends.
 //!
+//! Every operation's observable outcome is compared between the two backends, and - for provable
+//! operations - against the Prove/Verify-mode outcome.
+//!
 //! For every provable operation a proof is produced from the persistence-backed
 //! registry and verified.
 //!
@@ -24,6 +27,7 @@ use crate::registry::Registry;
 use crate::repo::DirectoryManager;
 use crate::storage::in_memory::InMemoryKeyValueStore;
 use crate::storage::in_memory::InMemoryRepo;
+use crate::test_helpers::StepOutcome;
 use crate::test_helpers::database::check_and_apply_value_operation;
 use crate::test_helpers::proof_size::assert_proof_size;
 use crate::test_helpers::proof_size::registry_operation_proof_size_bound;
@@ -42,47 +46,63 @@ struct Targets {
 /// against the (read-only) `model`. Only `ShrinkRegistry` checks the model's
 /// `permanent` floor here; the other registry operations rely on the strategy
 /// having generated valid indices.
+///
+/// Returns the operation's observable [`StepOutcome`], so that callers can compare it across
+/// backends and against the Prove/Verify-mode outcome. Structural operations (grow, shrink, copy,
+/// move, clear) have no return value - their observable effect is state, which is checked via the
+/// root hashes and the proofs - so their outcome is [`StepOutcome::Unit`], matching what
+/// Prove/Verify mode records for them.
 fn apply_op_checked<KV>(
     registry: &mut Registry<KV, Normal>,
     model: &RegistryLongTestModel,
     op: &RegistryOperation,
-) where
+) -> Option<StepOutcome>
+where
     KV: BackgroundKeyValueStore,
 {
-    match op {
+    let outcome = match op {
         RegistryOperation::Database(index, db_op) => {
             let database = registry
                 .database_mut(*index)
                 .expect("the database index should be in bounds");
-            check_and_apply_value_operation(database, &model.databases[*index], db_op);
+            return check_and_apply_value_operation(database, &model.databases[*index], db_op);
         }
-        RegistryOperation::GrowRegistry => grow_registry(registry),
+        RegistryOperation::GrowRegistry => {
+            grow_registry(registry);
+            StepOutcome::Unit(Ok(()))
+        }
         RegistryOperation::ShrinkRegistry => {
             if registry.len() > model.permanent() {
                 registry
                     .resize_tick(registry.len() - 1)
                     .expect("shrinking the registry should succeed");
             }
+            StepOutcome::Unit(Ok(()))
         }
         RegistryOperation::CopyDatabase(src, dst) => {
             registry
                 .copy_database(*src, *dst)
                 .expect("copying the database should succeed");
+            StepOutcome::Unit(Ok(()))
         }
         RegistryOperation::MoveDatabase(src, dst) => {
             registry
                 .move_database(*src, *dst)
                 .expect("moving the database should succeed");
+            StepOutcome::Unit(Ok(()))
         }
         RegistryOperation::ClearDatabase(index) => {
             registry
                 .clear_database(*index)
                 .expect("clearing the database should succeed");
+            StepOutcome::Unit(Ok(()))
         }
         RegistryOperation::CommitCheckoutRoundtrip => {
             unreachable!("commit/checkout operations should not be generated")
         }
-    }
+    };
+
+    Some(outcome)
 }
 
 /// Check out the shared `base` into a fresh set of targets.
@@ -117,17 +137,34 @@ fn apply_sequence(
     for op in ops {
         // Proofs are taken over the pre-operation state, so prove first. The
         // size bound is likewise computed over the pre-operation model.
-        if prove {
+        let proof_verify_out = if prove {
             let bound = registry_operation_proof_size_bound(&targets.model.databases, op);
-            let proof = prove_and_verify_registry_operation(&targets.persistent, op);
-            if let Some((proof, _proof_outcome)) = proof {
+            prove_and_verify_registry_operation(&targets.persistent, op).map(|(proof, outcome)| {
                 let bound = bound.expect("provable operations have a size bound");
                 assert_proof_size(op, proof.len(), bound, fail_on_warning);
-            }
+                outcome
+            })
+        } else {
+            None
+        };
+
+        let in_memory_out = apply_op_checked(&mut targets.in_memory, &targets.model, op);
+        let persistent_out = apply_op_checked(&mut targets.persistent, &targets.model, op);
+
+        assert_eq!(
+            in_memory_out, persistent_out,
+            "step outcome mismatch between in-memory and persistence backends"
+        );
+
+        if prove {
+            // Both normal-mode registries produce the same outcome (asserted just above), so
+            // comparing the prove/verify outcome against one of them is enough.
+            assert_eq!(
+                proof_verify_out, in_memory_out,
+                "proof_verify step outcome should match normal-mode application"
+            );
         }
 
-        apply_op_checked(&mut targets.in_memory, &targets.model, op);
-        apply_op_checked(&mut targets.persistent, &targets.model, op);
         targets.model.apply(op);
     }
 }
