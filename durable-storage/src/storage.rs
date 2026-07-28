@@ -92,6 +92,24 @@ pub trait PersistentKeyValueStore: WriteableKeyValueStore + Sized {
     fn checkout(repo: &Self::Repo, id: &CommitId) -> Result<Self, OperationalError>;
 }
 
+/// An in-place, read-only view of a commit.
+///
+/// Stores implementing this trait should read the committed state where it lies. This is safe
+/// as no mutable operations may be performed.
+pub trait ReadOnlyKeyValueStore: ReadableKeyValueStore {
+    /// The store a read-only view can be upgraded into.
+    type Writeable: PersistentKeyValueStore<Repo = Self::Repo>;
+
+    /// Read the state of the given commit in the repository, without making a working copy.
+    fn checkout_read_only(repo: &Self::Repo, id: &CommitId) -> Result<Self, OperationalError>;
+
+    /// Read the state committed at `source_path`, without making a working copy.
+    fn checkout_read_only_from_path(source_path: &Path) -> Result<Self, OperationalError>;
+
+    /// Copy the committed state into a fresh working state, which can then be modified.
+    fn to_writeable(&self, repo: &Self::Repo) -> Result<Self::Writeable, OperationalError>;
+}
+
 #[cfg(test)]
 cfg_if::cfg_if! {
     if #[cfg(rocksdb)] {
