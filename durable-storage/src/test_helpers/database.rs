@@ -12,6 +12,8 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
+#[cfg(test)]
+use octez_riscv_data::components::bytes::PAGE_SIZE;
 use octez_riscv_data::hash::Hash;
 #[cfg(any(test, rocksdb_test_utils))]
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -771,6 +773,87 @@ pub(crate) fn prove_and_verify_database_operation<KV: BackgroundWriteableKeyValu
     );
 
     Some((proof_bytes, prove_outcome))
+}
+
+/// Number of [`PAGE_SIZE`] pages in the value built by [`multi_page_value_operations`].
+///
+/// Sixteen pages keep the page tree several layers deep for any plausible arity, so a proof that
+/// opens one or two pages must carry a blinded branch per layer: exactly the cost the page tree's
+/// arity and page size control.
+#[cfg(test)]
+const MULTI_PAGE_VALUE_PAGES: usize = 16;
+
+/// Operations that grow a single value across [`MULTI_PAGE_VALUE_PAGES`] pages and then read and
+/// write across its page boundaries.
+///
+/// The randomly generated regression inputs never hold a value spanning more than
+/// `ceil(MAX_FILE_CHUNK_SIZE / PAGE_SIZE)` pages: a single [`DatabaseOperation::Set`] or
+/// [`DatabaseOperation::Write`] may carry at most [`MAX_FILE_CHUNK_SIZE`] bytes, and a sampled
+/// `Write` offset practically never lands exactly on the end of an existing value, so no generated
+/// input ever appends. A page tree that small is a single node whatever its arity, which leaves
+/// those proofs blind to the shape of the page tree. This sequence appends explicitly, so its
+/// proofs do depend on that shape.
+#[cfg(test)]
+pub(crate) fn multi_page_value_operations() -> Vec<DatabaseOperation> {
+    let page = PAGE_SIZE;
+    let len = MULTI_PAGE_VALUE_PAGES * page;
+    let middle = (MULTI_PAGE_VALUE_PAGES / 2) * page;
+
+    // Deterministic content that differs from page to page, so no two page hashes coincide.
+    let content = |range: std::ops::Range<usize>| {
+        Bytes::from(range.map(|i| (i % 251) as u8).collect::<Vec<u8>>())
+    };
+
+    // A second, single-page key so the multi-page value is not the AVL tree's only node.
+    let small = Key::new(b"/single/page").expect("Size less than KEY_MAX_SIZE");
+    let big = Key::new(b"/multi/page").expect("Size less than KEY_MAX_SIZE");
+
+    let mut ops = vec![
+        DatabaseOperation::Set(small.clone(), content(0..page / 2)),
+        DatabaseOperation::Set(big.clone(), content(0..MAX_FILE_CHUNK_SIZE.min(len))),
+    ];
+
+    // Grow the value by appending the largest chunk a single operation may carry.
+    let mut offset = MAX_FILE_CHUNK_SIZE.min(len);
+    while offset < len {
+        let end = offset.saturating_add(MAX_FILE_CHUNK_SIZE).min(len);
+        ops.push(DatabaseOperation::Write(
+            big.clone(),
+            offset,
+            content(offset..end),
+        ));
+        offset = end;
+    }
+
+    ops.push(DatabaseOperation::ValueLength(big.clone()));
+
+    // Two bytes either side of a page boundary: the pair of pages that share the fewest layers of
+    // the page tree, plus the first and last boundary.
+    for pages in [1, MULTI_PAGE_VALUE_PAGES / 2, MULTI_PAGE_VALUE_PAGES - 1] {
+        ops.push(DatabaseOperation::Read(big.clone(), pages * page - 1, 2));
+    }
+
+    ops.extend([
+        // A read inside a single page opens one page leaf, ...
+        DatabaseOperation::Read(big.clone(), page / 2, 8),
+        // ... while a maximal read spans as many pages as one chunk can cover.
+        DatabaseOperation::Read(big.clone(), middle - 1, MAX_FILE_CHUNK_SIZE),
+        // A two-byte write across the middle boundary rehashes both of its pages.
+        DatabaseOperation::Write(big.clone(), middle - 1, content(0..2)),
+        DatabaseOperation::Hash,
+        // Reads after a round trip through the store load the pages back from it.
+        DatabaseOperation::CommitCheckoutRoundtrip,
+        DatabaseOperation::Read(big.clone(), middle - 1, 2),
+        // An append that leaves a partial last page, deepening the page tree by a layer.
+        DatabaseOperation::Write(big.clone(), len, content(len..len + page / 2)),
+        DatabaseOperation::Read(big.clone(), len - 1, 2),
+        DatabaseOperation::ValueLength(big.clone()),
+        // A delete keeps the value's data blinded, so its proof is page-tree independent.
+        DatabaseOperation::Delete(big),
+        DatabaseOperation::ValueLength(small),
+    ]);
+
+    ops
 }
 
 /// A proof recorded for a single provable [`DatabaseOperation`], together with the operation's
