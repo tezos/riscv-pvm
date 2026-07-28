@@ -45,6 +45,7 @@ use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::repo::DirectoryManager;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::ReadOnlyKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
 use crate::storage::WriteableKeyValueStore;
 
@@ -384,6 +385,54 @@ impl ReadableKeyValueStore for PersistenceLayer {
 
     fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         get_from(&self.db_instance, key.as_ref())
+    }
+}
+
+/// A read-only view of a committed [`PersistenceLayer`], opened in place.
+///
+/// This is safe as no mutable operations can be performed using this type.
+#[derive(Debug)]
+pub struct ReadOnlyPersistenceLayer {
+    /// The underlying handle to the RocksDB instance.
+    ///
+    /// Unlike [`PersistenceLayer`], no manual-drop is needed: dropping this closes the handle
+    /// and there is nothing to destroy afterwards.
+    db_instance: rocksdb::DB,
+}
+
+impl ReadableKeyValueStore for ReadOnlyPersistenceLayer {
+    type Repo = DirectoryManager;
+
+    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        blob_get_from(&self.db_instance, key.as_ref())
+    }
+
+    fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        get_from(&self.db_instance, key.as_ref())
+    }
+}
+
+impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
+    type Writeable = PersistenceLayer;
+
+    fn checkout_read_only(repo: &Self::Repo, id: &CommitId) -> Result<Self, OperationalError> {
+        Self::checkout_read_only_from_path(&repo.database_commit_dir(id))
+    }
+
+    fn checkout_read_only_from_path(commit_path: &Path) -> Result<Self, OperationalError> {
+        if !Path::exists(commit_path) {
+            return Err(OperationalError::CommitNotFound);
+        };
+
+        Ok(Self {
+            db_instance: open_committed_read_only(commit_path)?,
+        })
+    }
+
+    fn to_writeable(&self, repo: &Self::Repo) -> Result<Self::Writeable, OperationalError> {
+        // Checkpointing works from a read-only instance - the working copy is made
+        // exactly as it is for a clone of a mutable layer.
+        PersistenceLayer::clone_as_checkpoint(&self.db_instance, repo)
     }
 }
 
@@ -979,6 +1028,123 @@ mod tests {
         let commit_id = CommitId::from(Hash::hash_bytes(b"nonexistent_commit"));
         let db_result = PersistenceLayer::checkout(&repo, &commit_id);
         assert!(matches!(db_result, Err(OperationalError::CommitNotFound)));
+
+        let read_only_result = ReadOnlyPersistenceLayer::checkout_read_only(&repo, &commit_id);
+        assert!(matches!(
+            read_only_result,
+            Err(OperationalError::CommitNotFound)
+        ));
+    }
+
+    /// Commit a database holding `blob`, and `"value"` under the key `"key"`.
+    fn commit_populated_db<Data: AsRef<[u8]>>(
+        repo: &DirectoryManager,
+        blob: &HashedData<Data>,
+    ) -> CommitId {
+        let db = PersistenceLayer::new(repo).expect("Failed to create the database");
+        db.blob_set(blob.hash(), blob.data())
+            .expect("Failed to set the blob");
+        db.set(b"key", b"value").expect("Failed to set the value");
+
+        let commit_id = CommitId::from(Hash::hash_bytes(b"read_only_commit"));
+        db.commit(repo, &commit_id).expect("Failed to commit");
+
+        commit_id
+    }
+
+    #[test]
+    fn test_read_only_checkout_reads_the_commit_in_place() {
+        let (_keepalive, repo) = setup_repo();
+
+        let blob = HashedData::from_data(b"read_only_value");
+        let commit_id = commit_populated_db(&repo, &blob);
+        let commit_path = repo.database_commit_dir(&commit_id);
+        let commit_contents = commit_dir_contents(&commit_path);
+
+        let read_only = ReadOnlyPersistenceLayer::checkout_read_only(&repo, &commit_id)
+            .expect("Read-only checkout should succeed");
+
+        // The committed database is read where it lies: no working copy was made.
+        assert_eq!(read_only.db_instance.path(), commit_path);
+
+        assert_blob_value(&read_only, &blob);
+        assert_eq!(
+            read_only
+                .get(b"key")
+                .expect("Reading the value should succeed")
+                .as_ref(),
+            b"value"
+        );
+        assert_blob_missing(&read_only, Hash::from([0u8; Hash::DIGEST_SIZE]));
+        assert_key_missing(&read_only, b"absent");
+
+        // The same commit can be viewed any number of times over.
+        let also_read_only = ReadOnlyPersistenceLayer::checkout_read_only(&repo, &commit_id)
+            .expect("A second read-only checkout should succeed");
+        assert_blob_value(&also_read_only, &blob);
+        drop(also_read_only);
+        drop(read_only);
+
+        // Dropping a read-only view leaves the commit alone: it neither destroys nor modifies it,
+        // and the commit remains available for further checkouts.
+        assert!(commit_path.exists(), "The commit should still exist");
+        assert_eq!(
+            commit_dir_contents(&commit_path),
+            commit_contents,
+            "The commit's contents should be unchanged"
+        );
+
+        let checked_out = PersistenceLayer::checkout(&repo, &commit_id)
+            .expect("Checking the commit out again should succeed");
+        assert_blob_value(&checked_out, &blob);
+    }
+
+    #[test]
+    fn test_read_only_checkout_to_writeable() {
+        let (_keepalive, repo) = setup_repo();
+
+        let blob = HashedData::from_data(b"read_only_value");
+        let commit_id = commit_populated_db(&repo, &blob);
+        let commit_path = repo.database_commit_dir(&commit_id);
+        let commit_contents = commit_dir_contents(&commit_path);
+
+        let read_only = ReadOnlyPersistenceLayer::checkout_read_only(&repo, &commit_id)
+            .expect("Read-only checkout should succeed");
+
+        // Switching to writeable switches to a new directory
+        let writeable = read_only
+            .to_writeable(&repo)
+            .expect("Making the read-only view writeable should succeed");
+
+        let working_path = checkpoint_db_path(&writeable);
+        assert_ne!(working_path, commit_path);
+        assert_blob_value(&writeable, &blob);
+
+        let new_blob = HashedData::from_data(b"new_value");
+        writeable
+            .blob_set(new_blob.hash(), new_blob.data())
+            .expect("Writing to the working copy should succeed");
+        writeable
+            .set(b"key", b"new_value")
+            .expect("Writing to the working copy should succeed");
+
+        // The read-only view - and the commit it reads - are unaffected.
+        assert_blob_missing(&read_only, new_blob.hash());
+        assert_eq!(
+            read_only
+                .get(b"key")
+                .expect("Reading the value should succeed")
+                .as_ref(),
+            b"value"
+        );
+        assert_eq!(commit_dir_contents(&commit_path), commit_contents);
+
+        drop(read_only);
+
+        // Only the working copy is temporary.
+        drop(writeable);
+        assert!(!working_path.exists());
+        assert!(commit_path.exists());
     }
 
     #[test]
@@ -1205,6 +1371,49 @@ mod tests {
 
         assert_blob_value(&db_a, &blob);
         assert_blob_missing(&db_a, blob_2.hash());
+    }
+    /// A published commit is never rewritten, so committing the same id again disturbs neither a
+    /// [`ReadOnlyPersistenceLayer`] already reading it nor one opened afterwards.
+    #[test]
+    fn test_duplicate_commit_leaves_read_only_checkouts_readable() {
+        let (_keepalive, repo) = setup_repo();
+
+        let blob = HashedData::from_data(b"read_only_value");
+        let commit_id = commit_populated_db(&repo, &blob);
+        let commit_path = repo.database_commit_dir(&commit_id);
+        let commit_contents = commit_dir_contents(&commit_path);
+
+        let read_only = ReadOnlyPersistenceLayer::checkout_read_only(&repo, &commit_id)
+            .expect("Read-only checkout should succeed");
+
+        // A working copy of that commit, committing the same state under the same id again.
+        let writeable = read_only
+            .to_writeable(&repo)
+            .expect("Making the read-only view writeable should succeed");
+        writeable
+            .commit(&repo, &commit_id)
+            .expect("Committing the same state again should succeed");
+
+        assert_eq!(
+            commit_dir_contents(&commit_path),
+            commit_contents,
+            "The published commit should be untouched"
+        );
+
+        // The view opened before the second commit still reads it.
+        assert_blob_value(&read_only, &blob);
+        assert_eq!(
+            read_only
+                .get(b"key")
+                .expect("Reading the value should succeed")
+                .as_ref(),
+            b"value"
+        );
+
+        // So does one opened after it.
+        let reopened = ReadOnlyPersistenceLayer::checkout_read_only(&repo, &commit_id)
+            .expect("A read-only checkout made after the second commit should succeed");
+        assert_blob_value(&reopened, &blob);
     }
 
     #[test]
