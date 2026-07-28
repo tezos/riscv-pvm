@@ -44,3 +44,10 @@ pub mod registry;
 pub mod repo;
 pub mod storage;
 pub mod test_helpers;
+
+// The Merkle representations a key-value store selects between through
+// `ReadableKeyValueStore::Merkle`. The rest of `merkle_worker` - the worker thread, its commands
+// and the store trait aliases - is an implementation detail of this crate.
+pub use merkle_worker::CommittedRoot;
+pub use merkle_worker::MerkleHandle;
+pub use merkle_worker::MerkleWorker;

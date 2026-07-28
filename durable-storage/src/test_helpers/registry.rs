@@ -329,8 +329,7 @@ where
     let checkout_repo = repo.clone();
     let mut checkout_candidates: HashMap<Hash, bool> = HashMap::new();
 
-    let mut registry: Registry<KV, Normal> =
-        Registry::new(repo).expect("Creating the registry should succeed");
+    let mut registry: Registry<KV, Normal> = Registry::new(repo);
 
     let mut registry_model: Vec<DatabaseModel> = vec![];
     let mut proof_steps: Vec<RegistryProofStep> = Vec::new();

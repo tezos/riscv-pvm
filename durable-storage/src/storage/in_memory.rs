@@ -20,6 +20,7 @@ use super::WriteableKeyValueStore;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
+use crate::merkle_worker::MerkleWorker;
 
 /// Repository used by [`InMemoryKeyValueStore`].
 ///
@@ -91,6 +92,8 @@ impl InMemoryKeyValueStore {
 
 impl ReadableKeyValueStore for InMemoryKeyValueStore {
     type Repo = InMemoryRepo;
+
+    type Merkle = MerkleWorker<Self>;
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         let blob_store = self

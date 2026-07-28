@@ -43,6 +43,8 @@ use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
+use crate::merkle_worker::CommittedRoot;
+use crate::merkle_worker::MerkleWorker;
 use crate::repo::DirectoryManager;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::ReadOnlyKeyValueStore;
@@ -255,20 +257,23 @@ fn get_from<'db>(db: &'db rocksdb::DB, key: &[u8]) -> Result<rocksdb::DBPinnable
 
 /// Open the database committed at `commit_path` in read-only mode.
 ///
-/// A read-only instance does not acquire the directory's lock, replay its write-ahead log or
-/// rewrite its manifest, so the committed state is left exactly as it is found on disk - and the
-/// same directory can be opened this way any number of times over.
+/// A read-only instance does not acquire the directory's lock, replay its write-ahead log, rewrite
+/// its manifest or write an info log, so the committed state is left exactly as it is found on
+/// disk - not one byte of the directory is touched, and it can be opened this way any number of
+/// times over. `test_read_only_checkout_reads_the_commit_in_place` holds this to the letter.
 ///
 /// As a consequence such an instance only observes state that has been flushed to the commit; in
 /// practice that is all of it, as commits are created through [`Checkpoint::create_checkpoint`],
 /// which flushes first.
 fn open_committed_read_only(commit_path: &Path) -> Result<rocksdb::DB, OperationalError> {
+    let options = rocksdb_checkpoint_options();
+
     rocksdb::DB::open_cf_descriptors_read_only(
-        &rocksdb_checkpoint_options(),
+        &options,
         commit_path,
         [
-            ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
-            ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
+            ColumnFamilyDescriptor::new(BLOB_CF, options.clone()),
+            ColumnFamilyDescriptor::new(KV_CF, options.clone()),
         ],
         false,
     )
@@ -280,6 +285,11 @@ fn open_committed_read_only(commit_path: &Path) -> Result<rocksdb::DB, Operation
 /// A commit is published by renaming a complete checkpoint into place, so the `CURRENT` file that
 /// every RocksDB directory holds is enough to tell a published commit from a directory left behind
 /// by an interrupted removal.
+///
+/// Once published, a commit directory is never mutated or unlinked: it is read in place, by any
+/// number of concurrent read-only checkouts, and committing the same id again leaves it alone. A
+/// future commit GC has to honour that - it may remove a commit nothing refers to any more, but
+/// never rewrite one in place, and never remove one while it is being read.
 fn is_published_commit(commit_path: &Path) -> bool {
     commit_path.join("CURRENT").exists()
 }
@@ -379,6 +389,8 @@ impl PersistenceLayer {
 impl ReadableKeyValueStore for PersistenceLayer {
     type Repo = DirectoryManager;
 
+    type Merkle = MerkleWorker<Self>;
+
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         blob_get_from(&self.db_instance, key.as_ref())
     }
@@ -403,6 +415,8 @@ pub struct ReadOnlyPersistenceLayer {
 impl ReadableKeyValueStore for ReadOnlyPersistenceLayer {
     type Repo = DirectoryManager;
 
+    type Merkle = CommittedRoot;
+
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         blob_get_from(&self.db_instance, key.as_ref())
     }
@@ -420,7 +434,10 @@ impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
     }
 
     fn checkout_read_only_from_path(commit_path: &Path) -> Result<Self, OperationalError> {
-        if !Path::exists(commit_path) {
+        // A directory that is not a published commit is no commit at all - an interrupted removal
+        // by an older version of `commit` can leave one behind, and opening it would fail further
+        // in, with an error about the database rather than about the commit.
+        if !is_published_commit(commit_path) {
             return Err(OperationalError::CommitNotFound);
         };
 
@@ -767,7 +784,9 @@ mod tests {
         contents: Hash,
     }
 
-    /// The files in `path`, ignoring RocksDB's info log - which even a read-only open appends to.
+    /// Every file in `path`, with nothing filtered out. Opening a commit read-only writes nothing
+    /// into it - not even an info log, which only a writeable open produces - so the whole
+    /// directory is expected to hold still.
     fn commit_dir_contents(path: &Path) -> Vec<CommitFile> {
         use std::os::unix::fs::MetadataExt;
 
@@ -793,7 +812,6 @@ mod tests {
                     ),
                 }
             })
-            .filter(|file| !file.name.to_string_lossy().starts_with("LOG"))
             .collect();
 
         contents.sort_by(|left, right| left.name.cmp(&right.name));
@@ -1086,12 +1104,14 @@ mod tests {
         drop(read_only);
 
         // Dropping a read-only view leaves the commit alone: it neither destroys nor modifies it,
-        // and the commit remains available for further checkouts.
+        // and the commit remains available for further checkouts. Not one file has changed and no
+        // file has appeared - opening a commit read-only, twice over, writes nothing into it at
+        // all, which is what lets commit directories be shared and read concurrently.
         assert!(commit_path.exists(), "The commit should still exist");
         assert_eq!(
             commit_dir_contents(&commit_path),
             commit_contents,
-            "The commit's contents should be unchanged"
+            "The commit directory should be untouched, down to the last file"
         );
 
         let checked_out = PersistenceLayer::checkout(&repo, &commit_id)
@@ -1163,6 +1183,12 @@ mod tests {
 
         let db_result = PersistenceLayer::checkout(&repo, &commit_id);
         assert!(matches!(db_result, Err(OperationalError::CommitNotFound)));
+
+        let read_only_result = ReadOnlyPersistenceLayer::checkout_read_only(&repo, &commit_id);
+        assert!(matches!(
+            read_only_result,
+            Err(OperationalError::CommitNotFound)
+        ));
     }
 
     #[test]

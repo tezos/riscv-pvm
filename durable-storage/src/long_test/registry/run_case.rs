@@ -226,10 +226,8 @@ pub fn initial_base(
     persistent_repo: &DirectoryManager,
     permanent: usize,
 ) -> Base<RegistryLongTestModel> {
-    let mut in_memory = Registry::<InMemoryKeyValueStore, Normal>::new(in_memory_repo.clone())
-        .expect("creating the in-memory registry should succeed");
-    let mut persistent = Registry::<PersistenceLayer, Normal>::new(persistent_repo.clone())
-        .expect("creating the persistence registry should succeed");
+    let mut in_memory = Registry::<InMemoryKeyValueStore, Normal>::new(in_memory_repo.clone());
+    let mut persistent = Registry::<PersistenceLayer, Normal>::new(persistent_repo.clone());
 
     for size in 1..=permanent {
         in_memory

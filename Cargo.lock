@@ -2611,6 +2611,7 @@ dependencies = [
  "octez-riscv-data",
  "octez-riscv-durable-storage",
  "octez-riscv-test-utils",
+ "once_cell",
  "perfect-derive",
  "proptest",
  "rand 0.10.2",

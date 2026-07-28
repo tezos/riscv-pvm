@@ -30,6 +30,7 @@ log.workspace = true
 hex.workspace = true
 perfect-derive.workspace = true
 octez-riscv-data.workspace = true
+once_cell.workspace = true
 rand.workspace = true
 tempfile.workspace = true
 tezos-smart-rollup-constants.workspace = true

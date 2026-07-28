@@ -34,6 +34,8 @@ use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
+use once_cell::sync::OnceCell;
+use tokio::runtime::Handle;
 use tokio::runtime::Runtime;
 
 use crate::avl::tree::Tree;
@@ -46,6 +48,7 @@ use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::merkle_worker::BackgroundReadableKeyValueStore;
 use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::repo::RegistryRepo;
+use crate::storage::ReadOnlyKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
 
 #[derive(Debug, Encode, Decode)]
@@ -64,28 +67,25 @@ pub struct Registry<KV: ReadableKeyValueStore, M: Mode> {
 impl<KV: BackgroundReadableKeyValueStore> Registry<KV, Normal> {
     /// Creates a new, empty Registry.
     ///
-    /// The registry owns a Tokio [`Runtime`] and a register state repository.
-    pub fn new(repo: KV::Repo) -> Result<Self, OperationalError> {
-        let runtime = Self::build_runtime()?;
-
-        Ok(Registry {
-            inner: NormalImpl { repo, runtime },
+    /// The registry owns a register state repository. The [`Runtime`] hosting its databases'
+    /// Merkle workers is built when one is first needed - see [`LazyRuntime`].
+    pub fn new(repo: KV::Repo) -> Self {
+        Registry {
+            inner: NormalImpl {
+                repo,
+                runtime: LazyRuntime::default(),
+            },
             databases: Vector::new(Vec::new()),
-        })
-    }
-
-    fn build_runtime() -> Result<Arc<Runtime>, OperationalError> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .build()
-            .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
-        Ok(Arc::new(runtime))
+        }
     }
 
     /// Get a [`Handle`] to the registry's runtime.
     #[cfg(test_utils)]
     pub(crate) fn handle(&self) -> &tokio::runtime::Handle {
-        self.inner.runtime.handle()
+        self.inner
+            .runtime
+            .handle()
+            .expect("Building the runtime should succeed")
     }
 }
 
@@ -127,20 +127,37 @@ impl<KV: ReadableKeyValueStore> Registry<KV, Prove<'static>> {
     }
 }
 
-impl<KV: BackgroundPersistentKeyValueStore> Registry<KV, Normal>
+impl<KV: ReadableKeyValueStore> Registry<KV, Normal>
 where
     KV::Repo: RegistryRepo,
 {
-    /// Restore a registry from a previously committed manifest.
-    ///
-    /// The restored databases are checked out from the database commits referenced by the
-    /// manifest, then the reconstructed registry root is verified against the requested
-    /// `commit_id`.
-    pub fn checkout(repo: KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
-        let manifest = Self::read_checkout_manifest(&repo, &commit_id)?;
-        let runtime = Self::build_runtime()?;
-        let databases = Self::checkout_databases(&runtime, &repo, &manifest.database_hashes)?;
+    fn read_checkout_manifest(
+        repo: &KV::Repo,
+        commit_id: &CommitId,
+    ) -> Result<RegistryManifest, OperationalError> {
+        let commit_bytes = repo.read_registry_commit(commit_id)?;
+        deserialise(&commit_bytes).map_err(OperationalError::from)
+    }
 
+    /// Assemble a registry from databases restored from the commits the manifest of `commit_id`
+    /// referenced, verifying the reconstructed registry root against `commit_id`.
+    ///
+    /// How much that verifies depends on where the database hashes come from. Under
+    /// [`Registry::checkout`] each database has loaded its Merkle tree, so the fold is over roots
+    /// computed from the data on disk. Under [`Registry::checkout_read_only`] each database holds
+    /// a [`CommittedRoot`], which answers with the very commit id the manifest named: the fold then
+    /// re-derives the registry root from the contents of the manifest itself, and so catches a
+    /// manifest that does not match the id it is stored under - not a database that does not match
+    /// its commit. As with a missing root blob, that failure surfaces when the database is read or
+    /// upgraded.
+    ///
+    /// [`CommittedRoot`]: crate::merkle_worker::CommittedRoot
+    fn from_restored_databases(
+        repo: KV::Repo,
+        runtime: LazyRuntime,
+        databases: Vec<Database<KV, Normal>>,
+        commit_id: CommitId,
+    ) -> Result<Self, Error> {
         let registry = Registry {
             inner: NormalImpl { repo, runtime },
             databases: Vector::new(databases),
@@ -153,13 +170,23 @@ where
 
         Ok(registry)
     }
+}
 
-    fn read_checkout_manifest(
-        repo: &KV::Repo,
-        commit_id: &CommitId,
-    ) -> Result<RegistryManifest, OperationalError> {
-        let commit_bytes = repo.read_registry_commit(commit_id)?;
-        deserialise(&commit_bytes).map_err(OperationalError::from)
+impl<KV: BackgroundPersistentKeyValueStore> Registry<KV, Normal>
+where
+    KV::Repo: RegistryRepo,
+{
+    /// Restore a registry from a previously committed manifest.
+    ///
+    /// The restored databases are checked out from the database commits referenced by the
+    /// manifest, then the reconstructed registry root is verified against the requested
+    /// `commit_id`.
+    pub fn checkout(repo: KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
+        let manifest = Self::read_checkout_manifest(&repo, &commit_id)?;
+        let runtime = LazyRuntime::default();
+        let databases = Self::checkout_databases(&runtime, &repo, &manifest.database_hashes)?;
+
+        Self::from_restored_databases(repo, runtime, databases, commit_id)
     }
 
     /// The database commit ids referenced by the registry committed at `commit_id`.
@@ -172,14 +199,16 @@ where
     }
 
     fn checkout_databases(
-        runtime: &Arc<Runtime>,
+        runtime: &LazyRuntime,
         repo: &KV::Repo,
         database_hashes: &[CommitId],
     ) -> Result<Vec<Database<KV, Normal>>, Error> {
+        let handle = runtime.handle()?;
+
         // TODO RV-946: Investigate parallelising the checkouts of individual databases.
         database_hashes
             .iter()
-            .map(|&db_hash| Database::checkout(runtime.handle(), repo, db_hash))
+            .map(|&db_hash| Database::checkout(handle, repo, db_hash))
             .collect()
     }
 
@@ -207,6 +236,84 @@ where
             .write_registry_commit(&registry_commit, &encoded)?;
 
         Ok(registry_commit)
+    }
+}
+
+/// A registry whose databases read their commits in place, through a [`ReadOnlyKeyValueStore`].
+///
+/// As for [`Database`], the mutating operations - [`Registry::resize_tick`], copy/move/clear and
+/// [`Registry::commit`] - are bounded on a writeable store, so they do not exist here.
+///
+/// Read-only databases hold no Merkle tree, so such a registry hosts no worker threads and builds
+/// no async runtime - see [`LazyRuntime`].
+///
+/// [`ReadOnlyKeyValueStore`]: crate::storage::ReadOnlyKeyValueStore
+impl<KV: ReadOnlyKeyValueStore> Registry<KV, Normal>
+where
+    KV::Repo: RegistryRepo,
+{
+    /// Restore a registry from a previously committed manifest, for reading only.
+    ///
+    /// Where [`Registry::checkout`] copies every database commit into a working state, this reads
+    /// them where they lie.
+    pub fn checkout_read_only(repo: KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
+        let manifest = Self::read_checkout_manifest(&repo, &commit_id)?;
+
+        // TODO RV-946: Investigate parallelising the checkouts of individual databases.
+        let databases = manifest
+            .database_hashes
+            .iter()
+            .map(|&db_hash| Database::checkout_read_only(&repo, db_hash))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Self::from_restored_databases(repo, LazyRuntime::default(), databases, commit_id)
+    }
+
+    /// Create another registry over the same committed state.
+    ///
+    /// Copies nothing and cannot fail - see [`Database::clone_read_only`] - so read-only consumers
+    /// can be handed a registry each for free.
+    pub fn clone_read_only(&self) -> Self {
+        let NormalImpl { repo, runtime } = &self.inner;
+
+        let databases = self
+            .databases
+            .iter()
+            .map(Database::clone_read_only)
+            .collect();
+
+        Registry {
+            inner: NormalImpl {
+                repo: repo.clone(),
+                runtime: runtime.clone(),
+            },
+            databases: Vector::new(databases),
+        }
+    }
+
+    /// Copy the committed state of every database into a working state - see
+    /// [`Database::to_writeable`].
+    pub fn to_writeable(&self) -> Result<Registry<KV::Writeable, Normal>, OperationalError>
+    where
+        KV::Writeable: BackgroundPersistentKeyValueStore,
+    {
+        let NormalImpl { repo, runtime } = &self.inner;
+        let handle = runtime.handle()?;
+
+        // TODO RV-946: Investigate parallelising the checkouts of individual databases.
+        let databases = self
+            .databases
+            .iter()
+            .map(|db| db.to_writeable(handle, repo))
+            .collect::<Result<_, _>>()?;
+
+        Ok(Registry {
+            inner: NormalImpl {
+                repo: repo.clone(),
+                runtime: runtime.clone(),
+            },
+            databases: Vector::new(databases),
+        })
     }
 }
 
@@ -428,7 +535,7 @@ impl RegistryMode for Normal {
     fn try_new_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
     ) -> Result<Database<KV, Self>, OperationalError> {
-        Database::try_new(inner.runtime.handle(), &inner.repo)
+        Database::try_new(inner.runtime.handle()?, &inner.repo)
     }
 
     fn copy_database<KV: BackgroundWriteableKeyValueStore>(
@@ -437,7 +544,7 @@ impl RegistryMode for Normal {
         src_index: usize,
         dst_index: usize,
     ) -> Result<(), OperationalError> {
-        let db_copy = databases[src_index].try_clone_with(inner.runtime.handle(), &inner.repo)?;
+        let db_copy = databases[src_index].try_clone_with(inner.runtime.handle()?, &inner.repo)?;
         databases[dst_index] = db_copy;
         Ok(())
     }
@@ -580,11 +687,12 @@ impl CloneRegistryMode for Normal {
     {
         let runtime = this.inner.runtime.clone();
         let repo = this.inner.repo.clone();
+        let handle = runtime.handle()?;
 
         let databases = this
             .databases
             .iter()
-            .map(|db| db.try_clone_with(runtime.handle(), &repo))
+            .map(|db| db.try_clone_with(handle, &repo))
             .collect::<Result<_, _>>()?;
         let databases = Vector::new(databases);
 
@@ -599,7 +707,37 @@ impl CloneRegistryMode for Normal {
 /// Registry implementation for the [`Normal`] mode
 struct NormalImpl<KV: ReadableKeyValueStore> {
     repo: KV::Repo,
-    runtime: Arc<Runtime>,
+    runtime: LazyRuntime,
+}
+
+/// The async runtime hosting the Merkle workers of a registry's databases, built when first needed.
+///
+/// A read-only registry has no workers to host - its databases hold a
+/// [`CommittedRoot`](crate::merkle_worker::CommittedRoot), not a tree - so it never builds a
+/// runtime. Only the writeable paths, including
+/// [`to_writeable`](Registry::to_writeable), ask for a handle.
+///
+/// Clones share the runtime, so upgrading a read-only registry twice builds only one.
+#[derive(Clone, Default)]
+struct LazyRuntime(Arc<OnceCell<Runtime>>);
+
+impl LazyRuntime {
+    /// A handle to the runtime, building it if this is the first caller to need one.
+    ///
+    /// The runtime is built inside the initialiser, so exactly one is ever built. Were it built
+    /// beforehand, a caller that lost the race to store it would have to drop the one it built -
+    /// and dropping a runtime blocks on its worker threads, which panics when it happens inside an
+    /// async context. That is precisely where a read-only registry is upgraded to a writeable one.
+    fn handle(&self) -> Result<&Handle, OperationalError> {
+        let runtime = self.0.get_or_try_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .build()
+                .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })
+        })?;
+
+        Ok(runtime.handle())
+    }
 }
 
 /// Registry implementation for the [`Prove`] mode.
@@ -634,10 +772,43 @@ pub(super) mod tests {
     use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_data::serialisation::serialise;
 
+    use super::LazyRuntime;
     use super::ProveImpl;
     use super::Registry;
     use super::RegistryManifest;
     use super::VerifyImpl;
+
+    /// A losing racer must not be left holding a runtime of its own: dropping one blocks on its
+    /// worker threads, which panics inside an async context - and upgrading a read-only registry
+    /// to a writeable one is done from exactly there.
+    ///
+    /// The contention is genuine but not guaranteed on any single run; what the test can never do
+    /// is fail against an implementation that builds the runtime inside the initialiser.
+    #[test]
+    fn test_lazy_runtime_under_contention_in_an_async_context() {
+        let outer = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .build()
+            .expect("Building the outer runtime should succeed");
+
+        let lazy = LazyRuntime::default();
+
+        outer.block_on(async {
+            let askers: Vec<_> = (0..8)
+                .map(|_| {
+                    let lazy = lazy.clone();
+                    tokio::spawn(async move { lazy.handle().map(|_| ()) })
+                })
+                .collect();
+
+            for asker in askers {
+                asker
+                    .await
+                    .expect("Asking for a handle should not panic")
+                    .expect("Building the runtime should succeed");
+            }
+        });
+    }
     use crate::commit::CommitId;
     use crate::errors::Error;
     use crate::errors::InvalidArgumentError;
@@ -652,7 +823,7 @@ pub(super) mod tests {
     pub(super) fn setup_registry<KV: BackgroundWriteableKeyValueStore>(
         repo: KV::Repo,
     ) -> Registry<KV, Normal> {
-        Registry::new(repo).expect("Registry should be created")
+        Registry::new(repo)
     }
 
     pub(super) fn setup_size_2_registry<KV: BackgroundWriteableKeyValueStore>(
@@ -1094,6 +1265,90 @@ pub(super) mod tests {
             root_commit
         );
     });
+
+    // Not `kv_test!`s: the in-memory backend copies a commit into memory either way, so it has no
+    // read-only store.
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_registry_checkout_read_only() {
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+        use crate::storage::TestKeyValueStoreSetup;
+
+        let (_keepalive, repo) = PersistenceLayer::setup_repo();
+        let mut registry = setup_size_2_registry::<PersistenceLayer>(repo.clone());
+
+        populate_database_with_key_value::<PersistenceLayer>(&mut registry, 0, &[1], b"alpha");
+        populate_database_with_key_value::<PersistenceLayer>(&mut registry, 1, &[2], b"beta");
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+
+        let read_only = Registry::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(
+            repo.clone(),
+            root_commit,
+        )
+        .expect("Read-only checkout should succeed");
+
+        assert_eq!(read_only.len(), 2);
+        read_only.databases[0].assert_database_value(&key_a, b"alpha");
+        read_only.databases[1].assert_database_value(&key_b, b"beta");
+        assert_eq!(
+            CommitId::from(Hash::from_foldable(&read_only)),
+            root_commit,
+            "A read-only checkout should reconstruct the committed root"
+        );
+
+        // Clones share the committed state, so they observe exactly the same thing.
+        let clone = read_only.clone_read_only();
+        clone.databases[0].assert_database_value(&key_a, b"alpha");
+        assert_eq!(CommitId::from(Hash::from_foldable(&clone)), root_commit);
+
+        let mut writeable = read_only
+            .to_writeable()
+            .expect("Making the registry writeable should succeed");
+        assert_eq!(
+            CommitId::from(Hash::from_foldable(&writeable)),
+            root_commit,
+            "The working copies should start from the committed state"
+        );
+
+        populate_database_with_key_value::<PersistenceLayer>(&mut writeable, 0, &[3], b"gamma");
+        let derived_commit = writeable.commit().expect("Commit should succeed");
+        assert_ne!(derived_commit, root_commit);
+
+        // The read-only registry - and the commit it reads - are unaffected.
+        let key_c = Key::new(&[3]).expect("Size less than KEY_MAX_SIZE");
+        assert!(
+            !read_only.databases[0]
+                .exists(&key_c)
+                .expect("Existence check should succeed"),
+            "The read-only registry should not observe the working copy's writes"
+        );
+        assert_eq!(CommitId::from(Hash::from_foldable(&read_only)), root_commit);
+
+        let reloaded = Registry::<PersistenceLayer, Normal>::checkout(repo, root_commit)
+            .expect("Checking out the original commit should succeed");
+        assert_eq!(CommitId::from(Hash::from_foldable(&reloaded)), root_commit);
+    }
+
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_registry_checkout_read_only_missing_commit_fails() {
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+        use crate::storage::TestKeyValueStoreSetup;
+
+        let (_keepalive, repo) = PersistenceLayer::setup_repo();
+        let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-registry-commit"));
+
+        assert!(matches!(
+            Registry::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(repo, missing_commit),
+            Err(Error::Operational(OperationalError::CommitNotFound))
+        ));
+    }
 
     kv_test!(test_registry_checkout_missing_commit_fails, KV: BackgroundPersistentKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
