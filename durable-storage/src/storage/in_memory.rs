@@ -3,7 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-//! In-memory storage backend [`KeyValueStore`]-compatible with the Persistence layer
+//! In-memory storage backend [`WriteableKeyValueStore`]-compatible with the Persistence layer
 
 use std::collections::HashMap;
 #[cfg(test_utils)]
@@ -15,7 +15,8 @@ use std::sync::RwLock;
 use bytes::Bytes;
 use bytes::BytesMut;
 
-use super::KeyValueStore;
+use super::ReadableKeyValueStore;
+use super::WriteableKeyValueStore;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
@@ -88,16 +89,8 @@ impl InMemoryKeyValueStore {
     }
 }
 
-impl KeyValueStore for InMemoryKeyValueStore {
+impl ReadableKeyValueStore for InMemoryKeyValueStore {
     type Repo = InMemoryRepo;
-
-    fn new(_repo: &Self::Repo) -> Result<Self, OperationalError> {
-        Ok(Self::default())
-    }
-
-    fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
-        self.try_clone()
-    }
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         let blob_store = self
@@ -110,6 +103,29 @@ impl KeyValueStore for InMemoryKeyValueStore {
             .ok_or(InvalidArgumentError::KeyNotFound)?;
 
         Ok(data.clone())
+    }
+
+    fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        let store = self
+            .values
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+
+        let value = store
+            .get(key.as_ref())
+            .ok_or(InvalidArgumentError::KeyNotFound)?;
+
+        Ok(value.clone())
+    }
+}
+
+impl WriteableKeyValueStore for InMemoryKeyValueStore {
+    fn new(_repo: &Self::Repo) -> Result<Self, OperationalError> {
+        Ok(Self::default())
+    }
+
+    fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
+        self.try_clone()
     }
 
     fn blob_set(
@@ -139,19 +155,6 @@ impl KeyValueStore for InMemoryKeyValueStore {
         blob_store.remove(key.as_ref());
 
         Ok(())
-    }
-
-    fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-        let store = self
-            .values
-            .read()
-            .map_err(|_| OperationalError::LockPoisoned)?;
-
-        let value = store
-            .get(key.as_ref())
-            .ok_or(InvalidArgumentError::KeyNotFound)?;
-
-        Ok(value.clone())
     }
 
     fn set(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<(), OperationalError> {

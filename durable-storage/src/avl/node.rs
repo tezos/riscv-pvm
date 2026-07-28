@@ -39,10 +39,11 @@ use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
-use crate::storage::KeyValueStore;
 use crate::storage::Loadable;
+use crate::storage::ReadableKeyValueStore;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
+use crate::storage::WriteableKeyValueStore;
 
 /// This type is a compact serialised form of a [`Node`] with metadata and child subtree hashes.
 #[derive(Encode, Decode)]
@@ -865,7 +866,7 @@ where
 {
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         // The stored representation is more compact. We don't include the `data` field, as that
@@ -903,7 +904,7 @@ where
 }
 
 impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, Normal> {
-    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         let StoredNode {
             balance_factor,
             key,
@@ -962,14 +963,22 @@ where
 }
 
 /// Helper trait for node data that can be reconstructed
-/// from a [`KeyValueStore`] by content hash and key.
+/// from a [`ReadableKeyValueStore`] by content hash and key.
 trait DataLoadable: Sized {
     /// Load data identified by `id` and `key` from `store`.
-    fn load(id: Hash, key: &Key, store: &impl KeyValueStore) -> Result<Self, OperationalError>;
+    fn load(
+        id: Hash,
+        key: &Key,
+        store: &impl ReadableKeyValueStore,
+    ) -> Result<Self, OperationalError>;
 }
 
 impl DataLoadable for Bytes<Normal> {
-    fn load(_id: Hash, key: &Key, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(
+        _id: Hash,
+        key: &Key,
+        store: &impl ReadableKeyValueStore,
+    ) -> Result<Self, OperationalError> {
         let data = {
             let bytes =
                 store
@@ -986,7 +995,11 @@ impl DataLoadable for Bytes<Normal> {
 }
 
 impl DataLoadable for LazyDataId {
-    fn load(id: Hash, key: &Key, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(
+        id: Hash,
+        key: &Key,
+        store: &impl ReadableKeyValueStore,
+    ) -> Result<Self, OperationalError> {
         // TODO (RV-998): go all in on laziness
         let data = match store.get(key.as_ref()) {
             Ok(bytes) => {

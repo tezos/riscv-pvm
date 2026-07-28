@@ -20,7 +20,7 @@ use octez_riscv_data::mode::Provable;
 use octez_riscv_durable_storage::errors::OperationalError;
 use octez_riscv_durable_storage::registry::CloneRegistryMode;
 use octez_riscv_durable_storage::registry::Registry;
-use octez_riscv_durable_storage::storage::KeyValueStore;
+use octez_riscv_durable_storage::storage::WriteableKeyValueStore;
 
 /// Implementing types provide an interface for durable storage
 pub trait DurableStorage<M: Mode>: Sized {
@@ -29,7 +29,8 @@ pub trait DurableStorage<M: Mode>: Sized {
         M: CloneRegistryMode;
 }
 
-impl<KV: KeyValueStore + Send + Sync + 'static, M: Mode> DurableStorage<M> for Registry<KV, M>
+impl<KV: WriteableKeyValueStore + Send + Sync + 'static, M: Mode> DurableStorage<M>
+    for Registry<KV, M>
 where
     KV::Repo: Clone,
 {

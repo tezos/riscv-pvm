@@ -19,11 +19,25 @@ use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::OperationalError;
 
-/// Types that implement this trait can be used as the underlying key-value store
-pub trait KeyValueStore: Sized {
+/// Types that implement this trait can serve reads from a key-value store.
+///
+/// This is the half of the store interface that requires no ability to modify the stored data.
+/// Note that [`ReadableKeyValueStore::Repo`] lives here rather than on
+/// [`WriteableKeyValueStore`]: a store which cannot be written to still needs to know the
+/// repository its data is read from.
+pub trait ReadableKeyValueStore: Sized {
     /// Type of repository required to initialise a key value store.
     type Repo;
 
+    /// Retrieves the data associated with the given blob key.
+    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
+
+    /// Retrieves a value associated with the given key.
+    fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
+}
+
+/// Types that implement this trait can be used as the underlying key-value store
+pub trait WriteableKeyValueStore: ReadableKeyValueStore {
     /// Create a new instance of the key-value store.
     ///
     /// The backend may make use of the repo provided, for persistence - if required.
@@ -31,9 +45,6 @@ pub trait KeyValueStore: Sized {
 
     /// Attempt to make a copy of the key-value store.
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError>;
-
-    /// Retrieves the data associated with the given blob key.
-    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
     /// Register data under a blob key.
     fn blob_set(
@@ -44,9 +55,6 @@ pub trait KeyValueStore: Sized {
 
     /// Deletes a value associated with the given blob key.
     fn blob_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError>;
-
-    /// Retrieves a value associated with the given key.
-    fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
     /// Sets a value for the given key.
     fn set(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<(), OperationalError>;
@@ -64,7 +72,7 @@ pub trait KeyValueStore: Sized {
 }
 
 /// Types that implement this trait can be used as a persistent key-value store
-pub trait PersistentKeyValueStore: KeyValueStore + Sized {
+pub trait PersistentKeyValueStore: WriteableKeyValueStore + Sized {
     /// Commits the current state of the store to the given path.
     ///
     /// Implementations will treat the path as a directory.
@@ -91,7 +99,7 @@ cfg_if::cfg_if! {
         pub(crate) type TestKeyValueStore = crate::persistence_layer::PersistenceLayer;
 
         /// Repository type required to initialise [`TestKeyValueStore`].
-        pub(crate) type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+        pub(crate) type TestRepo = <TestKeyValueStore as ReadableKeyValueStore>::Repo;
 
         /// Create a test repository for [`TestKeyValueStore`].
         ///
@@ -99,7 +107,7 @@ cfg_if::cfg_if! {
         /// - `keepalive` is a temporary directory handle that must stay in scope for the lifetime
         ///   of `repo`.
         /// - `repo` is the backend repository value to pass into
-        ///   [`KeyValueStore::new`] / [`KeyValueStore::try_clone`].
+        ///   [`WriteableKeyValueStore::new`] / [`WriteableKeyValueStore::try_clone`].
         ///
         /// TODO RV-942: Refactor the function to avoid the need for `keepalive` return value.
         pub(crate) fn setup_repo() -> (octez_riscv_test_utils::TestableTmpdir, TestRepo) {
@@ -126,8 +134,8 @@ cfg_if::cfg_if! {
 
         // TODO: This trait currently duplicates the functionality of the `TestKeyValueStore` mechanism defined above.
         // Tests which use the `kv_test!` macro will be refactored to use `TestKeyValueStoreSetup`, which can supersede
-        // `KeyValueStore` once all tests have been rewritten.
-        pub(crate) trait TestKeyValueStoreSetup: KeyValueStore + std::fmt::Debug {
+        // `WriteableKeyValueStore` once all tests have been rewritten.
+        pub(crate) trait TestKeyValueStoreSetup: WriteableKeyValueStore + std::fmt::Debug {
             /// Temporary directory handle that must stay in scope for the lifetime of the repo
             type Keepalive;
 
@@ -223,7 +231,7 @@ cfg_if::cfg_if! {
                     $(#[$attr])* $fun_name, $ty_name $(: $ty_bound)?,
                     ret_ty = (
                         <$ty_name as $crate::storage::TestKeyValueStoreSetup>::Keepalive,
-                        <$ty_name as $crate::storage::KeyValueStore>::Repo,
+                        <$ty_name as $crate::storage::ReadableKeyValueStore>::Repo,
                     ),
                     setup_values = (_keepalive, $repo),
                     setup = $setup,
@@ -244,7 +252,7 @@ cfg_if::cfg_if! {
                         ::tokio::runtime::Runtime,
                         ::tokio::runtime::Handle,
                         <$ty_name as $crate::storage::TestKeyValueStoreSetup>::Keepalive,
-                        <$ty_name as $crate::storage::KeyValueStore>::Repo,
+                        <$ty_name as $crate::storage::ReadableKeyValueStore>::Repo,
                     ),
                     setup_values = (_runtime, $handle, _keepalive, $repo),
                     setup = $setup,
@@ -269,7 +277,7 @@ cfg_if::cfg_if! {
                                 $(+ $ty_bound)?,
                     >() -> $ret_ty
                     where
-                        <$ty_name as $crate::storage::KeyValueStore>::Repo:
+                        <$ty_name as $crate::storage::ReadableKeyValueStore>::Repo:
                             $crate::repo::RegistryRepo,
                     {
                         $setup
@@ -318,7 +326,7 @@ cfg_if::cfg_if! {
                                 $(+ $ty_bound)?,
                     >()
                     where
-                        <$ty_name as $crate::storage::KeyValueStore>::Repo:
+                        <$ty_name as $crate::storage::ReadableKeyValueStore>::Repo:
                             $crate::repo::RegistryRepo,
                     {}
 
@@ -350,7 +358,7 @@ cfg_if::cfg_if! {
     }
 }
 
-/// Options for storing MAVL values in a [`KeyValueStore`]
+/// Options for storing MAVL values in a [`WriteableKeyValueStore`]
 #[derive(Debug, Clone, Default)]
 pub struct StoreOptions {
     /// Persist the key-value pairs from MAVL nodes
@@ -383,12 +391,12 @@ impl StoreOptions {
     }
 }
 
-/// This trait marks values that can be persisted into a [`KeyValueStore`].
+/// This trait marks values that can be persisted into a [`WriteableKeyValueStore`].
 pub trait Storable: Foldable<HashFold> {
     /// Persist this value into `store` according to `options`.
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError>;
 }
@@ -396,21 +404,21 @@ pub trait Storable: Foldable<HashFold> {
 impl<T: Storable> Storable for Arc<T> {
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         T::store(self, store, options)
     }
 }
 
-/// This trait marks values that can be reconstructed from a [`KeyValueStore`] by content hash.
+/// This trait marks values that can be reconstructed from a [`ReadableKeyValueStore`] by content hash.
 pub trait Loadable: Sized {
     /// Load a value identified by `id` from `store`.
-    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError>;
+    fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError>;
 }
 
 impl<T: Loadable> Loadable for Arc<T> {
-    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         T::load(id, store).map(Arc::new)
     }
 }

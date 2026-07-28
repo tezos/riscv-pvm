@@ -44,8 +44,9 @@ use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::repo::DirectoryManager;
-use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::ReadableKeyValueStore;
+use crate::storage::WriteableKeyValueStore;
 
 /// The name of the column family used for storing blob-keyed data.
 const BLOB_CF: &str = "blob";
@@ -264,9 +265,43 @@ impl PersistenceLayer {
     }
 }
 
-impl KeyValueStore for PersistenceLayer {
+impl ReadableKeyValueStore for PersistenceLayer {
     type Repo = DirectoryManager;
 
+    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        let key = key.as_ref();
+        let entry = self
+            .db_instance
+            .get_pinned_cf(self.blob_cf(), key)
+            .map_err(|error| OperationalError::GetFailed {
+                column: BLOB_CF.to_string(),
+                key: key.to_owned(),
+                error,
+            })?;
+
+        match entry {
+            Some(value) => Ok(value),
+            None => Err(InvalidArgumentError::KeyNotFound)?,
+        }
+    }
+
+    fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        let value = self.db_instance.get_pinned(key.as_ref()).map_err(|error| {
+            OperationalError::GetFailed {
+                column: "default".to_owned(),
+                key: key.as_ref().to_owned(),
+                error,
+            }
+        })?;
+
+        match value {
+            Some(value) => Ok(value),
+            None => Err(InvalidArgumentError::KeyNotFound)?,
+        }
+    }
+}
+
+impl WriteableKeyValueStore for PersistenceLayer {
     fn new(repo: &Self::Repo) -> Result<Self, OperationalError> {
         let tempdir = repo.temp_database_dir()?;
         let new_db_path = tempdir.path().join("checkpoint");
@@ -287,23 +322,6 @@ impl KeyValueStore for PersistenceLayer {
 
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError> {
         Self::clone_as_checkpoint(&self.db_instance, repo)
-    }
-
-    fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-        let key = key.as_ref();
-        let entry = self
-            .db_instance
-            .get_pinned_cf(self.blob_cf(), key)
-            .map_err(|error| OperationalError::GetFailed {
-                column: BLOB_CF.to_string(),
-                key: key.to_owned(),
-                error,
-            })?;
-
-        match entry {
-            Some(value) => Ok(value),
-            None => Err(InvalidArgumentError::KeyNotFound)?,
-        }
     }
 
     fn blob_set(
@@ -330,21 +348,6 @@ impl KeyValueStore for PersistenceLayer {
                 key: key.to_owned(),
                 error,
             })
-    }
-
-    fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-        let value = self.db_instance.get_pinned(key.as_ref()).map_err(|error| {
-            OperationalError::GetFailed {
-                column: "default".to_owned(),
-                key: key.as_ref().to_owned(),
-                error,
-            }
-        })?;
-
-        match value {
-            Some(value) => Ok(value),
-            None => Err(InvalidArgumentError::KeyNotFound)?,
-        }
     }
 
     fn set(&self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<(), OperationalError> {

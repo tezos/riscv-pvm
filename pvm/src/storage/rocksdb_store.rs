@@ -16,8 +16,9 @@ use octez_riscv_durable_storage::errors::Error;
 use octez_riscv_durable_storage::errors::InvalidArgumentError;
 use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use octez_riscv_durable_storage::repo::DirectoryManager;
-use octez_riscv_durable_storage::storage::KeyValueStore;
 use octez_riscv_durable_storage::storage::PersistentKeyValueStore;
+use octez_riscv_durable_storage::storage::ReadableKeyValueStore;
+use octez_riscv_durable_storage::storage::WriteableKeyValueStore;
 
 use super::PersistentBlobStore;
 use super::StorageError;

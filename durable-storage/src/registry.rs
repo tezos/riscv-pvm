@@ -42,10 +42,11 @@ use crate::database::Database;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
-use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+use crate::merkle_worker::BackgroundReadableKeyValueStore;
+use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::repo::RegistryRepo;
-use crate::storage::KeyValueStore;
+use crate::storage::ReadableKeyValueStore;
 
 #[derive(Debug, Encode, Decode)]
 /// Structure to store the result of serialising a registry.
@@ -55,12 +56,12 @@ struct RegistryManifest {
 
 /// Registry that owns a set of databases and the repository used to manage
 /// registry state.
-pub struct Registry<KV: KeyValueStore, M: Mode> {
+pub struct Registry<KV: ReadableKeyValueStore, M: Mode> {
     inner: M::Select<RegistryTemplate<KV>>,
     databases: Vector<Database<KV, M>, M>,
 }
 
-impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
+impl<KV: BackgroundReadableKeyValueStore> Registry<KV, Normal> {
     /// Creates a new, empty Registry.
     ///
     /// The registry owns a Tokio [`Runtime`] and a register state repository.
@@ -90,7 +91,7 @@ impl<KV: BackgroundKeyValueStore> Registry<KV, Normal> {
 
 impl<'normal, KV> ProvableExt<'normal, 'static, OperationalError> for Registry<KV, Normal>
 where
-    KV: BackgroundKeyValueStore,
+    KV: BackgroundReadableKeyValueStore,
     KV::Repo: Clone,
 {
     type Prover = Registry<KV, Prove<'static>>;
@@ -111,7 +112,7 @@ where
     }
 }
 
-impl<KV: KeyValueStore> Registry<KV, Prove<'static>> {
+impl<KV: ReadableKeyValueStore> Registry<KV, Prove<'static>> {
     /// Produce a [`Proof`] of the operations performed against this
     /// Prove-mode registry.
     ///
@@ -209,7 +210,7 @@ where
     }
 }
 
-impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
+impl<KV: ReadableKeyValueStore, M: Mode> Registry<KV, M> {
     /// Check the given `index` is valid for a database in the registry.
     fn validate_index(&self, index: usize) -> Result<(), InvalidArgumentError>
     where
@@ -247,7 +248,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
     /// databases from the end.
     pub fn resize_tick(&mut self, new_size: usize) -> Result<(), Error>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundWriteableKeyValueStore,
         M: RegistryMode + VectorMode,
     {
         match self.len().abs_diff(new_size) {
@@ -283,7 +284,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
     /// Copy the contents of database at `src_index` to database at `dst_index`.
     pub fn copy_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundWriteableKeyValueStore,
         M: RegistryMode + VectorMode,
     {
         self.validate_index(src_index)?;
@@ -303,7 +304,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
     /// database is replaced with an empty database.
     pub fn move_database(&mut self, src_index: usize, dst_index: usize) -> Result<(), Error>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundWriteableKeyValueStore,
         M: RegistryMode + VectorMode,
     {
         self.validate_index(src_index)?;
@@ -322,7 +323,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
     /// Clear the database at the given `index`.
     pub fn clear_database(&mut self, index: usize) -> Result<(), Error>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundWriteableKeyValueStore,
         M: RegistryMode + VectorMode,
     {
         self.validate_index(index)?;
@@ -331,7 +332,7 @@ impl<KV: KeyValueStore, M: Mode> Registry<KV, M> {
     }
 }
 
-impl<KV: BackgroundKeyValueStore, M: CloneRegistryMode> Registry<KV, M>
+impl<KV: BackgroundWriteableKeyValueStore, M: CloneRegistryMode> Registry<KV, M>
 where
     KV::Repo: Clone,
 {
@@ -343,7 +344,7 @@ where
     }
 }
 
-impl<KV: KeyValueStore, M: Mode, F: Fold> Foldable<F> for Registry<KV, M>
+impl<KV: ReadableKeyValueStore, M: Mode, F: Fold> Foldable<F> for Registry<KV, M>
 where
     Database<KV, M>: Foldable<F>,
     Vector<Database<KV, M>, M>: Foldable<F>,
@@ -353,7 +354,7 @@ where
     }
 }
 
-impl<KV: KeyValueStore> FromProof for Registry<KV, Verify> {
+impl<KV: ReadableKeyValueStore> FromProof for Registry<KV, Verify> {
     // TODO (TZX-161): for a verify mode Registry, the resulting registry state is currently
     // only usable if `proof` is the ProofTree. Otherwise, if created using the stream
     // deserialiser, verification will fail (as this does not support capturing the owned proof).
@@ -373,9 +374,9 @@ impl<KV: KeyValueStore> FromProof for Registry<KV, Verify> {
 /// Modal template for the [`Registry`]
 ///
 /// This is used to select the appropriate implementation for the mode.
-struct RegistryTemplate<KV: KeyValueStore>(PhantomData<KV>, Infallible);
+struct RegistryTemplate<KV: ReadableKeyValueStore>(PhantomData<KV>, Infallible);
 
-impl<KV: KeyValueStore> Modal for RegistryTemplate<KV> {
+impl<KV: ReadableKeyValueStore> Modal for RegistryTemplate<KV> {
     type Normal = NormalImpl<KV>;
 
     type Prove<'normal> = ProveImpl<KV>;
@@ -390,12 +391,12 @@ impl<KV: KeyValueStore> Modal for RegistryTemplate<KV> {
 )]
 pub trait RegistryMode: VectorMode {
     /// Create a new database.
-    fn try_new_database<KV: BackgroundKeyValueStore>(
+    fn try_new_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
     ) -> Result<Database<KV, Self>, OperationalError>;
 
     /// Copy the database at `src_index` over the one at `dst_index`.
-    fn copy_database<KV: BackgroundKeyValueStore>(
+    fn copy_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -404,7 +405,7 @@ pub trait RegistryMode: VectorMode {
 
     /// Move the database at `src_index` over the one at `dst_index`, leaving an empty database
     /// at `src_index`.
-    fn move_database<KV: BackgroundKeyValueStore>(
+    fn move_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -412,7 +413,7 @@ pub trait RegistryMode: VectorMode {
     ) -> Result<(), OperationalError>;
 
     /// Clear the database at `index`.
-    fn clear_database<KV: BackgroundKeyValueStore>(
+    fn clear_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         index: usize,
@@ -424,13 +425,13 @@ pub trait RegistryMode: VectorMode {
     reason = "This method should not be used outside of this module"
 )]
 impl RegistryMode for Normal {
-    fn try_new_database<KV: BackgroundKeyValueStore>(
+    fn try_new_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
     ) -> Result<Database<KV, Self>, OperationalError> {
         Database::try_new(inner.runtime.handle(), &inner.repo)
     }
 
-    fn copy_database<KV: BackgroundKeyValueStore>(
+    fn copy_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -441,7 +442,7 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn move_database<KV: BackgroundKeyValueStore>(
+    fn move_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -453,7 +454,7 @@ impl RegistryMode for Normal {
         Ok(())
     }
 
-    fn clear_database<KV: BackgroundKeyValueStore>(
+    fn clear_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         index: usize,
@@ -468,7 +469,7 @@ impl RegistryMode for Normal {
     reason = "This method should not be used outside of this module"
 )]
 impl RegistryMode for Prove<'static> {
-    fn try_new_database<KV: BackgroundKeyValueStore>(
+    fn try_new_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
     ) -> Result<Database<KV, Self>, OperationalError> {
         let persistence = Arc::new(KV::new(&inner.repo)?);
@@ -484,7 +485,7 @@ impl RegistryMode for Prove<'static> {
     // the source slot's initial tree, but are recorded against the destination slot — the
     // source's fold blinds them, so such proofs under-include data and fail to verify.
 
-    fn copy_database<KV: BackgroundKeyValueStore>(
+    fn copy_database<KV: BackgroundWriteableKeyValueStore>(
         _inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -495,7 +496,7 @@ impl RegistryMode for Prove<'static> {
         Ok(())
     }
 
-    fn move_database<KV: BackgroundKeyValueStore>(
+    fn move_database<KV: BackgroundWriteableKeyValueStore>(
         _inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -506,7 +507,7 @@ impl RegistryMode for Prove<'static> {
         Ok(())
     }
 
-    fn clear_database<KV: BackgroundKeyValueStore>(
+    fn clear_database<KV: BackgroundWriteableKeyValueStore>(
         _inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         index: usize,
@@ -521,13 +522,13 @@ impl RegistryMode for Prove<'static> {
     reason = "This method should not be used outside of this module"
 )]
 impl RegistryMode for Verify {
-    fn try_new_database<KV: BackgroundKeyValueStore>(
+    fn try_new_database<KV: BackgroundWriteableKeyValueStore>(
         _inner: &Self::Select<RegistryTemplate<KV>>,
     ) -> Result<Database<KV, Self>, OperationalError> {
         Ok(<Database<KV, Verify>>::empty())
     }
 
-    fn copy_database<KV: BackgroundKeyValueStore>(
+    fn copy_database<KV: BackgroundWriteableKeyValueStore>(
         _inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -538,7 +539,7 @@ impl RegistryMode for Verify {
         Ok(())
     }
 
-    fn move_database<KV: BackgroundKeyValueStore>(
+    fn move_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         src_index: usize,
@@ -550,7 +551,7 @@ impl RegistryMode for Verify {
         Ok(())
     }
 
-    fn clear_database<KV: BackgroundKeyValueStore>(
+    fn clear_database<KV: BackgroundWriteableKeyValueStore>(
         inner: &Self::Select<RegistryTemplate<KV>>,
         databases: &mut Vector<Database<KV, Self>, Self>,
         index: usize,
@@ -563,7 +564,7 @@ impl RegistryMode for Verify {
 /// Modes that implement this marker support cloning of the [`Registry`] type
 pub trait CloneRegistryMode: Mode {
     /// See [`Registry::try_clone`]
-    fn try_clone<KV: BackgroundKeyValueStore>(
+    fn try_clone<KV: BackgroundWriteableKeyValueStore>(
         this: &Registry<KV, Self>,
     ) -> Result<Registry<KV, Self>, OperationalError>
     where
@@ -571,7 +572,7 @@ pub trait CloneRegistryMode: Mode {
 }
 
 impl CloneRegistryMode for Normal {
-    fn try_clone<KV: BackgroundKeyValueStore>(
+    fn try_clone<KV: BackgroundWriteableKeyValueStore>(
         this: &Registry<KV, Self>,
     ) -> Result<Registry<KV, Self>, OperationalError>
     where
@@ -596,18 +597,18 @@ impl CloneRegistryMode for Normal {
 }
 
 /// Registry implementation for the [`Normal`] mode
-struct NormalImpl<KV: KeyValueStore> {
+struct NormalImpl<KV: ReadableKeyValueStore> {
     repo: KV::Repo,
     runtime: Arc<Runtime>,
 }
 
 /// Registry implementation for the [`Prove`] mode.
-struct ProveImpl<KV: KeyValueStore> {
+struct ProveImpl<KV: ReadableKeyValueStore> {
     repo: KV::Repo,
 }
 
 /// Registry implementation for the [`Verify`] mode.
-struct VerifyImpl<KV: KeyValueStore>(PhantomData<KV>);
+struct VerifyImpl<KV: ReadableKeyValueStore>(PhantomData<KV>);
 
 #[cfg(test)]
 pub(super) mod tests {
@@ -642,19 +643,19 @@ pub(super) mod tests {
     use crate::errors::InvalidArgumentError;
     use crate::errors::OperationalError;
     use crate::key::Key;
-    use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+    use crate::merkle_worker::BackgroundWriteableKeyValueStore;
     use crate::repo::RegistryRepo;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::kv_test;
 
-    pub(super) fn setup_registry<KV: BackgroundKeyValueStore>(
+    pub(super) fn setup_registry<KV: BackgroundWriteableKeyValueStore>(
         repo: KV::Repo,
     ) -> Registry<KV, Normal> {
         Registry::new(repo).expect("Registry should be created")
     }
 
-    pub(super) fn setup_size_2_registry<KV: BackgroundKeyValueStore>(
+    pub(super) fn setup_size_2_registry<KV: BackgroundWriteableKeyValueStore>(
         repo: KV::Repo,
     ) -> Registry<KV, Normal> {
         let mut registry = setup_registry::<KV>(repo);
@@ -669,7 +670,7 @@ pub(super) mod tests {
         registry
     }
 
-    fn setup_prove_registry<KV: BackgroundKeyValueStore>(
+    fn setup_prove_registry<KV: BackgroundWriteableKeyValueStore>(
         repo: KV::Repo,
     ) -> Registry<KV, Prove<'static>> {
         Registry {
@@ -678,7 +679,7 @@ pub(super) mod tests {
         }
     }
 
-    fn setup_prove_size_2_registry<KV: BackgroundKeyValueStore>(
+    fn setup_prove_size_2_registry<KV: BackgroundWriteableKeyValueStore>(
         repo: KV::Repo,
     ) -> Registry<KV, Prove<'static>> {
         let mut registry = setup_prove_registry::<KV>(repo);
@@ -691,14 +692,15 @@ pub(super) mod tests {
         registry
     }
 
-    fn setup_verify_registry<KV: BackgroundKeyValueStore>() -> Registry<KV, Verify> {
+    fn setup_verify_registry<KV: BackgroundWriteableKeyValueStore>() -> Registry<KV, Verify> {
         Registry {
             inner: VerifyImpl(PhantomData),
             databases: <Verify as VectorMode>::new(Vec::new()),
         }
     }
 
-    fn setup_verify_size_2_registry<KV: BackgroundKeyValueStore>() -> Registry<KV, Verify> {
+    fn setup_verify_size_2_registry<KV: BackgroundWriteableKeyValueStore>() -> Registry<KV, Verify>
+    {
         let mut registry = setup_verify_registry::<KV>();
         registry
             .resize_tick(1)
@@ -709,7 +711,7 @@ pub(super) mod tests {
         registry
     }
 
-    fn seed_copy_move<KV: BackgroundKeyValueStore>(
+    fn seed_copy_move<KV: BackgroundWriteableKeyValueStore>(
         registry: &mut Registry<KV, Normal>,
         src_index: usize,
         dst_index: usize,
@@ -741,7 +743,7 @@ pub(super) mod tests {
         (src_pairs, key_c)
     }
 
-    fn assert_pairs_present<KV: BackgroundKeyValueStore>(
+    fn assert_pairs_present<KV: BackgroundWriteableKeyValueStore>(
         registry: &Registry<KV, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
@@ -760,7 +762,7 @@ pub(super) mod tests {
         }
     }
 
-    fn assert_pairs_absent<KV: BackgroundKeyValueStore>(
+    fn assert_pairs_absent<KV: BackgroundWriteableKeyValueStore>(
         registry: &Registry<KV, Normal>,
         db_index: usize,
         pairs: &[(Key, &'static [u8])],
@@ -775,7 +777,7 @@ pub(super) mod tests {
         }
     }
 
-    pub(super) fn populate_database_with_key_value<KV: BackgroundKeyValueStore>(
+    pub(super) fn populate_database_with_key_value<KV: BackgroundWriteableKeyValueStore>(
         registry: &mut Registry<KV, Normal>,
         db_index: usize,
         key_bytes: &[u8],
@@ -787,13 +789,13 @@ pub(super) mod tests {
             .expect("Writing to database should succeed");
     }
 
-    kv_test!(test_new, KV: BackgroundKeyValueStore, {
+    kv_test!(test_new, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let registry = setup_registry::<KV>(repo);
         assert!(registry.is_empty());
     });
 
-    kv_test!(test_resize, KV: BackgroundKeyValueStore, {
+    kv_test!(test_resize, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_registry::<KV>(repo);
 
@@ -814,7 +816,7 @@ pub(super) mod tests {
         assert!(registry.resize_tick(5).is_err());
     });
 
-    kv_test!(test_get_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_get_database, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_registry::<KV>(repo);
 
@@ -829,7 +831,7 @@ pub(super) mod tests {
         }
     });
 
-    kv_test!(test_copy_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_copy_database, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_size_2_registry::<KV>(repo);
 
@@ -852,7 +854,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_database_operations_invalid_index, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_operations_invalid_index, KV: BackgroundWriteableKeyValueStore, {
         macro_rules! assert_invalid_index_error {
             ($result:expr, $operation:expr, $direction:expr) => {
                 assert!(
@@ -886,7 +888,7 @@ pub(super) mod tests {
         assert_invalid_index_error!(registry.clear_database(2), "clear", "");
     });
 
-    kv_test!(test_move_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_move_database, KV: BackgroundWriteableKeyValueStore, {
         // Test that the source database is emptied and the destination database
         // has all the data, and any data previously in the destination is lost.
 
@@ -906,7 +908,7 @@ pub(super) mod tests {
         assert_pairs_absent::<KV>(&registry, src_index, &src_pairs);
     });
 
-    kv_test!(test_database_operations_same_index, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_operations_same_index, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_size_2_registry::<KV>(repo);
 
@@ -925,7 +927,7 @@ pub(super) mod tests {
         assert_pairs_present::<KV>(&registry, 0, &src_pairs);
     });
 
-    kv_test!(test_clear_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_clear_database, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_size_2_registry::<KV>(repo);
 
@@ -1127,7 +1129,7 @@ pub(super) mod tests {
         ));
     });
 
-    kv_test!(test_hashing_prove_registry_does_not_record_reads, KV: BackgroundKeyValueStore, {
+    kv_test!(test_hashing_prove_registry_does_not_record_reads, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1176,7 +1178,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_prove_clear_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_clear_database, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_prove_size_2_registry::<KV>(repo);
 
@@ -1201,7 +1203,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_prove_copy_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_copy_database, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_prove_size_2_registry::<KV>(repo);
 
@@ -1227,7 +1229,7 @@ pub(super) mod tests {
             .assert_database_value(&key, b"src");
     });
 
-    kv_test!(test_prove_database_clone_independence, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_database_clone_independence, KV: BackgroundWriteableKeyValueStore, {
         // Cloning via copy should produce an independent database — mutations to the source
         // after the copy must not propagate to the destination.
         let (_keepalive, repo) = KV::setup_repo();
@@ -1260,7 +1262,7 @@ pub(super) mod tests {
             .assert_database_value(&key, b"original");
     });
 
-    kv_test!(test_prove_database_ops, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_database_ops, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_prove_size_2_registry::<KV>(repo);
 
@@ -1281,7 +1283,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_prove_invalid_index, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_invalid_index, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_prove_size_2_registry::<KV>(repo);
 
@@ -1305,7 +1307,7 @@ pub(super) mod tests {
         ));
     });
 
-    kv_test!(test_prove_move_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_move_database, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_prove_size_2_registry::<KV>(repo);
 
@@ -1334,13 +1336,13 @@ pub(super) mod tests {
             .assert_database_value(&key, b"value");
     });
 
-    kv_test!(test_prove_new, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_new, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let registry = setup_prove_registry::<KV>(repo);
         assert!(registry.is_empty());
     });
 
-    kv_test!(test_prove_resize, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_resize, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_prove_registry::<KV>(repo);
 
@@ -1364,7 +1366,7 @@ pub(super) mod tests {
     // Reading through a `Registry<Prove>` populated from snapshots of Normal-mode source
     // data records a proof; replaying the same reads through the resulting
     // `Registry<Verify>` must yield the same values.
-    kv_test!(test_verify_replays_prove_reads, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_replays_prove_reads, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1476,7 +1478,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_verify_clear_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_clear_database, KV: BackgroundWriteableKeyValueStore, {
         let mut registry = setup_verify_size_2_registry::<KV>();
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1500,7 +1502,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_verify_copy_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_copy_database, KV: BackgroundWriteableKeyValueStore, {
         let mut registry = setup_verify_size_2_registry::<KV>();
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1525,7 +1527,7 @@ pub(super) mod tests {
             .assert_database_value(&key, b"src");
     });
 
-    kv_test!(test_verify_database_clone_independence, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_database_clone_independence, KV: BackgroundWriteableKeyValueStore, {
         // Cloning via copy should produce an independent database — mutations to the source
         // after the copy must not propagate to the destination.
         let mut registry = setup_verify_size_2_registry::<KV>();
@@ -1557,7 +1559,7 @@ pub(super) mod tests {
             .assert_database_value(&key, b"original");
     });
 
-    kv_test!(test_verify_database_ops, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_database_ops, KV: BackgroundWriteableKeyValueStore, {
         // Exercise read/write/delete on a verify-mode database obtained from the registry.
         let mut registry = setup_verify_size_2_registry::<KV>();
 
@@ -1578,7 +1580,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_verify_invalid_index, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_invalid_index, KV: BackgroundWriteableKeyValueStore, {
         let mut registry = setup_verify_size_2_registry::<KV>();
 
         assert!(matches!(
@@ -1601,7 +1603,7 @@ pub(super) mod tests {
         ));
     });
 
-    kv_test!(test_verify_move_database, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_move_database, KV: BackgroundWriteableKeyValueStore, {
         let mut registry = setup_verify_size_2_registry::<KV>();
 
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1629,12 +1631,12 @@ pub(super) mod tests {
             .assert_database_value(&key, b"value");
     });
 
-    kv_test!(test_verify_new, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_new, KV: BackgroundWriteableKeyValueStore, {
         let registry = setup_verify_registry::<KV>();
         assert!(registry.is_empty());
     });
 
-    kv_test!(test_verify_resize, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_resize, KV: BackgroundWriteableKeyValueStore, {
         let mut registry = setup_verify_registry::<KV>();
 
         while registry.len() < 4 {
@@ -1667,7 +1669,7 @@ pub(super) mod tests {
     ///    registry.
     ///
     /// Returns the registries produced by both passes.
-    fn deserialise_proof_via_bytes<KV: BackgroundKeyValueStore>(
+    fn deserialise_proof_via_bytes<KV: BackgroundWriteableKeyValueStore>(
         proof: &Proof,
     ) -> (Registry<KV, Verify>, Registry<KV, Verify>) {
         let bytes = serialise_proof(proof);
@@ -1696,7 +1698,7 @@ pub(super) mod tests {
     ///
     /// Future full e2e tests should additionally pass the whole proof to
     /// allow registry partial hash fold to function if these don't apply.
-    fn registry_root_hash_small<KV: BackgroundKeyValueStore>(
+    fn registry_root_hash_small<KV: BackgroundWriteableKeyValueStore>(
         registry: &Registry<KV, Verify>,
     ) -> Hash {
         PartialHash::from_foldable(None, registry)
@@ -1704,7 +1706,7 @@ pub(super) mod tests {
             .expect("Database captures owned proof, should be able to hash")
     }
 
-    kv_test!(test_proof_via_bytes_end_to_end, KV: BackgroundKeyValueStore, {
+    kv_test!(test_proof_via_bytes_end_to_end, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1810,7 +1812,7 @@ pub(super) mod tests {
     // touched database is present, its merkle-tree siblings are blinded, and every other database
     // is absent (absorbed into a blinded ancestor). The proof must still round-trip and let the
     // verifier replay the touched read.
-    kv_test!(test_touch_one_database_yields_minimal_proof, KV: BackgroundKeyValueStore, {
+    kv_test!(test_touch_one_database_yields_minimal_proof, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_registry::<KV>(repo);
         for n in 1..=16 {
@@ -1866,7 +1868,7 @@ pub(super) mod tests {
     // Such a proof is fully blinded — the whole registry collapses to a single blind leaf carrying
     // its root hash — rather than exposing each database (which would yield a present contents
     // subtree with no length node, rejected by the deserialiser).
-    kv_test!(test_untouched_nonempty_registry_proof_is_fully_blinded, KV: BackgroundKeyValueStore, {
+    kv_test!(test_untouched_nonempty_registry_proof_is_fully_blinded, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let mut registry = setup_size_2_registry::<KV>(repo);
@@ -1905,7 +1907,7 @@ pub(super) mod tests {
 
     // TODO (TZX-161): once the stream deserialiser can capture owned proofs, the first pass
     // should become verifiable on its own and this test should be updated.
-    kv_test!(test_proof_via_bytes_requires_second_deserialisation, KV: BackgroundKeyValueStore, {
+    kv_test!(test_proof_via_bytes_requires_second_deserialisation, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1973,7 +1975,7 @@ pub(super) mod tests {
         );
     });
 
-    kv_test!(test_proof_database_hash_queries_replay_in_verify_mode, KV: BackgroundKeyValueStore, {
+    kv_test!(test_proof_database_hash_queries_replay_in_verify_mode, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let key_c = Key::new(&[3]).expect("Size less than KEY_MAX_SIZE");
@@ -2042,7 +2044,7 @@ pub(super) mod tests {
     });
 
     kv_test!(
-        test_proof_copy_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
+        test_proof_copy_database_preserves_hash_invariants, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let mut registry = setup_size_2_registry::<KV>(repo);
@@ -2091,7 +2093,7 @@ pub(super) mod tests {
     });
 
     kv_test!(
-        test_proof_move_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
+        test_proof_move_database_preserves_hash_invariants, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let mut registry = setup_size_2_registry::<KV>(repo);
@@ -2140,7 +2142,7 @@ pub(super) mod tests {
     });
 
     kv_test!(
-        test_proof_clear_database_preserves_hash_invariants, KV: BackgroundKeyValueStore, {
+        test_proof_clear_database_preserves_hash_invariants, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
 
         let mut registry = setup_size_2_registry::<KV>(repo);

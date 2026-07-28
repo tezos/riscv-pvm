@@ -27,16 +27,20 @@ use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
-use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::ReadableKeyValueStore;
 use crate::storage::StoreOptions;
+use crate::storage::WriteableKeyValueStore;
 
 trait_set! {
-    /// [`KeyValueStore`] that can be used in a background thread
-    pub trait BackgroundKeyValueStore = KeyValueStore + Send + Sync + 'static;
+    /// [`ReadableKeyValueStore`] that can be used in a background thread
+    pub trait BackgroundReadableKeyValueStore = ReadableKeyValueStore + Send + Sync + 'static;
+
+    /// [`WriteableKeyValueStore`] that can be used in a background thread
+    pub trait BackgroundWriteableKeyValueStore = WriteableKeyValueStore + BackgroundReadableKeyValueStore;
 
     /// [`PersistentKeyValueStore`] that can be used in a background thread
-    pub trait BackgroundPersistentKeyValueStore = PersistentKeyValueStore + BackgroundKeyValueStore;
+    pub trait BackgroundPersistentKeyValueStore = PersistentKeyValueStore + BackgroundWriteableKeyValueStore;
 }
 
 /// Alias for the inner workings of the [`Command`] struct to make Clippy happy
@@ -48,13 +52,13 @@ type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>, &mut BTreeSet<Key
 ///
 /// As these are handled in a background thread, there are potential race conditions between the
 /// background worker, and the persistence layer. The `MerkleLayer` resolves values lazily from the
-/// `KeyValueStore` - and as a result can attempt to perform operations over unexpected, or
+/// `WriteableKeyValueStore` - and as a result can attempt to perform operations over unexpected, or
 /// incorrectly shaped, values.
 ///
 /// ## Out-of-order delete
 ///
 /// One such race condition is that a delete operation may already have been performed in the
-/// `KeyValueStore`, prior to a _previous_ write/set on that value being handled in the Merkle
+/// `WriteableKeyValueStore`, prior to a _previous_ write/set on that value being handled in the Merkle
 /// layer. This can happen when, on the first `set/write`, the value needs to be resolved (loaded).
 /// This takes time to happen - and is fully possible (if many intermediate nodes need to be resolved
 /// first), that a subsequent delete operation has already been handled by the persistence layer.
@@ -100,7 +104,7 @@ impl<KV> Command<KV> {
     /// Construct a command that performs a [`MerkleLayer::write`].
     fn new_write(key: Key, offset: usize, value: Bytes) -> Self
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         Self(Box::new(
             move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| match layer
@@ -128,7 +132,7 @@ impl<KV> Command<KV> {
     /// Construct a command that performs a [`MerkleLayer::set`].
     fn new_set(key: Key, value: Bytes) -> Self
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         Self(Box::new(
             move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| match layer
@@ -152,7 +156,7 @@ impl<KV> Command<KV> {
     /// Construct a command that performs a [`MerkleLayer::delete`].
     fn new_delete(key: Key) -> Self
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         Self(Box::new(
             move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| {
@@ -174,7 +178,7 @@ impl<KV> Command<KV> {
         Self,
     )
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundReadableKeyValueStore,
     {
         let (sender, receiver) = oneshot::channel();
 
@@ -202,7 +206,7 @@ impl<KV> Command<KV> {
     /// Construct a command that performs a [`MerkleLayer::hash`].
     fn new_hash() -> (impl FnOnce() -> Result<Hash, OperationalError>, Self)
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         let (sender, receiver) = oneshot::channel();
 
@@ -272,7 +276,7 @@ impl<KV> MerkleWorker<KV> {
     /// The provided handle is used to spawn the background worker thread.
     pub fn new(async_handle: &Handle, store: Arc<KV>) -> Self
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundReadableKeyValueStore,
     {
         let layer = MerkleLayer::new(store);
         MerkleWorker::from_layer(async_handle, layer)
@@ -308,7 +312,7 @@ impl<KV> MerkleWorker<KV> {
         store: Arc<KV>,
     ) -> Result<Self, OperationalError>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundReadableKeyValueStore,
     {
         let (receive, command) = Command::new_clone_with(store);
         self.sender
@@ -329,7 +333,7 @@ impl<KV> MerkleWorker<KV> {
         value: Bytes,
     ) -> Result<(), OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         let command = Command::new_write(key, offset, value);
         self.sender
@@ -340,7 +344,7 @@ impl<KV> MerkleWorker<KV> {
     /// Non-blocking version of [`MerkleLayer::set`].
     pub(crate) fn set(&self, key: Key, value: Bytes) -> Result<(), OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         let command = Command::new_set(key, value);
         self.sender
@@ -351,7 +355,7 @@ impl<KV> MerkleWorker<KV> {
     /// Non-blocking version of [`MerkleLayer::delete`].
     pub(crate) fn delete(&self, key: Key) -> Result<(), OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         let command = Command::new_delete(key);
         self.sender
@@ -362,7 +366,7 @@ impl<KV> MerkleWorker<KV> {
     /// See [`MerkleLayer::hash`].
     pub(crate) fn hash(&self) -> Result<Hash, OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         let (receive, command) = Command::new_hash();
         self.sender
@@ -381,7 +385,7 @@ impl<KV> MerkleWorker<KV> {
         commit: CommitId,
     ) -> Result<Self, Error>
     where
-        KV: BackgroundPersistentKeyValueStore,
+        KV: BackgroundReadableKeyValueStore,
     {
         let layer = MerkleLayer::checkout(store, commit)?;
         let worker = MerkleWorker::from_layer(async_handle, layer);
@@ -407,7 +411,7 @@ impl<KV> MerkleWorker<KV> {
         store: Arc<KV>,
     ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundReadableKeyValueStore,
     {
         let (receive, command) = Command::new_clone_with(store);
         self.sender
@@ -435,7 +439,7 @@ mod tests {
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::MerkleWorker;
-    use crate::storage::KeyValueStore;
+    use crate::storage::WriteableKeyValueStore;
     use crate::storage::kv_test;
 
     fn key_strategy() -> impl Strategy<Value = Key> {

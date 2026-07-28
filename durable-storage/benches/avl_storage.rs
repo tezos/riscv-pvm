@@ -23,10 +23,10 @@ use octez_riscv_durable_storage::avl::resolver::LazyNodeId;
 use octez_riscv_durable_storage::avl::resolver::LazyResolver;
 use octez_riscv_durable_storage::avl::tree::Tree;
 use octez_riscv_durable_storage::key::Key;
-use octez_riscv_durable_storage::storage::KeyValueStore;
 use octez_riscv_durable_storage::storage::Loadable;
 use octez_riscv_durable_storage::storage::Storable;
 use octez_riscv_durable_storage::storage::StoreOptions;
+use octez_riscv_durable_storage::storage::WriteableKeyValueStore;
 use rand::prelude::*;
 use random::generate_keys;
 use random::generate_random_bytes_in_range;
@@ -49,7 +49,11 @@ fn key_count() -> usize {
 
 /// Build an AVL tree with `keys`, persist it (including value data) into `store`, and return
 /// the tree's root hash.
-fn build_and_persist<KV: KeyValueStore>(rng: &mut impl Rng, store: &Arc<KV>, keys: &[Key]) -> Hash {
+fn build_and_persist<KV: WriteableKeyValueStore>(
+    rng: &mut impl Rng,
+    store: &Arc<KV>,
+    keys: &[Key],
+) -> Hash {
     let mut resolver = LazyResolver::new(store.clone());
     let mut tree: Tree<LazyNodeId> = Tree::default();
     for key in keys {

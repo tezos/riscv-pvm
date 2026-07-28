@@ -14,7 +14,8 @@ use criterion::criterion_main;
 use octez_riscv_durable_storage::avl::resolver::LazyResolver;
 use octez_riscv_durable_storage::avl::tree::Tree;
 use octez_riscv_durable_storage::key::Key;
-use octez_riscv_durable_storage::storage::KeyValueStore;
+use octez_riscv_durable_storage::storage::ReadableKeyValueStore;
+use octez_riscv_durable_storage::storage::WriteableKeyValueStore;
 use rand::prelude::*;
 use random::generate_keys;
 use random::generate_random_bytes_in_range;
@@ -49,7 +50,7 @@ cfg_if::cfg_if! {
         use octez_riscv_test_utils::TestableTmpdir;
 
         type TestKeyValueStore = PersistenceLayer;
-        type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+        type TestRepo = <TestKeyValueStore as ReadableKeyValueStore>::Repo;
 
         fn setup_repo() -> (TestableTmpdir, TestRepo) {
             use octez_riscv_durable_storage::repo::DirectoryManager;
@@ -64,7 +65,7 @@ cfg_if::cfg_if! {
         use octez_riscv_durable_storage::storage::in_memory::InMemoryRepo;
 
         type TestKeyValueStore = InMemoryKeyValueStore;
-        type TestRepo = <TestKeyValueStore as KeyValueStore>::Repo;
+        type TestRepo = <TestKeyValueStore as ReadableKeyValueStore>::Repo;
 
         fn setup_repo() -> ((), TestRepo) {
             ((), InMemoryRepo::default())

@@ -37,8 +37,8 @@ use crate::commit::CommitId;
 use crate::database::DatabaseMode;
 use crate::errors::OperationalError;
 use crate::key::Key;
-use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::registry::Registry;
 use crate::registry::RegistryMode;
 use crate::repo::RegistryRepo;
@@ -150,7 +150,7 @@ impl OperationView for RegistryOperationView {
 
 pub(crate) fn grow_registry<KV, M>(registry: &mut Registry<KV, M>)
 where
-    KV: BackgroundKeyValueStore,
+    KV: BackgroundWriteableKeyValueStore,
     M: RegistryMode,
 {
     let new = registry.len();
@@ -187,7 +187,7 @@ fn apply_registry_step<KV, M>(
     len: usize,
 ) -> Result<Option<StepOutcome>, OperationalError>
 where
-    KV: BackgroundKeyValueStore,
+    KV: BackgroundWriteableKeyValueStore,
     M: RegistryMode + DatabaseMode,
 {
     let outcome = match op {
@@ -249,7 +249,7 @@ pub(crate) fn prove_and_verify_registry_operation<KV>(
     op: &RegistryOperation,
 ) -> Option<(Vec<u8>, StepOutcome)>
 where
-    KV: BackgroundKeyValueStore,
+    KV: BackgroundWriteableKeyValueStore,
     KV::Repo: Clone,
 {
     let pre_root = Hash::from_foldable(registry);
