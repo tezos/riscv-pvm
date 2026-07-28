@@ -8,13 +8,15 @@ use proptest::collection::vec;
 use proptest::prop_assert;
 use proptest::prop_assert_eq;
 use proptest::proptest;
+use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
+use super::test_utils::BytesOp;
+use super::test_utils::MAX_PROOF_OFFSETS;
 use crate::components::bytes::Bytes;
 use crate::components::bytes::PAGE_SIZE;
 use crate::components::bytes::test_utils::BytesMutOp;
 use crate::components::bytes::test_utils::MAX_PROOF_LENGTH;
 use crate::components::bytes::test_utils::NDS_BYTES_LENGTH;
-use crate::components::bytes::test_utils::max_proof_ops;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
 use crate::foldable::tests::TestFolder;
@@ -582,8 +584,29 @@ fn fold_unfold() {
     });
 }
 
+/// At each of the `MAX_PROOF_OFFSETS` a read or write of `MAX_FILE_CHUNK_SIZE`
+/// results in a maximally long proof. This returns a vector of all six such operations.
+fn max_proof_ops() -> Vec<BytesMutOp> {
+    let mut v = vec![];
+
+    for offset in MAX_PROOF_OFFSETS {
+        v.push(BytesMutOp::Immutable {
+            op: BytesOp::Read {
+                offset,
+                size: MAX_FILE_CHUNK_SIZE,
+            },
+        });
+        v.push(BytesMutOp::Write {
+            offset,
+            data: vec![0; MAX_FILE_CHUNK_SIZE],
+        });
+    }
+
+    v
+}
+
 #[test]
-fn largest_valid_proof() {
+fn test_bytes_largest_valid_proof_nds() {
     let v = vec![0; 1024 * 1024 * 64];
     let bytes: Bytes<Normal> = Bytes::from(&v[..]);
 
@@ -593,7 +616,12 @@ fn largest_valid_proof() {
         let proof_tree = MerkleProof::from_foldable(&bytes_prove);
         let proof = serialise(proof_tree).unwrap();
 
-        assert_eq!(proof.len(), MAX_PROOF_LENGTH);
+        assert_eq!(
+            proof.len(),
+            MAX_PROOF_LENGTH,
+            "expect maximum proof size to be {MAX_PROOF_LENGTH}, but got {}",
+            proof.len()
+        );
     }
 
     proptest::proptest!(|(op in BytesMutOp::any(NDS_BYTES_LENGTH))| {

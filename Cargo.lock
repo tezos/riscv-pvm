@@ -2547,6 +2547,7 @@ dependencies = [
  "rand 0.10.2",
  "range-collections",
  "serde",
+ "tezos-smart-rollup-constants",
  "thiserror 2.0.18",
  "trait-set",
  "unty",

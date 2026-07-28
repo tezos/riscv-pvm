@@ -98,69 +98,85 @@ pub enum BytesOpResult {
 /// 64 MiB: the maximum size of a `Bytes` component in the durable storage
 pub const NDS_BYTES_LENGTH: usize = 1024 * 1024 * 64;
 
-/// The depth of the (data part of the) Merkle tree for a maximal durable storage leaf. This should
-/// be 7.
+/// The depth of the (data part of the) Merkle tree for a maximal durable storage leaf.
 pub const NDS_BYTES_TREE_DEPTH: usize = (NDS_BYTES_LENGTH / PAGE_SIZE).ilog(NODE_ARITY) as usize;
 
 /// A layer in the proof tree with two non-blinded nodes in two separate branches. Each branch
 /// contributes one less than `NODE_ARITY` hashes and `NODE_ARITY` worth of tags.
 pub const BIFURCATED_LAYER: usize = ((NODE_ARITY - 1) * Hash::DIGEST_SIZE + NODE_ARITY) * 2;
 
+/// A layer in the proof tree with three non-blinded nodes -
+/// two in the same branch, one in the other.
+///
+/// - both branches contribute `NODE_ARITY` worth of tags
+/// - one branch contributes two less than `NODE_ARITY` hashes
+/// - the other branch contributes one less than `NODE_ARITY` hashes
+pub const BIFURCATED_ASYMMETRIC_LAYER: usize =
+    NODE_ARITY * 2 + (NODE_ARITY - 2) * Hash::DIGEST_SIZE + (NODE_ARITY - 1) * Hash::DIGEST_SIZE;
+
 /// A layer in the proof tree with two non-blinded nodes both in the same branch. This has two less
 /// than `NODE_ARITY` hashes and `NODE_ARITY` worth of tags.
 pub const MONOFURCATED_LAYER: usize = (NODE_ARITY - 2) * Hash::DIGEST_SIZE + NODE_ARITY;
 
 /// The calculated theoretical maximum length of a proof for a single operation on a leaf in the
-/// durable storage. It is caused by a read or write that crosses the worst possible boundary of
-/// two pages.
+/// durable storage. It is caused by a read or write that crosses the worst possible boundaries of
+/// three pages.
 ///
-/// Page size is 4096 bytes, plus 8 for a `u64` representing the length of the page; there are at
-/// most two such pages in any proof, because the maximum read/write is smaller than one page.
+/// Page size is 1024 bytes, plus 8 for a `u64` representing the length of the page; there are at
+/// most three such pages in any proof, because the maximum read/write is twice the size of a page.
 ///
-/// There are then 6 identical bifurcated layers of the tree, each with 6 blinded nodes (6 * 32 =
-/// 192) and 8 bytes of tags (blind, blind, blind, node) on one side, (node, blind, blind, blind)
-/// on the other.
+/// There is a single asymmetric bifurcated layer of the tree: it has one branch with 3 blinded nodes,
+/// and one branch with 2. e.g. on the left the tags would be (blind, blind, node, node) and on the right
+/// (node, blind, blind, blind).
 ///
-/// There is then one more monofurcated layer with only two blinded nodes (64 bytes) and four tags
+/// There are then 6 identical bifurcated layers of the tree, each with 6 blinded nodes:
+/// (blind, blind, blind, node) on one side, (node, blind, blind, blind) on the other.
+///
+/// There is then one more monofurcated layer with only two blinded nodes and four tags
 /// (node, node, blind, blind).
 ///
 /// Finally there are 8 bytes for the overall length of the `Bytes` component (serialised as a
 /// `u64`) and an extra two tags for the layer containing 'length' and 'data'. There is then one
 /// extra tag for the root node of the entire tree.
-///
-/// This all adds up to give 9487 bytes.
-pub const MAX_PROOF_LENGTH: usize = (PAGE_SIZE + 8) * 2
-    + BIFURCATED_LAYER * (NDS_BYTES_TREE_DEPTH - 1)
+pub const MAX_PROOF_LENGTH: usize = (PAGE_SIZE + 8) * 3
+    + BIFURCATED_ASYMMETRIC_LAYER
+    + BIFURCATED_LAYER * (NDS_BYTES_TREE_DEPTH - 2)
     + MONOFURCATED_LAYER
     + 8
     + 2
     + 1;
 
-/// There are three offsets at which the worst possible boundary between two pages occurs---at the
+/// There are three 'areas' at which the worst possible boundary between two pages occurs---at the
 /// 1st, 2nd and 3rd quartile in the `Bytes` component.
-pub const MAX_PROOF_OFFSETS: [usize; 3] = [
+///
+/// Essentially in the worst case, two pages will be present on one path down from the top of the tree,
+/// and one more page on aother path from the top of the tree. The pages are contiguous by 'idx'.
+///
+/// One such example is given below
+///
+/// ```custom,{class=language-markdown}
+///                         [root_hash]
+///                          ____|____
+///     ____________________/  /   \  \_____________________
+///    /                      /     \                       \
+/// [blind]                  /       \                   [blind]
+///               __________/         \__________
+///     _________/  /                         \  \_______
+///    /           /                           \         \
+/// [blind..]  ___/____                     ____\___   [blind..]
+///           /  / \   \                   /   / \  \
+///     _____/  /   \_  \____         ____/  _/   \  \______
+///    /       /      \      \       /      /      \        \
+/// [blind] [blind] [data] [data] [data] [blind] [blind] [blind]
+/// ```
+pub const MAX_PROOF_OFFSETS: [usize; 6] = [
     NDS_BYTES_LENGTH / 4 - 1,
+    NDS_BYTES_LENGTH / 4 - PAGE_SIZE - 1,
     (NDS_BYTES_LENGTH / 4) * 2 - 1,
+    (NDS_BYTES_LENGTH / 4) * 2 - PAGE_SIZE - 1,
+    (NDS_BYTES_LENGTH / 4) * 3 - PAGE_SIZE - 1,
     (NDS_BYTES_LENGTH / 4) * 3 - 1,
 ];
-
-/// At each of the `MAX_PROOF_OFFSETS` a read or write of only two bytes is all that is needed to
-/// get a maximally long proof. This returns a vector of all six such operations.
-pub fn max_proof_ops() -> Vec<BytesMutOp> {
-    let mut v = vec![];
-
-    for offset in MAX_PROOF_OFFSETS {
-        v.push(BytesMutOp::Immutable {
-            op: BytesOp::Read { offset, size: 2 },
-        });
-        v.push(BytesMutOp::Write {
-            offset,
-            data: vec![0, 0],
-        });
-    }
-
-    v
-}
 
 #[cfg(test)]
 mod tests {
@@ -180,6 +196,11 @@ mod tests {
         writeln!(file, "NDS_BYTES_TREE_DEPTH = {NDS_BYTES_TREE_DEPTH}").unwrap();
         writeln!(file, "MONOFURCATED_LAYER = {MONOFURCATED_LAYER}").unwrap();
         writeln!(file, "BIFURCATED_LAYER = {BIFURCATED_LAYER}").unwrap();
+        writeln!(
+            file,
+            "BIFURCATED_ASYMMETRIC_LAYER = {BIFURCATED_ASYMMETRIC_LAYER}"
+        )
+        .unwrap();
         writeln!(file, "MAX_PROOF_LENGTH = {MAX_PROOF_LENGTH}").unwrap();
     }
 }
