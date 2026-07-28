@@ -2375,6 +2375,34 @@ pub(crate) mod tests {
         trace
     });
 
+    // Like `test_database_proof_regression`, but over a hand-written sequence that grows a value
+    // across many pages instead of a generated input.
+    //
+    // The generated inputs only ever hold values of at most `MAX_FILE_CHUNK_SIZE` bytes, whose
+    // page tree is a single node for any arity, so their proofs cannot show a change to the shape
+    // of the `Bytes` page tree — its arity or its page size. This trace can: every proof it
+    // records opens a page tree several layers deep.
+    kv_test!(test_database_bytes_proof_regression, KV: BackgroundPersistentKeyValueStore, {
+        use goldenfile::Mint;
+
+        use crate::test_helpers::REGRESSION_EXPECTED_DIR;
+        use crate::test_helpers::database::multi_page_value_operations;
+
+        let (_keepalive, repo) = KV::setup_repo();
+        let trace = crate::test_helpers::database::run_and_prove_database_operations::<
+            KV,
+        >(&repo, multi_page_value_operations());
+
+        let mut mint = Mint::new(REGRESSION_EXPECTED_DIR);
+        let mut golden = mint
+            .new_goldenfile("database_bytes.proof-trace")
+            .expect("opening goldenfile should succeed");
+        serde_json::to_writer_pretty(&mut golden, &trace)
+            .expect("writing goldenfile should succeed");
+
+        trace
+    });
+
     kv_test!(test_database_end_to_end, KV: BackgroundPersistentKeyValueStore,
     [
         generated in <crate::test_helpers::database::DatabaseOperationView as crate::test_helpers::OperationView>::operations_commit_checkout_strategy(1usize..100, 0.1)
