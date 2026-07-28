@@ -339,6 +339,10 @@ where
     grow_registry_with_model(&mut registry, &mut registry_model);
 
     for operation in operations {
+        // The size bound must be computed over the pre-operation models, so take it before the
+        // operation is applied to `registry_model` below.
+        let bound = registry_operation_proof_size_bound(&registry_model, &operation);
+
         // Prove and verify over the pre-operation state; also yields the (identical) prove/verify
         // outcome to compare against the Normal-mode outcome below.
         let proof_and_outcome = prove_and_verify_registry_operation(&registry, &operation);
@@ -454,9 +458,7 @@ where
         };
 
         if let Some((proof, prove_outcome)) = proof_and_outcome {
-            // The size bound is computed over the pre-operation model.
-            let bound = registry_operation_proof_size_bound(&registry_model, &operation)
-                .expect("provable operations have a size bound");
+            let bound = bound.expect("provable operations have a size bound");
             assert_proof_size(&operation, proof.len(), bound, false);
 
             let normal_outcome =
