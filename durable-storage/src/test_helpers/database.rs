@@ -38,8 +38,8 @@ use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
-use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::test_helpers::OperationView;
 use crate::test_helpers::StepOutcome;
 use crate::test_helpers::outcome_from_value;
@@ -342,7 +342,7 @@ pub(crate) trait DatabaseOps<KV: BackgroundPersistentKeyValueStore>:
     ) -> Result<CommitId, OperationalError>;
 }
 
-impl<KV: BackgroundKeyValueStore, M: DatabaseMode> DatabaseValueOps for Database<KV, M> {
+impl<KV: BackgroundWriteableKeyValueStore, M: DatabaseMode> DatabaseValueOps for Database<KV, M> {
     fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
         Database::set(self, key, data)
     }
@@ -399,7 +399,9 @@ impl<KV: BackgroundPersistentKeyValueStore> DatabaseOps<KV> for Database<KV, Nor
 }
 
 #[cfg(any(test, rocksdb_test_utils))]
-impl<KV: BackgroundKeyValueStore, M: DatabaseMode> DatabaseValueOps for TracedDatabase<KV, M> {
+impl<KV: BackgroundWriteableKeyValueStore, M: DatabaseMode> DatabaseValueOps
+    for TracedDatabase<KV, M>
+{
     fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
         TracedDatabase::set(self, key, data)
     }
@@ -707,7 +709,7 @@ pub(crate) fn apply_database_step<D: DatabaseValueOps>(
 /// `None` if `operation` is not a provable step. The Prove- and Verify-mode outcomes are
 /// asserted to be equal before returning; the returned outcome is the (identical) Prove-mode one.
 #[cfg(any(test, rocksdb_test_utils))]
-pub(crate) fn prove_and_verify_database_operation<KV: BackgroundKeyValueStore>(
+pub(crate) fn prove_and_verify_database_operation<KV: BackgroundWriteableKeyValueStore>(
     database: &Database<KV, Normal>,
     operation: &DatabaseOperation,
 ) -> Option<(Vec<u8>, StepOutcome)> {

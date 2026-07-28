@@ -39,10 +39,11 @@ use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
-use crate::storage::KeyValueStore;
 use crate::storage::Loadable;
+use crate::storage::ReadableKeyValueStore;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
+use crate::storage::WriteableKeyValueStore;
 
 /// Hash of the empty AVL tree (`Tree::<NodeId>(None)`).
 /// The empty-tree hash is independent of the `NodeId` type parameter.
@@ -446,7 +447,7 @@ impl FromProof for Tree<VerifyNodeId> {
 impl<NodeId: Storable> Storable for Tree<NodeId> {
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         // We don't store empty trees. All leaf nodes contain two empty trees. Adding
@@ -465,7 +466,7 @@ impl<NodeId: Storable> Storable for Tree<NodeId> {
 }
 
 impl<NodeId: Loadable> Loadable for Tree<NodeId> {
-    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         // Empty trees are not stored. We can short-circuit here, if we detect the requested hash
         // corresponds to the hash of the empty tree.
         if id == *EMPTY_TREE_HASH {

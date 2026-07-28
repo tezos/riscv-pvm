@@ -21,7 +21,7 @@
 //!
 //! # ArcResolver vs LazyResolver
 //! Use [`ArcResolver`] when values are already present and can be shared directly via [`Arc`]. Use
-//! [`LazyResolver`] when values are persisted in a [`KeyValueStore`] and should be fetched on
+//! [`LazyResolver`] when values are persisted in a [`WriteableKeyValueStore`] and should be fetched on
 //! demand.
 //!
 //! [`Tree`]: crate::avl::tree::Tree
@@ -63,10 +63,11 @@ use super::node::Node;
 use super::tree::Tree;
 use crate::errors::OperationalError;
 use crate::key::Key;
-use crate::storage::KeyValueStore;
 use crate::storage::Loadable;
+use crate::storage::ReadableKeyValueStore;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
+use crate::storage::WriteableKeyValueStore;
 
 /// Trait for resolving identifiers to values.
 pub trait Resolver<Id, Value> {
@@ -124,7 +125,7 @@ impl Foldable<HashFold> for ArcNodeId {
 impl Storable for ArcNodeId {
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         self.0.store(store, options)
@@ -132,7 +133,7 @@ impl Storable for ArcNodeId {
 }
 
 impl Loadable for ArcNodeId {
-    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         Arc::load(id, store).map(Self)
     }
 }
@@ -150,7 +151,7 @@ impl Foldable<HashFold> for ArcTreeId {
 impl Storable for ArcTreeId {
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         self.0.store(store, options)
@@ -158,7 +159,7 @@ impl Storable for ArcTreeId {
 }
 
 impl Loadable for ArcTreeId {
-    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         Tree::load(id, store).map(Self)
     }
 }
@@ -250,7 +251,7 @@ impl<Value> LazyId<Value> {
     /// Populate the inner value from the store.
     ///
     /// This does not check if the value is already loaded.
-    fn load(&self, store: &impl KeyValueStore) -> Result<(), OperationalError>
+    fn load(&self, store: &impl ReadableKeyValueStore) -> Result<(), OperationalError>
     where
         Value: Loadable,
     {
@@ -320,7 +321,7 @@ impl Foldable<HashFold> for LazyNodeId {
 impl Storable for LazyNodeId {
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         let Some(node) = self.0.inner.get() else {
@@ -334,7 +335,7 @@ impl Storable for LazyNodeId {
 }
 
 impl Loadable for LazyNodeId {
-    fn load(id: Hash, store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         // `id` is the tree hash under which the node body is stored. Read it eagerly so that
         // resolving the containing tree yields a fully-materialised node — with its children
         // still lazy — in a single lookup, instead of deferring a second lookup for the body.
@@ -362,7 +363,7 @@ impl LazyDataId {
     pub(crate) fn try_get(
         &self,
         key: &Key,
-        store: &impl KeyValueStore,
+        store: &impl ReadableKeyValueStore,
     ) -> Result<&Bytes<Normal>, OperationalError> {
         if let Some(bytes) = self.0.inner.get() {
             return Ok(bytes);
@@ -379,7 +380,7 @@ impl LazyDataId {
     fn try_get_mut(
         &mut self,
         key: &Key,
-        store: &impl KeyValueStore,
+        store: &impl ReadableKeyValueStore,
     ) -> Result<&mut Bytes<Normal>, OperationalError> {
         // evict the cached-hash, if any - the value will be mutated
         self.0.hash = None;
@@ -411,7 +412,7 @@ impl LazyDataId {
     fn try_load_inner(
         &self,
         key: &Key,
-        store: &impl KeyValueStore,
+        store: &impl ReadableKeyValueStore,
     ) -> Result<(), OperationalError> {
         let bytes = store
             .get(key)
@@ -524,7 +525,7 @@ impl Foldable<HashFold> for LazyTreeId {
 impl Storable for LazyTreeId {
     fn store(
         &self,
-        store: &impl KeyValueStore,
+        store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
         let Some(tree) = self.0.inner.get() else {
@@ -538,12 +539,12 @@ impl Storable for LazyTreeId {
 }
 
 impl Loadable for LazyTreeId {
-    fn load(id: Hash, _store: &impl KeyValueStore) -> Result<Self, OperationalError> {
+    fn load(id: Hash, _store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         Ok(Self::from(id))
     }
 }
 
-/// Resolver that lazily loads AVL nodes and trees from a [`KeyValueStore`].
+/// Resolver that lazily loads AVL nodes and trees from a [`ReadableKeyValueStore`].
 ///
 /// In contrast to [`ArcResolver`], this resolver can start from hash-only identifiers and defer
 /// storage reads until an identifier is resolved. Loaded values are cached in their corresponding
@@ -563,7 +564,7 @@ impl<KV> LazyResolver<KV> {
     }
 }
 
-impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>
+impl<KV: ReadableKeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>
     for LazyResolver<KV>
 {
     fn resolve<'a>(
@@ -604,7 +605,7 @@ impl<KV: KeyValueStore> Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal
     }
 }
 
-impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<KV> {
+impl<KV: ReadableKeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<KV> {
     fn resolve<'a>(&self, id: &'a LazyTreeId) -> Result<&'a Tree<LazyNodeId>, OperationalError> {
         if let Some(value) = id.0.inner.get() {
             return Ok(value);
@@ -630,7 +631,7 @@ impl<KV: KeyValueStore> Resolver<LazyTreeId, Tree<LazyNodeId>> for LazyResolver<
     }
 }
 
-impl<KV: KeyValueStore> DataResolver<LazyDataId, Normal> for LazyResolver<KV> {
+impl<KV: ReadableKeyValueStore> DataResolver<LazyDataId, Normal> for LazyResolver<KV> {
     fn resolve_bytes<'a>(
         &self,
         id: &'a LazyDataId,
@@ -1282,9 +1283,10 @@ mod tests {
     use crate::errors::Error;
     use crate::errors::OperationalError;
     use crate::key::Key;
-    use crate::storage::KeyValueStore;
+    use crate::storage::ReadableKeyValueStore;
     use crate::storage::Storable;
     use crate::storage::StoreOptions;
+    use crate::storage::WriteableKeyValueStore;
     use crate::storage::in_memory::InMemoryKeyValueStore;
     use crate::storage::in_memory::InMemoryRepo;
 
@@ -1301,9 +1303,20 @@ mod tests {
         }
     }
 
-    impl KeyValueStore for CountingKeyValueStore {
+    impl ReadableKeyValueStore for CountingKeyValueStore {
         type Repo = InMemoryRepo;
 
+        fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+            self.blob_get_calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.blob_get(key)
+        }
+
+        fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+            self.inner.get(key)
+        }
+    }
+
+    impl WriteableKeyValueStore for CountingKeyValueStore {
         fn new(_repo: &Self::Repo) -> Result<Self, OperationalError> {
             Ok(Self::default())
         }
@@ -1313,11 +1326,6 @@ mod tests {
                 inner: self.inner.try_clone()?,
                 blob_get_calls: AtomicUsize::new(self.blob_get_calls()),
             })
-        }
-
-        fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-            self.blob_get_calls.fetch_add(1, Ordering::SeqCst);
-            self.inner.blob_get(key)
         }
 
         fn blob_set(
@@ -1330,10 +1338,6 @@ mod tests {
 
         fn blob_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
             self.inner.blob_delete(key)
-        }
-
-        fn get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-            self.inner.get(key)
         }
 
         fn set(
@@ -1361,7 +1365,7 @@ mod tests {
     fn persist_tree<NodeId, KV>(tree: &Tree<NodeId>, persistence_layer: &KV)
     where
         NodeId: Storable,
-        KV: KeyValueStore,
+        KV: WriteableKeyValueStore,
     {
         let store_options = StoreOptions::default().with_node_data();
 

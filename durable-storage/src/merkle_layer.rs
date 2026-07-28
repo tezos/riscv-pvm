@@ -15,6 +15,12 @@
 //!
 //! [`MerkleLayer::clone_with`] enables forking snapshots. Clones share the underlying tree
 //! cheaply via an `Arc` and diverge upon mutation, using copy-on-write (CoW) semantics.
+//!
+//! *NB* perhaps counterintuitively, all operations (other than `commit`) only require the underlying
+//! KV store be _readable_, even for operations that mutate the AVL tree. This occurs because all these
+//! operations, including mutable ones, only ever load data from the store. The reason `commit` requires
+//! the store to be _writeable_, is precisely because this is the only place where the (possibly updated)
+//! in-memory store is persisted back to the underlying store.
 
 use std::convert::Infallible;
 use std::marker::PhantomData;
@@ -59,9 +65,9 @@ use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::OperationalError;
 use crate::key::Key;
-use crate::storage::KeyValueStore;
 use crate::storage::Loadable;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::ReadableKeyValueStore;
 use crate::storage::Storable;
 use crate::storage::StoreOptions;
 
@@ -76,7 +82,7 @@ impl<KV> MerkleLayer<KV, Normal> {
     /// Create a new, empty Merkle layer that will commit to the provided persistence layer.
     pub fn new(persistence: Arc<KV>) -> Self
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         MerkleLayer {
             inner: NormalImpl::new(persistence),
@@ -86,7 +92,7 @@ impl<KV> MerkleLayer<KV, Normal> {
     /// Load the Merkle layer from the given key-value store.
     pub fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, Error>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         Ok(MerkleLayer {
             inner: NormalImpl::checkout(persistence, root)?,
@@ -94,6 +100,10 @@ impl<KV> MerkleLayer<KV, Normal> {
     }
 
     /// Generates a commitment for the [MerkleLayer].
+    ///
+    /// This is the only operation of the merkle layer that requires the underlying storage
+    /// be _writeable_ - as nowhere else does the merkle layer write-back to the underlying
+    /// storage.
     pub fn commit(&mut self, options: &StoreOptions) -> Result<CommitId, OperationalError>
     where
         KV: PersistentKeyValueStore,
@@ -129,7 +139,7 @@ impl<KV> MerkleLayer<KV, Prove<'static>> {
     /// An empty prove-mode Merkle layer backed by the given persistence layer.
     pub(crate) fn empty(persistence: Arc<KV>) -> Self
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         MerkleLayer {
             inner: ProveImpl {
@@ -209,7 +219,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     /// Clone the Merkle layer. The new layer will commit to the provided persistence layer.
     pub fn clone_with(&self, persistence: Arc<KV>) -> Self
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         M::clone_with(self, persistence)
     }
@@ -222,7 +232,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     /// Delete the data associated with a given [Key].
     pub fn delete(&mut self, key: &Key) -> Result<(), OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         M::delete(self, key)
     }
@@ -230,7 +240,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     /// Sets the data associated with a given [Key].
     pub fn set(&mut self, key: &Key, data: &[u8]) -> Result<(), OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         M::set(self, key, data)
     }
@@ -238,7 +248,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     /// Writes the data to the node associated with a given [Key] with the given offset.
     pub fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         M::write(self, key, offset, data)
     }
@@ -246,7 +256,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
     /// Returns an immutable reference to the data stored for a given [Key].
     pub(crate) fn get(&self, key: &Key) -> Result<Option<&Bytes<M>>, OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         M::get(self, key)
     }
@@ -255,7 +265,7 @@ impl<KV, M: MerkleLayerMode> MerkleLayer<KV, M> {
 /// Modes that implements this trait support Merkle layer operations
 pub trait MerkleLayerMode: Mode {
     /// See [`MerkleLayer::clone_with`]
-    fn clone_with<KV: KeyValueStore>(
+    fn clone_with<KV: ReadableKeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self>;
@@ -264,20 +274,20 @@ pub trait MerkleLayerMode: Mode {
     fn hash<KV>(this: &MerkleLayer<KV, Self>) -> Hash;
 
     /// See [`MerkleLayer::delete`]
-    fn delete<KV: KeyValueStore>(
+    fn delete<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError>;
 
     /// See [`MerkleLayer::set`]
-    fn set<KV: KeyValueStore>(
+    fn set<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         data: &[u8],
     ) -> Result<(), OperationalError>;
 
     /// See [`MerkleLayer::write`]
-    fn write<KV: KeyValueStore>(
+    fn write<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         offset: usize,
@@ -285,14 +295,14 @@ pub trait MerkleLayerMode: Mode {
     ) -> Result<(), Error>;
 
     /// See [`MerkleLayer::get`]
-    fn get<'a, KV: KeyValueStore>(
+    fn get<'a, KV: ReadableKeyValueStore>(
         this: &'a MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<Option<&'a Bytes<Self>>, OperationalError>;
 }
 
 impl MerkleLayerMode for Normal {
-    fn clone_with<KV: KeyValueStore>(
+    fn clone_with<KV: ReadableKeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
@@ -305,14 +315,14 @@ impl MerkleLayerMode for Normal {
         this.inner.hash()
     }
 
-    fn delete<KV: KeyValueStore>(
+    fn delete<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError> {
         this.inner.delete(key)
     }
 
-    fn set<KV: KeyValueStore>(
+    fn set<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         data: &[u8],
@@ -320,7 +330,7 @@ impl MerkleLayerMode for Normal {
         this.inner.set(key, data)
     }
 
-    fn write<KV: KeyValueStore>(
+    fn write<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         offset: usize,
@@ -329,7 +339,7 @@ impl MerkleLayerMode for Normal {
         this.inner.write(key, offset, data)
     }
 
-    fn get<'a, KV: KeyValueStore>(
+    fn get<'a, KV: ReadableKeyValueStore>(
         this: &'a MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<Option<&'a Bytes<Self>>, OperationalError> {
@@ -343,7 +353,7 @@ impl MerkleLayerMode for Normal {
 }
 
 impl MerkleLayerMode for Prove<'static> {
-    fn clone_with<KV: KeyValueStore>(
+    fn clone_with<KV: ReadableKeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
@@ -362,7 +372,7 @@ impl MerkleLayerMode for Prove<'static> {
         this.inner.working_tree.hash()
     }
 
-    fn delete<KV: KeyValueStore>(
+    fn delete<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError> {
@@ -372,7 +382,7 @@ impl MerkleLayerMode for Prove<'static> {
         Ok(())
     }
 
-    fn set<KV: KeyValueStore>(
+    fn set<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         data: &[u8],
@@ -383,7 +393,7 @@ impl MerkleLayerMode for Prove<'static> {
         Ok(())
     }
 
-    fn write<KV: KeyValueStore>(
+    fn write<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         offset: usize,
@@ -395,7 +405,7 @@ impl MerkleLayerMode for Prove<'static> {
         Ok(())
     }
 
-    fn get<'a, KV: KeyValueStore>(
+    fn get<'a, KV: ReadableKeyValueStore>(
         this: &'a MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<Option<&'a Bytes<Self>>, OperationalError> {
@@ -408,7 +418,7 @@ impl MerkleLayerMode for Prove<'static> {
 }
 
 impl MerkleLayerMode for Verify {
-    fn clone_with<KV: KeyValueStore>(
+    fn clone_with<KV: ReadableKeyValueStore>(
         this: &MerkleLayer<KV, Self>,
         _persistence: Arc<KV>,
     ) -> MerkleLayer<KV, Self> {
@@ -433,7 +443,7 @@ impl MerkleLayerMode for Verify {
             .unwrap_or_else(|| unsafe { not_found() })
     }
 
-    fn delete<KV: KeyValueStore>(
+    fn delete<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<(), OperationalError> {
@@ -442,7 +452,7 @@ impl MerkleLayerMode for Verify {
         Ok(())
     }
 
-    fn set<KV: KeyValueStore>(
+    fn set<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         data: &[u8],
@@ -452,7 +462,7 @@ impl MerkleLayerMode for Verify {
         Ok(())
     }
 
-    fn write<KV: KeyValueStore>(
+    fn write<KV: ReadableKeyValueStore>(
         this: &mut MerkleLayer<KV, Self>,
         key: &Key,
         offset: usize,
@@ -463,7 +473,7 @@ impl MerkleLayerMode for Verify {
         Ok(())
     }
 
-    fn get<'a, KV: KeyValueStore>(
+    fn get<'a, KV: ReadableKeyValueStore>(
         this: &'a MerkleLayer<KV, Self>,
         key: &Key,
     ) -> Result<Option<&'a Bytes<Self>>, OperationalError> {
@@ -520,7 +530,7 @@ impl<KV> NormalImpl<KV> {
     /// Delete the data associated with a given [Key].
     fn delete(&mut self, key: &Key) -> Result<(), OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         self.tree.delete(key, &mut self.resolver)?;
         Ok(())
@@ -529,7 +539,7 @@ impl<KV> NormalImpl<KV> {
     /// Sets the data associated with a given [Key].
     fn set(&mut self, key: &Key, data: &[u8]) -> Result<(), OperationalError>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         self.tree.set(key, data, &mut self.resolver)?;
         Ok(())
@@ -538,7 +548,7 @@ impl<KV> NormalImpl<KV> {
     /// Writes the data to the node associated with a given [Key] with the given offset.
     fn write(&mut self, key: &Key, offset: usize, data: &[u8]) -> Result<(), Error>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         self.tree.write(key, offset, data, &mut self.resolver)?;
         Ok(())
@@ -547,7 +557,7 @@ impl<KV> NormalImpl<KV> {
     /// Load the Merkle layer from the given key-value store with lazy node loading.
     fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, Error>
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         let resolver = LazyResolver::new(persistence.clone());
         let tree = Tree::load(*root.as_hash(), persistence.as_ref())?;
@@ -613,13 +623,13 @@ struct ProveImpl<KV> {
     resolver: ProveResolver<LazyResolver<KV>>,
 }
 
-impl<KV: KeyValueStore> Foldable<HashFold> for MerkleLayer<KV, Prove<'_>> {
+impl<KV: ReadableKeyValueStore> Foldable<HashFold> for MerkleLayer<KV, Prove<'_>> {
     fn fold(&self, _builder: HashFold) -> <HashFold as Fold>::Folded {
         self.inner.working_tree.hash()
     }
 }
 
-impl<KV: KeyValueStore> Foldable<MerkleProofFold> for MerkleLayer<KV, Prove<'_>> {
+impl<KV: ReadableKeyValueStore> Foldable<MerkleProofFold> for MerkleLayer<KV, Prove<'_>> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         // If the database was not touched at all, then it is safely
         // blindable.
@@ -645,7 +655,7 @@ struct InitialTreeFold<'a, KV> {
     prove_impl: &'a ProveImpl<KV>,
 }
 
-impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialTreeFold<'_, KV> {
+impl<KV: ReadableKeyValueStore> Foldable<MerkleProofFold> for InitialTreeFold<'_, KV> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         let root_hash = Hash::from_foldable(self.tree_id);
 
@@ -669,7 +679,7 @@ struct InitialNodeFold<'a, KV> {
     prove_impl: &'a ProveImpl<KV>,
 }
 
-impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
+impl<KV: ReadableKeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         let hash = Hash::from_foldable(self.node_id);
 
@@ -750,7 +760,7 @@ impl<KV: KeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_, KV> {
 /// # Panics
 ///
 /// Panics if the subtree was not, in fact, resolved during the prove operations.
-fn fold_resolved_tree<KV: KeyValueStore>(
+fn fold_resolved_tree<KV: ReadableKeyValueStore>(
     tree_id: &LazyTreeId,
     prove_impl: &ProveImpl<KV>,
     builder: MerkleProofFold,
@@ -781,10 +791,15 @@ fn fold_resolved_tree<KV: KeyValueStore>(
     node_fold.done()
 }
 
+#[cfg(test)]
+use crate::storage::WriteableKeyValueStore;
+
 /// Construct a verify-mode [`MerkleLayer`] for an empty initial state. Used in tests that exercise
 /// verify-mode mutation primitives in isolation.
 #[cfg(test)]
-pub(crate) fn new_verify_layer<KV: KeyValueStore>(repo: &KV::Repo) -> MerkleLayer<KV, Verify> {
+pub(crate) fn new_verify_layer<KV: WriteableKeyValueStore>(
+    repo: &KV::Repo,
+) -> MerkleLayer<KV, Verify> {
     let normal_ml = new_merkle_layer::<KV>(repo);
     let prove_ml = normal_ml.start_proof();
     let proof = MerkleProof::from_foldable(&prove_ml);
@@ -792,7 +807,7 @@ pub(crate) fn new_verify_layer<KV: KeyValueStore>(repo: &KV::Repo) -> MerkleLaye
 }
 
 #[cfg(test)]
-fn new_merkle_layer<KV: KeyValueStore>(repo: &KV::Repo) -> MerkleLayer<KV, Normal> {
+fn new_merkle_layer<KV: WriteableKeyValueStore>(repo: &KV::Repo) -> MerkleLayer<KV, Normal> {
     let persistence_layer = KV::new(repo)
         .expect("Creating a persistence layer should succeed")
         .into();
@@ -831,12 +846,13 @@ mod tests {
     use crate::avl::resolver::ProveResolver;
     use crate::avl::tree::Tree;
     use crate::key::Key;
-    use crate::storage::KeyValueStore;
     use crate::storage::PersistentKeyValueStore;
+    use crate::storage::ReadableKeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
+    use crate::storage::WriteableKeyValueStore;
     use crate::storage::kv_test;
 
-    impl<KV: KeyValueStore> MerkleLayer<KV, Normal> {
+    impl<KV: ReadableKeyValueStore> MerkleLayer<KV, Normal> {
         fn tree(&self) -> &Tree<LazyNodeId> {
             &self.inner.tree
         }
@@ -855,7 +871,7 @@ mod tests {
         }
     }
 
-    impl<KV: KeyValueStore> MerkleLayer<KV, Prove<'static>> {
+    impl<KV: ReadableKeyValueStore> MerkleLayer<KV, Prove<'static>> {
         /// Construct a Prove-mode MerkleLayer from a tree, lazily resolving from `persistence`.
         pub(crate) fn from_prove_tree(persistence: Arc<KV>, tree: Tree<ProveNodeId>) -> Self {
             MerkleLayer {
@@ -894,7 +910,7 @@ mod tests {
 
     /// Apply `op` against `ml`. Returns `Some(bytes)` for [`Operation::Read`] so callers can
     /// compare read results across modes, and `None` for state-mutating ops.
-    fn apply_operation<KV: KeyValueStore, M: MerkleLayerMode + BytesMode>(
+    fn apply_operation<KV: ReadableKeyValueStore, M: MerkleLayerMode + BytesMode>(
         ml: &mut MerkleLayer<KV, M>,
         op: &Operation,
     ) -> Option<Vec<u8>> {
@@ -940,7 +956,7 @@ mod tests {
     /// 3. Replaying the same operation against the Verify-mode tree decoded from the proof
     ///    produces the same final hash as prove mode (the proof carries enough information for
     ///    full verification).
-    fn assert_prove_mode_correct<KV: KeyValueStore + TestKeyValueStoreSetup>(
+    fn assert_prove_mode_correct<KV: ReadableKeyValueStore + TestKeyValueStoreSetup>(
         setup_keys: &[[u8; 2]],
         operations: &[Operation],
     ) {
@@ -1508,7 +1524,7 @@ mod tests {
         ml.tree().check(&ml.inner.resolver).expect("the tree should be retrieved successfully.");
     });
 
-    fn test_mavl_delete_keys<KV: KeyValueStore>(repo: &KV::Repo, keys: &[Key]) {
+    fn test_mavl_delete_keys<KV: WriteableKeyValueStore>(repo: &KV::Repo, keys: &[Key]) {
         let data = bytes::Bytes::from("delete");
 
         let mut ml = new_merkle_layer::<KV>(repo);

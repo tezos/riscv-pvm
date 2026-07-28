@@ -53,12 +53,13 @@ use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
-use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
+use crate::merkle_worker::BackgroundReadableKeyValueStore;
+use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::merkle_worker::MerkleWorker;
 pub use crate::repo::DirectoryManager;
-use crate::storage::KeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::ReadableKeyValueStore;
 use crate::storage::StoreOptions;
 
 /// The maximum possible length of a value in durable storage.
@@ -84,7 +85,7 @@ impl<KV> Database<KV, Normal> {
     /// called.
     pub fn try_new(handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundWriteableKeyValueStore,
     {
         let persistent = KV::new(repo)?;
         let persistent = Arc::new(persistent);
@@ -121,7 +122,7 @@ impl<KV> Database<KV, Normal> {
     /// [`Database::commit`] is called.
     pub fn try_clone_with(&self, handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError>
     where
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundWriteableKeyValueStore,
     {
         let persistent = self.inner.persistent.try_clone(repo)?;
         let persistent = Arc::new(persistent);
@@ -149,15 +150,7 @@ impl<KV> Database<KV, Normal> {
     }
 }
 
-impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
-    /// Remove a key from the database.
-    ///
-    /// Deleting a missing key succeeds and leaves the database unchanged.
-    /// TODO RV-943: Fix behaviour to returning an operational error when deleting a missing key.
-    pub fn delete(&mut self, key: Key) -> Result<(), OperationalError> {
-        M::delete(self, key)
-    }
-
+impl<KV: BackgroundReadableKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Returns true if the provided key exists in the database, false if it does not.
     pub fn exists(&self, key: &Key) -> Result<bool, Error> {
         match self.get(key) {
@@ -220,6 +213,25 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         Ok(buf)
     }
 
+    /// Retrieve the length of the value associated with the provided key.
+    ///
+    /// Fails if:
+    ///  - The key does not exist in the database.
+    pub fn value_length(&self, key: &Key) -> Result<usize, Error> {
+        Ok(self.get(key)?.len())
+    }
+
+    /// Retrieve the value associated with the provided key.
+    ///
+    /// Fails if:
+    ///  - The key does not exist in the database.
+    fn get(&self, key: &Key) -> Result<impl ValueRef, Error> {
+        M::get(self, key)
+    }
+}
+
+/// Operations which modify the database, and so require a store that can be written to.
+impl<KV: BackgroundWriteableKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Inserts the value associated with the provided key, replacing any data already associated
     /// with the key.
     ///
@@ -265,48 +277,39 @@ impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
         M::write(self, key, offset, data)
     }
 
-    /// Retrieve the length of the value associated with the provided key.
+    /// Remove a key from the database.
     ///
-    /// Fails if:
-    ///  - The key does not exist in the database.
-    pub fn value_length(&self, key: &Key) -> Result<usize, Error> {
-        Ok(self.get(key)?.len())
-    }
-
-    /// Retrieve the value associated with the provided key.
-    ///
-    /// Fails if:
-    ///  - The key does not exist in the database.
-    fn get(&self, key: &Key) -> Result<impl ValueRef, Error> {
-        M::get(self, key)
+    /// Deleting a missing key succeeds and leaves the database unchanged.
+    pub fn delete(&mut self, key: Key) -> Result<(), OperationalError> {
+        M::delete(self, key)
     }
 }
 
-impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Normal> {
+impl<KV: ReadableKeyValueStore> Foldable<HashFold> for Database<KV, Normal> {
     fn fold(&self, _builder: HashFold) -> Hash {
         self.inner.merkle.hash().expect("Hashing should not fail")
     }
 }
 
-impl<KV: KeyValueStore> Foldable<HashFold> for Database<KV, Prove<'_>> {
+impl<KV: ReadableKeyValueStore> Foldable<HashFold> for Database<KV, Prove<'_>> {
     fn fold(&self, _builder: HashFold) -> Hash {
         self.inner.merkle.hash()
     }
 }
 
-impl<KV: KeyValueStore> Foldable<MerkleProofFold> for Database<KV, Prove<'_>> {
+impl<KV: ReadableKeyValueStore> Foldable<MerkleProofFold> for Database<KV, Prove<'_>> {
     fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
         self.inner.merkle.fold(builder)
     }
 }
 
-impl<KV: KeyValueStore> Foldable<PartialHashFold> for Database<KV, Verify> {
+impl<KV: ReadableKeyValueStore> Foldable<PartialHashFold> for Database<KV, Verify> {
     fn fold(&self, builder: PartialHashFold) -> PartialHash {
         self.inner.merkle.fold(builder)
     }
 }
 
-impl<'normal, KV: BackgroundKeyValueStore> ProvableExt<'normal, 'static, OperationalError>
+impl<'normal, KV: BackgroundReadableKeyValueStore> ProvableExt<'normal, 'static, OperationalError>
     for Database<KV, Normal>
 {
     type Prover = Database<KV, Prove<'static>>;
@@ -338,14 +341,14 @@ impl<KV> Modal for DatabaseTemplate<KV> {
 /// Modes that support the operational API exposed by [`Database`].
 pub trait DatabaseMode: Mode {
     /// See [`Database::set`]
-    fn set<KV: BackgroundKeyValueStore>(
+    fn set<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         value: Bytes,
     ) -> Result<(), Error>;
 
     /// See [`Database::write`]
-    fn write<KV: BackgroundKeyValueStore>(
+    fn write<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         offset: usize,
@@ -353,25 +356,25 @@ pub trait DatabaseMode: Mode {
     ) -> Result<usize, Error>;
 
     /// See [`Database::delete`]
-    fn delete<KV: BackgroundKeyValueStore>(
+    fn delete<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
     ) -> Result<(), OperationalError>;
 
     /// See [`Database::hash`]
-    fn hash<KV: BackgroundKeyValueStore>(
+    fn hash<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
     ) -> Result<Hash, OperationalError>;
 
     /// See [`Database::get`]
-    fn get<KV: BackgroundKeyValueStore>(
+    fn get<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
     ) -> Result<impl ValueRef, Error>;
 }
 
 impl DatabaseMode for Normal {
-    fn get<KV: BackgroundKeyValueStore>(
+    fn get<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
     ) -> Result<impl ValueRef, Error> {
@@ -379,7 +382,7 @@ impl DatabaseMode for Normal {
         Ok(AsRefValueRef(as_ref))
     }
 
-    fn set<KV: BackgroundKeyValueStore>(
+    fn set<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         data: Bytes,
@@ -389,7 +392,7 @@ impl DatabaseMode for Normal {
         Ok(())
     }
 
-    fn write<KV: BackgroundKeyValueStore>(
+    fn write<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         offset: usize,
@@ -401,7 +404,7 @@ impl DatabaseMode for Normal {
         Ok(written)
     }
 
-    fn delete<KV: BackgroundKeyValueStore>(
+    fn delete<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
     ) -> Result<(), OperationalError> {
@@ -410,7 +413,7 @@ impl DatabaseMode for Normal {
         Ok(())
     }
 
-    fn hash<KV: BackgroundKeyValueStore>(
+    fn hash<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
     ) -> Result<Hash, OperationalError> {
         this.inner.merkle.hash()
@@ -427,7 +430,7 @@ impl<KV> Database<KV, Prove<'static>> {
     /// An empty prove-mode database backed by the given persistence layer.
     pub(crate) fn empty(persistence: Arc<KV>) -> Self
     where
-        KV: KeyValueStore,
+        KV: ReadableKeyValueStore,
     {
         Database {
             inner: ProveImpl {
@@ -478,7 +481,7 @@ struct VerifyImpl<KV> {
 }
 
 impl DatabaseMode for Verify {
-    fn get<KV: BackgroundKeyValueStore>(
+    fn get<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
     ) -> Result<impl ValueRef, Error> {
@@ -513,7 +516,7 @@ impl DatabaseMode for Verify {
         Ok(Wrapper(bytes))
     }
 
-    fn set<KV: BackgroundKeyValueStore>(
+    fn set<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         data: Bytes,
@@ -522,7 +525,7 @@ impl DatabaseMode for Verify {
         Ok(())
     }
 
-    fn write<KV: BackgroundKeyValueStore>(
+    fn write<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         offset: usize,
@@ -533,14 +536,14 @@ impl DatabaseMode for Verify {
         Ok(written)
     }
 
-    fn delete<KV: BackgroundKeyValueStore>(
+    fn delete<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
     ) -> Result<(), OperationalError> {
         this.inner.merkle.delete(&key)
     }
 
-    fn hash<KV: BackgroundKeyValueStore>(
+    fn hash<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
     ) -> Result<Hash, OperationalError> {
         Ok(this.inner.merkle.hash())
@@ -553,7 +556,7 @@ struct ProveImpl<KV> {
 }
 
 impl DatabaseMode for Prove<'static> {
-    fn get<KV: BackgroundKeyValueStore>(
+    fn get<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
         key: &Key,
     ) -> Result<impl ValueRef, Error> {
@@ -582,7 +585,7 @@ impl DatabaseMode for Prove<'static> {
         Ok(Wrapper(bytes))
     }
 
-    fn set<KV: BackgroundKeyValueStore>(
+    fn set<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         data: Bytes,
@@ -591,7 +594,7 @@ impl DatabaseMode for Prove<'static> {
         Ok(())
     }
 
-    fn write<KV: BackgroundKeyValueStore>(
+    fn write<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
         offset: usize,
@@ -602,14 +605,14 @@ impl DatabaseMode for Prove<'static> {
         Ok(written)
     }
 
-    fn delete<KV: BackgroundKeyValueStore>(
+    fn delete<KV: BackgroundWriteableKeyValueStore>(
         this: &mut Database<KV, Self>,
         key: Key,
     ) -> Result<(), OperationalError> {
         this.inner.merkle.delete(&key)
     }
 
-    fn hash<KV: BackgroundKeyValueStore>(
+    fn hash<KV: BackgroundReadableKeyValueStore>(
         this: &Database<KV, Self>,
     ) -> Result<Hash, OperationalError> {
         Ok(this.inner.merkle.hash())
@@ -617,7 +620,7 @@ impl DatabaseMode for Prove<'static> {
 }
 
 #[cfg(test)]
-impl<KV: BackgroundKeyValueStore, M: DatabaseMode> Database<KV, M> {
+impl<KV: BackgroundReadableKeyValueStore, M: DatabaseMode> Database<KV, M> {
     /// Assert that a database contains the expected value for a given key.
     pub(crate) fn assert_database_value(&self, key: &Key, expected: &[u8]) {
         let mut stored = vec![0; expected.len()];
@@ -658,26 +661,26 @@ pub(crate) mod tests {
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
-    use crate::merkle_worker::BackgroundKeyValueStore;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
-    use crate::storage::KeyValueStore;
+    use crate::merkle_worker::BackgroundWriteableKeyValueStore;
     use crate::storage::TestKeyValueStoreSetup;
+    use crate::storage::WriteableKeyValueStore;
     use crate::storage::kv_test;
 
-    fn new_database<KV: BackgroundKeyValueStore>(
+    fn new_database<KV: BackgroundWriteableKeyValueStore>(
         handle: &Handle,
         repo: &KV::Repo,
     ) -> TracedDatabase<KV> {
         TracedDatabase::try_new(handle, repo).expect("Creating a test database should succeed")
     }
 
-    fn new_verify_database<KV: KeyValueStore + TestKeyValueStoreSetup>(
+    fn new_verify_database<KV: WriteableKeyValueStore + TestKeyValueStoreSetup>(
         repo: &KV::Repo,
     ) -> TracedDatabase<KV, Verify> {
         TracedDatabase::<KV, Verify>::new_verify(repo)
     }
 
-    fn new_prove_database<KV: KeyValueStore>(
+    fn new_prove_database<KV: WriteableKeyValueStore>(
         persistence: Arc<KV>,
     ) -> TracedDatabase<KV, Prove<'static>> {
         TracedDatabase::from(Database {
@@ -695,7 +698,7 @@ pub(crate) mod tests {
         TracedDatabase<KV>,
     )
     where
-        KV: BackgroundKeyValueStore + TestKeyValueStoreSetup,
+        KV: BackgroundWriteableKeyValueStore + TestKeyValueStoreSetup,
     {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -743,7 +746,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_delete, KV: BackgroundKeyValueStore,
+    kv_test!(test_database_delete, KV: BackgroundWriteableKeyValueStore,
         setup_runtime |handle, repo| = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .build()
@@ -775,7 +778,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_delete_nonexistent, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_delete_nonexistent, KV: BackgroundWriteableKeyValueStore, {
         // Receiving the hash requires a separate worker thread
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
@@ -1095,7 +1098,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_exists, KV: BackgroundKeyValueStore,
+    kv_test!(test_database_exists, KV: BackgroundWriteableKeyValueStore,
         setup_runtime |handle, repo| = {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -1129,7 +1132,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_hash, KV: BackgroundKeyValueStore,
+    kv_test!(test_database_hash, KV: BackgroundWriteableKeyValueStore,
         setup_runtime |handle, repo| = {
             // Needs a thread for sending and a thread for receiving
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -1171,7 +1174,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_hash_revert, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_hash_revert, KV: BackgroundWriteableKeyValueStore, {
         // Needs a thread for sending and a thread for receiving
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -1210,7 +1213,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_read, KV: BackgroundKeyValueStore,
+    kv_test!(test_database_read, KV: BackgroundWriteableKeyValueStore,
         setup_runtime |handle, repo| = {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -1290,7 +1293,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_read_bytes, KV: BackgroundKeyValueStore,
+    kv_test!(test_database_read_bytes, KV: BackgroundWriteableKeyValueStore,
         setup_runtime |handle, repo| = {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -1338,7 +1341,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_read_bytes_no_key, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_read_bytes_no_key, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1357,7 +1360,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_read_no_key, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_read_no_key, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1379,7 +1382,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_read_bytes_io_too_large, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_read_bytes_io_too_large, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1401,7 +1404,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_read_io_too_large, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_read_io_too_large, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1426,7 +1429,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_value_length, KV: BackgroundKeyValueStore,
+    kv_test!(test_database_value_length, KV: BackgroundWriteableKeyValueStore,
         setup_runtime |handle, repo| = {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -1459,7 +1462,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_write, KV: BackgroundKeyValueStore,
+    kv_test!(test_database_write, KV: BackgroundWriteableKeyValueStore,
         setup_runtime |handle, repo| = {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .build()
@@ -1497,7 +1500,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_write_new_nonzero_offset, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_write_new_nonzero_offset, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1521,7 +1524,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_write_io_too_large, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_write_io_too_large, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1545,7 +1548,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_write_no_truncation, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_write_no_truncation, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1572,7 +1575,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_write_offset_append, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_write_offset_append, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1596,7 +1599,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_write_oversized_offset, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_write_oversized_offset, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1613,7 +1616,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_set_io_too_large, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_set_io_too_large, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1636,7 +1639,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_database_write_value_too_large, KV: BackgroundKeyValueStore, {
+    kv_test!(test_database_write_value_too_large, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("Creating a Tokio runtime should succeed");
@@ -1723,7 +1726,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_verify_database_delete, KV: BackgroundKeyValueStore, {
+    kv_test!(test_verify_database_delete, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut database = new_verify_database::<KV>(&repo);
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1760,7 +1763,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_verify_database_set_and_read, KV: BackgroundKeyValueStore,
+    kv_test!(test_verify_database_set_and_read, KV: BackgroundWriteableKeyValueStore,
         setup |repo| = { KV::setup_repo() },
     [
         data in prop::collection::vec(any::<u8>(), 0..200),
@@ -1780,7 +1783,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_verify_database_value_length, KV: BackgroundKeyValueStore,
+    kv_test!(test_verify_database_value_length, KV: BackgroundWriteableKeyValueStore,
         setup |repo| = { KV::setup_repo() },
     [
         data in prop::collection::vec(any::<u8>(), 0..200),
@@ -1802,7 +1805,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_verify_database_write_partial, KV: BackgroundKeyValueStore,
+    kv_test!(test_verify_database_write_partial, KV: BackgroundWriteableKeyValueStore,
         setup |repo| = { KV::setup_repo() },
     [
         initial in prop::collection::vec(any::<u8>(), 1..200),
@@ -1838,7 +1841,7 @@ pub(crate) mod tests {
 
     fn new_persistence<KV>() -> (KV::Keepalive, Arc<KV>)
     where
-        KV: BackgroundKeyValueStore + TestKeyValueStoreSetup,
+        KV: BackgroundWriteableKeyValueStore + TestKeyValueStoreSetup,
     {
         let (keepalive, repo) = KV::setup_repo();
         let persistence: Arc<KV> = KV::new(&repo)
@@ -1847,7 +1850,7 @@ pub(crate) mod tests {
         (keepalive, persistence)
     }
 
-    kv_test!(test_prove_database_delete, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_database_delete, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, persistence) = new_persistence::<KV>();
         let mut database = new_prove_database::<KV>(persistence);
         let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
@@ -1884,7 +1887,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_prove_database_set_and_read, KV: BackgroundKeyValueStore,
+    kv_test!(test_prove_database_set_and_read, KV: BackgroundWriteableKeyValueStore,
         setup |repo| = { KV::setup_repo() },
     [
         data in prop::collection::vec(any::<u8>(), 0..200),
@@ -1907,7 +1910,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_prove_database_value_length, KV: BackgroundKeyValueStore,
+    kv_test!(test_prove_database_value_length, KV: BackgroundWriteableKeyValueStore,
         setup |repo| = { KV::setup_repo() },
     [
         data in prop::collection::vec(any::<u8>(), 0..200),
@@ -1932,7 +1935,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_prove_database_write_partial, KV: BackgroundKeyValueStore,
+    kv_test!(test_prove_database_write_partial, KV: BackgroundWriteableKeyValueStore,
         setup |repo| = { KV::setup_repo() },
     [
         initial in prop::collection::vec(any::<u8>(), 1..200),
@@ -1969,7 +1972,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_prove_database_missing_key, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_database_missing_key, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, persistence) = new_persistence::<KV>();
         let mut database = new_prove_database::<KV>(persistence);
 
@@ -2023,7 +2026,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_prove_database_read_bytes_partial, KV: BackgroundKeyValueStore,
+    kv_test!(test_prove_database_read_bytes_partial, KV: BackgroundWriteableKeyValueStore,
         setup |repo| = { KV::setup_repo() },
     [
         data in prop::collection::vec(any::<u8>(), 3..200),
@@ -2075,7 +2078,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_prove_database_read_bytes_records_only_accessed_range, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_database_read_bytes_records_only_accessed_range, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .build()
@@ -2151,7 +2154,7 @@ pub(crate) mod tests {
         prove_trace
     });
 
-    kv_test!(test_prove_database_write_append, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_database_write_append, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, persistence) = new_persistence::<KV>();
         let mut database = new_prove_database::<KV>(persistence);
 
@@ -2197,7 +2200,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_prove_database_hash, KV: BackgroundKeyValueStore, {
+    kv_test!(test_prove_database_hash, KV: BackgroundWriteableKeyValueStore, {
         let (_keepalive, persistence) = new_persistence::<KV>();
         let mut database = new_prove_database::<KV>(persistence);
 
@@ -2235,7 +2238,7 @@ pub(crate) mod tests {
         database.into_trace()
     });
 
-    kv_test!(test_empty_db_noop_proof_readable_and_writeable, KV: BackgroundKeyValueStore, {
+    kv_test!(test_empty_db_noop_proof_readable_and_writeable, KV: BackgroundWriteableKeyValueStore, {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .build()
@@ -2268,7 +2271,7 @@ pub(crate) mod tests {
     kv_test!(
         #[should_panic(expected = "trace mismatch")]
         test_database_trace_comparison_detects_divergence,
-        KV: BackgroundKeyValueStore,
+        KV: BackgroundWriteableKeyValueStore,
     {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()

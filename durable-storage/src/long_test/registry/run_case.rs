@@ -21,7 +21,7 @@ use octez_riscv_data::mode::Normal;
 
 use super::model::RegistryLongTestModel;
 use crate::long_test::harness::Base;
-use crate::merkle_worker::BackgroundKeyValueStore;
+use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::persistence_layer::PersistenceLayer;
 use crate::registry::Registry;
 use crate::repo::DirectoryManager;
@@ -58,7 +58,7 @@ fn apply_op_checked<KV>(
     op: &RegistryOperation,
 ) -> Option<StepOutcome>
 where
-    KV: BackgroundKeyValueStore,
+    KV: BackgroundWriteableKeyValueStore,
 {
     let outcome = match op {
         RegistryOperation::Database(index, db_op) => {

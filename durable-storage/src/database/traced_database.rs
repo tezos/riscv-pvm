@@ -37,13 +37,13 @@ use crate::errors::OperationalError;
 use crate::key::Key;
 #[cfg(test)]
 use crate::merkle_layer::new_verify_layer;
-use crate::merkle_worker::BackgroundKeyValueStore;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
-#[cfg(test)]
-use crate::storage::KeyValueStore;
+use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::storage::PersistentKeyValueStore;
 #[cfg(test)]
 use crate::storage::TestKeyValueStoreSetup;
+#[cfg(test)]
+use crate::storage::WriteableKeyValueStore;
 
 /// A sequence of recorded [`Database`] operations
 pub(crate) type Trace = Vec<TraceEntry>;
@@ -104,7 +104,7 @@ pub(crate) struct TracedDatabase<KV, M: Mode = Normal> {
     trace: RefCell<Vec<TraceEntry>>,
 }
 
-impl<KV: BackgroundKeyValueStore> TracedDatabase<KV, Normal> {
+impl<KV: BackgroundWriteableKeyValueStore> TracedDatabase<KV, Normal> {
     /// Equivalent to [`Database::try_new`] which also records a [`TraceEntry`].
     #[cfg(test)]
     pub(crate) fn try_new(handle: &Handle, repo: &KV::Repo) -> Result<Self, OperationalError> {
@@ -155,7 +155,7 @@ impl<KV: BackgroundKeyValueStore> TracedDatabase<KV, Normal> {
 #[cfg(test)]
 impl<KV> TracedDatabase<KV, Verify>
 where
-    KV: KeyValueStore + TestKeyValueStoreSetup,
+    KV: WriteableKeyValueStore + TestKeyValueStoreSetup,
 {
     pub(crate) fn new_verify(repo: &KV::Repo) -> Self {
         TracedDatabase::from(Database {
@@ -166,7 +166,7 @@ where
     }
 }
 
-impl<KV: BackgroundKeyValueStore, M: DatabaseMode> TracedDatabase<KV, M> {
+impl<KV: BackgroundWriteableKeyValueStore, M: DatabaseMode> TracedDatabase<KV, M> {
     /// Equivalent to [`Database::set`] which also records a [`TraceEntry`].
     pub(crate) fn set(&mut self, key: Key, data: Bytes) -> Result<(), Error> {
         let result = self.inner.set(key.clone(), data.clone());
@@ -326,7 +326,7 @@ where
     }
 }
 
-impl<'normal, KV: BackgroundKeyValueStore> ProvableExt<'normal, 'static, OperationalError>
+impl<'normal, KV: BackgroundWriteableKeyValueStore> ProvableExt<'normal, 'static, OperationalError>
     for TracedDatabase<KV, Normal>
 {
     type Prover = TracedDatabase<KV, Prove<'static>>;
