@@ -165,7 +165,7 @@ fn serialise_consistently() {
 /// Test proof generation for data spaces with various access patterns
 #[test]
 fn generate_proof() {
-    const MERKLE_LEAF_SIZE: usize = 4096;
+    const MERKLE_LEAF_SIZE: usize = 1024;
     const LEAVES: usize = 8;
     const DATA_SPACE_SIZE: usize = MERKLE_LEAF_SIZE * LEAVES;
     const ELEM_SIZE: usize = u64::STORED_SIZE.get();

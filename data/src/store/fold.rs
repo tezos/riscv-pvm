@@ -194,9 +194,9 @@ mod tests {
         // a few more hashes we can check are in the store
         let hash1 = Hash::hash_encodable(false).unwrap();
         let page_encoding = {
-            let mut arr = [0u8; 4104];
-            // the first four bytes encode the length, which is 4096, i.e. 256 * 16
-            arr[1] = 16;
+            let mut arr = [0u8; core::mem::size_of::<u64>() + crate::components::bytes::PAGE_SIZE];
+            // the first eight bytes encode the length, which is 1024, i.e. 256 * 4
+            arr[1] = 4;
             arr
         };
         let hash2 = Hash::hash_encodable(page_encoding).unwrap();
