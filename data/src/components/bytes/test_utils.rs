@@ -125,15 +125,15 @@ pub const MONOFURCATED_LAYER: usize = (NODE_ARITY - 2) * Hash::DIGEST_SIZE + NOD
 /// Page size is 1024 bytes, plus 8 for a `u64` representing the length of the page; there are at
 /// most three such pages in any proof, because the maximum read/write is twice the size of a page.
 ///
-/// There is a single asymmetric bifurcated layer of the tree: it has one branch with 3 blinded nodes,
-/// and one branch with 2. e.g. on the left the tags would be (blind, blind, node, node) and on the right
-/// (node, blind, blind, blind).
+/// There is a single asymmetric bifurcated layer of the tree: it has one branch with 0 blinded nodes,
+/// and one branch with 1. e.g. on the left the tags would be (node, node) and on the right
+/// (node, blind).
 ///
-/// There are then 6 identical bifurcated layers of the tree, each with 6 blinded nodes:
-/// (blind, blind, blind, node) on one side, (node, blind, blind, blind) on the other.
+/// There are then 14 identical bifurcated layers of the tree, each with 2 blinded nodes:
+/// (blind, node) on one side, (node, blind) on the other.
 ///
-/// There is then one more monofurcated layer with only two blinded nodes and four tags
-/// (node, node, blind, blind).
+/// There is then one more monofurcated layer with only zero blinded nodes and two tags
+/// (node, node).
 ///
 /// Finally there are 8 bytes for the overall length of the `Bytes` component (serialised as a
 /// `u64`) and an extra two tags for the layer containing 'length' and 'data'. There is then one
@@ -146,36 +146,28 @@ pub const MAX_PROOF_LENGTH: usize = (PAGE_SIZE + 8) * 3
     + 2
     + 1;
 
-/// There are three 'areas' at which the worst possible boundary between two pages occurs---at the
-/// 1st, 2nd and 3rd quartile in the `Bytes` component.
+/// There is one 'area' at which the worst possible boundary between two pages occurs---at the
+/// halway point in the `Bytes` component.
 ///
 /// Essentially in the worst case, two pages will be present on one path down from the top of the tree,
 /// and one more page on aother path from the top of the tree. The pages are contiguous by 'idx'.
 ///
-/// One such example is given below
-///
 /// ```custom,{class=language-markdown}
-///                         [root_hash]
-///                          ____|____
-///     ____________________/  /   \  \_____________________
-///    /                      /     \                       \
-/// [blind]                  /       \                   [blind]
-///               __________/         \__________
-///     _________/  /                         \  \_______
-///    /           /                           \         \
-/// [blind..]  ___/____                     ____\___   [blind..]
-///           /  / \   \                   /   / \  \
-///     _____/  /   \_  \____         ____/  _/   \  \______
-///    /       /      \      \       /      /      \        \
-/// [blind] [blind] [data] [data] [data] [blind] [blind] [blind]
+///                   [root_hash]
+///                      __|__   
+///                     /     \
+///              ______/       \______
+///     ________/  /               \  \________
+///    /          /                 \          \
+/// [blind]      /                   \      [blind]
+///             /\                   /\
+///         ___/  \                 /  \___
+///        /       \               /       \     
+/// [blind/data] [data]         [data] [data/blind]
 /// ```
-pub const MAX_PROOF_OFFSETS: [usize; 6] = [
-    NDS_BYTES_LENGTH / 4 - 1,
-    NDS_BYTES_LENGTH / 4 - PAGE_SIZE - 1,
+pub const MAX_PROOF_OFFSETS: [usize; 2] = [
     (NDS_BYTES_LENGTH / 4) * 2 - 1,
     (NDS_BYTES_LENGTH / 4) * 2 - PAGE_SIZE - 1,
-    (NDS_BYTES_LENGTH / 4) * 3 - PAGE_SIZE - 1,
-    (NDS_BYTES_LENGTH / 4) * 3 - 1,
 ];
 
 #[cfg(test)]
