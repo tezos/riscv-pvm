@@ -43,6 +43,66 @@ trait_set! {
     pub trait BackgroundPersistentKeyValueStore = PersistentKeyValueStore + BackgroundWriteableKeyValueStore;
 }
 
+/// The Merkle representation held by a Normal-mode database, selected by its key-value store
+/// through [`ReadableKeyValueStore::Merkle`].
+///
+/// A store that can be written to needs a live tree to track the root hash of the writes made
+/// against it, and hence a [`MerkleWorker`] to own that tree. A store that reads a commit in place
+/// cannot change its root hash, so it needs nothing beyond the hash itself - see [`CommittedRoot`].
+pub trait MerkleHandle<KV> {
+    /// Obtain, and possibly calculate, the root hash of the Merkle tree.
+    fn hash(&self) -> Result<Hash, OperationalError>;
+
+    /// Snapshot the tree and enter Prove mode - see [`MerkleLayer::start_proof`].
+    fn start_proof(
+        &self,
+        store: Arc<KV>,
+    ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError>;
+}
+
+/// A store whose Merkle representation is a live tree, owned by a [`MerkleWorker`].
+///
+/// That is the shape of every store a database can be written through, and it is what
+/// distinguishes them from the read-only stores, which hold a [`CommittedRoot`] instead.
+pub trait TreeBackedKeyValueStore: ReadableKeyValueStore<Merkle = MerkleWorker<Self>> {}
+
+impl<KV: ReadableKeyValueStore<Merkle = MerkleWorker<KV>>> TreeBackedKeyValueStore for KV {}
+
+/// The Merkle representation of a database that reads a commit in place.
+///
+/// A [`CommitId`] *is* the Merkle root hash of the database committed under it - see
+/// [`MerkleLayer::commit`] - so a database that can only ever read that one commit already knows
+/// its root hash, and needs neither a tree nor a worker thread to answer for it. Proving requires a
+/// tree, so [`MerkleHandle::start_proof`] loads one on demand.
+#[derive(Debug, Clone, Copy)]
+pub struct CommittedRoot(CommitId);
+
+impl CommittedRoot {
+    /// The commit this database reads.
+    pub(crate) fn commit_id(&self) -> CommitId {
+        self.0
+    }
+}
+
+impl From<CommitId> for CommittedRoot {
+    fn from(commit: CommitId) -> Self {
+        Self(commit)
+    }
+}
+
+impl<KV: ReadableKeyValueStore> MerkleHandle<KV> for CommittedRoot {
+    fn hash(&self) -> Result<Hash, OperationalError> {
+        Ok(*self.0.as_hash())
+    }
+
+    fn start_proof(
+        &self,
+        store: Arc<KV>,
+    ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError> {
+        Ok(MerkleLayer::checkout(store, self.0)?.start_proof())
+    }
+}
+
 /// Alias for the inner workings of the [`Command`] struct to make Clippy happy
 type DynCommand<KV> = dyn FnOnce(&mut MerkleLayer<KV, Normal>, &mut BTreeSet<Key>) + Send;
 
@@ -363,19 +423,6 @@ impl<KV> MerkleWorker<KV> {
             .map_err(|_| OperationalError::WorkerThreadDied)
     }
 
-    /// See [`MerkleLayer::hash`].
-    pub(crate) fn hash(&self) -> Result<Hash, OperationalError>
-    where
-        KV: ReadableKeyValueStore,
-    {
-        let (receive, command) = Command::new_hash();
-        self.sender
-            .send(command)
-            .map_err(|_| OperationalError::WorkerThreadDied)?;
-
-        receive()
-    }
-
     /// Checkout a Merkle worker from an existing commit.
     ///
     /// The provided handle is used to spawn the background worker thread.
@@ -383,7 +430,7 @@ impl<KV> MerkleWorker<KV> {
         async_handle: &Handle,
         store: Arc<KV>,
         commit: CommitId,
-    ) -> Result<Self, Error>
+    ) -> Result<Self, OperationalError>
     where
         KV: BackgroundReadableKeyValueStore,
     {
@@ -404,15 +451,22 @@ impl<KV> MerkleWorker<KV> {
 
         receive()
     }
+}
 
-    /// See [`MerkleLayer::clone_with`].
-    pub(crate) fn start_proof(
+impl<KV: BackgroundReadableKeyValueStore> MerkleHandle<KV> for MerkleWorker<KV> {
+    fn hash(&self) -> Result<Hash, OperationalError> {
+        let (receive, command) = Command::new_hash();
+        self.sender
+            .send(command)
+            .map_err(|_| OperationalError::WorkerThreadDied)?;
+
+        receive()
+    }
+
+    fn start_proof(
         &self,
         store: Arc<KV>,
-    ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError>
-    where
-        KV: BackgroundReadableKeyValueStore,
-    {
+    ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError> {
         let (receive, command) = Command::new_clone_with(store);
         self.sender
             .send(command)
@@ -438,6 +492,7 @@ mod tests {
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
     use crate::merkle_layer::MerkleLayer;
+    use crate::merkle_worker::MerkleHandle;
     use crate::merkle_worker::MerkleWorker;
     use crate::storage::WriteableKeyValueStore;
     use crate::storage::kv_test;

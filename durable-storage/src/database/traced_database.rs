@@ -40,6 +40,7 @@ use crate::merkle_layer::new_verify_layer;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::ReadableKeyValueStore;
 #[cfg(test)]
 use crate::storage::TestKeyValueStoreSetup;
 #[cfg(test)]
@@ -99,7 +100,7 @@ pub(crate) enum TraceEntry {
 }
 
 /// A [`Database`] wrapper which can record execution traces
-pub(crate) struct TracedDatabase<KV, M: Mode = Normal> {
+pub(crate) struct TracedDatabase<KV: ReadableKeyValueStore, M: Mode = Normal> {
     inner: Database<KV, M>,
     trace: RefCell<Vec<TraceEntry>>,
 }
@@ -308,7 +309,7 @@ impl<KV: BackgroundWriteableKeyValueStore, M: DatabaseMode> TracedDatabase<KV, M
     }
 }
 
-impl<KV, M: Mode> From<Database<KV, M>> for TracedDatabase<KV, M> {
+impl<KV: ReadableKeyValueStore, M: Mode> From<Database<KV, M>> for TracedDatabase<KV, M> {
     fn from(inner: Database<KV, M>) -> Self {
         Self {
             inner,
@@ -317,7 +318,7 @@ impl<KV, M: Mode> From<Database<KV, M>> for TracedDatabase<KV, M> {
     }
 }
 
-impl<KV, M: Mode, F: Fold> Foldable<F> for TracedDatabase<KV, M>
+impl<KV: ReadableKeyValueStore, M: Mode, F: Fold> Foldable<F> for TracedDatabase<KV, M>
 where
     Database<KV, M>: Foldable<F>,
 {

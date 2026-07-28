@@ -106,7 +106,7 @@ impl<KV> MerkleLayer<KV, Normal> {
     }
 
     /// Load the Merkle layer from the given key-value store.
-    pub fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, Error>
+    pub fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, OperationalError>
     where
         KV: ReadableKeyValueStore,
     {
@@ -571,7 +571,7 @@ impl<KV> NormalImpl<KV> {
     }
 
     /// Load the Merkle layer from the given key-value store with lazy node loading.
-    fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, Error>
+    fn checkout(persistence: Arc<KV>, root: CommitId) -> Result<Self, OperationalError>
     where
         KV: ReadableKeyValueStore,
     {

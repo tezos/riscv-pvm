@@ -56,9 +56,13 @@ use crate::merkle_layer::MerkleLayer;
 use crate::merkle_worker::BackgroundPersistentKeyValueStore;
 use crate::merkle_worker::BackgroundReadableKeyValueStore;
 use crate::merkle_worker::BackgroundWriteableKeyValueStore;
+use crate::merkle_worker::CommittedRoot;
+use crate::merkle_worker::MerkleHandle;
 use crate::merkle_worker::MerkleWorker;
+use crate::merkle_worker::TreeBackedKeyValueStore;
 pub use crate::repo::DirectoryManager;
 use crate::storage::PersistentKeyValueStore;
+use crate::storage::ReadOnlyKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
 use crate::storage::StoreOptions;
 
@@ -73,11 +77,11 @@ pub const MAX_VALUE_SIZE: usize =
 /// alongside a representation which can provide a root hash.
 #[perfect_derive(Clone)]
 #[repr(transparent)]
-pub struct Database<KV, M: Mode> {
+pub struct Database<KV: ReadableKeyValueStore, M: Mode> {
     inner: M::Select<DatabaseTemplate<KV>>,
 }
 
-impl<KV> Database<KV, Normal> {
+impl<KV: TreeBackedKeyValueStore> Database<KV, Normal> {
     /// Construct a new, empty database backed by `repo`.
     ///
     /// The returned database owns an isolated working state. Mutations are applied immediately to
@@ -155,6 +159,67 @@ impl<KV> Database<KV, Normal> {
         self.inner.persistent.commit(repo, &commit_id)?;
 
         Ok(commit_id)
+    }
+}
+
+/// A database reading a commit in place, through a [`ReadOnlyKeyValueStore`].
+///
+/// The mutating operations - [`Database::set`], [`Database::write`], [`Database::delete`] and
+/// [`Database::commit`] - are bounded on a writeable store, so they do not exist here. Use
+/// [`Database::to_writeable`] if they are required.
+///
+/// Such a database holds no Merkle tree: its root hash cannot change and is already known, so the
+/// store pins [`ReadableKeyValueStore::Merkle`] to a [`CommittedRoot`]. Nothing here spawns a
+/// worker thread, and so nothing here needs an async runtime.
+///
+/// [`ReadOnlyKeyValueStore`]: crate::storage::ReadOnlyKeyValueStore
+impl<KV: ReadOnlyKeyValueStore> Database<KV, Normal> {
+    /// Read a previously committed snapshot, without making a working copy.
+    pub fn checkout_read_only(repo: &KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
+        let persistent = Arc::new(KV::checkout_read_only(repo, &commit_id)?);
+
+        Ok(Database {
+            inner: NormalImpl {
+                persistent,
+                merkle: CommittedRoot::from(commit_id),
+            },
+        })
+    }
+
+    /// Create another handle on the same committed state.
+    ///
+    /// Copies nothing and cannot fail - the store handle is shared and the root hash is a value -
+    /// unlike [`Database::try_clone_with`], which copies a working state.
+    pub fn clone_read_only(&self) -> Self {
+        Database {
+            inner: NormalImpl {
+                persistent: self.inner.persistent.clone(),
+                merkle: self.inner.merkle,
+            },
+        }
+    }
+
+    /// Copy the committed state into a working state, which can be modified.
+    ///
+    /// The commit is left untouched and remains readable through `self`. This is where a Merkle
+    /// tree and its worker first appear: the working copy can be written to, so its root hash has
+    /// to be tracked.
+    pub fn to_writeable(
+        &self,
+        handle: &Handle,
+        repo: &KV::Repo,
+    ) -> Result<Database<KV::Writeable, Normal>, OperationalError>
+    where
+        KV::Writeable: BackgroundPersistentKeyValueStore,
+    {
+        let persistent = Arc::new(self.inner.persistent.to_writeable(repo)?);
+
+        let merkle =
+            MerkleWorker::checkout(handle, persistent.clone(), self.inner.merkle.commit_id())?;
+
+        Ok(Database {
+            inner: NormalImpl { persistent, merkle },
+        })
     }
 }
 
@@ -336,9 +401,9 @@ impl<'normal, KV: BackgroundReadableKeyValueStore> ProvableExt<'normal, 'static,
 /// Modal template for the [`Database`]
 ///
 /// This is used to select the appropriate implementation for the mode.
-struct DatabaseTemplate<KV>(PhantomData<KV>, Infallible);
+struct DatabaseTemplate<KV: ReadableKeyValueStore>(PhantomData<KV>, Infallible);
 
-impl<KV> Modal for DatabaseTemplate<KV> {
+impl<KV: ReadableKeyValueStore> Modal for DatabaseTemplate<KV> {
     type Normal = NormalImpl<KV>;
 
     type Prove<'normal> = ProveImpl<KV>;
@@ -429,12 +494,15 @@ impl DatabaseMode for Normal {
 }
 
 /// Registry implementation for the [`Database`] mode
-struct NormalImpl<KV> {
+///
+/// The Merkle representation is selected by the store: a writeable store brings a
+/// [`MerkleWorker`] owning a live tree, a read-only one brings only a [`CommittedRoot`].
+struct NormalImpl<KV: ReadableKeyValueStore> {
     persistent: Arc<KV>,
-    merkle: MerkleWorker<KV>,
+    merkle: KV::Merkle,
 }
 
-impl<KV> Database<KV, Prove<'static>> {
+impl<KV: ReadableKeyValueStore> Database<KV, Prove<'static>> {
     /// An empty prove-mode database backed by the given persistence layer.
     pub(crate) fn empty(persistence: Arc<KV>) -> Self
     where
@@ -460,7 +528,7 @@ impl<KV> Database<KV, Prove<'static>> {
     }
 }
 
-impl<KV> Database<KV, Verify> {
+impl<KV: ReadableKeyValueStore> Database<KV, Verify> {
     /// An empty verify-mode database.
     pub(crate) fn empty() -> Self {
         Database {
@@ -471,7 +539,7 @@ impl<KV> Database<KV, Verify> {
     }
 }
 
-impl<KV> FromProof for Database<KV, Verify> {
+impl<KV: ReadableKeyValueStore> FromProof for Database<KV, Verify> {
     fn from_proof<Proof: Deserialiser<Codec = codec::Bincode>>(
         proof: Proof,
     ) -> SuspendedResult<Proof, Self> {
@@ -671,6 +739,7 @@ pub(crate) mod tests {
     use crate::merkle_layer::MerkleLayer;
     use crate::merkle_worker::BackgroundPersistentKeyValueStore;
     use crate::merkle_worker::BackgroundWriteableKeyValueStore;
+    use crate::merkle_worker::MerkleHandle;
     use crate::storage::TestKeyValueStoreSetup;
     use crate::storage::WriteableKeyValueStore;
     use crate::storage::kv_test;
@@ -1031,6 +1100,132 @@ pub(crate) mod tests {
         (original.into_trace(), checked_out.into_trace())
     });
 
+    // Not `kv_test!`s: the in-memory backend copies a commit into memory either way, so it has no
+    // read-only store.
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_database_checkout_read_only_reads_the_commit() {
+        use super::Database;
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+
+        let (runtime, _keepalive, repo, mut database) =
+            new_persistent_database::<PersistenceLayer>();
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key.clone(), Bytes::from_static(b"committed"))
+            .expect("Writing should succeed");
+        let expected_hash = database.hash().expect("Hashing should succeed");
+        let commit_id = database.commit(&repo).expect("Commit should succeed");
+
+        // A read-only database holds no Merkle worker, so it depends on no runtime: drop the one
+        // the writeable database needed, along with the database itself.
+        drop(database);
+        drop(runtime);
+
+        let read_only =
+            Database::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(&repo, commit_id)
+                .expect("Read-only checkout should succeed");
+
+        read_only.assert_database_value(&key, b"committed");
+        assert_eq!(
+            read_only.hash().expect("Hashing should succeed"),
+            expected_hash,
+            "A read-only checkout should have the committed root hash"
+        );
+
+        let clone = read_only.clone_read_only();
+        clone.assert_database_value(&key, b"committed");
+        assert_eq!(clone.hash().expect("Hashing should succeed"), expected_hash);
+    }
+
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_database_checkout_read_only_to_writeable() {
+        use super::Database;
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+
+        let (runtime, _keepalive, repo, mut database) =
+            new_persistent_database::<PersistenceLayer>();
+        let handle = runtime.handle();
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let added_key = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key.clone(), Bytes::from_static(b"committed"))
+            .expect("Writing should succeed");
+        let commit_id = database.commit(&repo).expect("Commit should succeed");
+        let committed_hash = database.hash().expect("Hashing should succeed");
+
+        let read_only =
+            Database::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(&repo, commit_id)
+                .expect("Read-only checkout should succeed");
+
+        // Upgrading pays for the copy and yields a database which can be modified and committed.
+        let mut writeable = read_only
+            .to_writeable(handle, &repo)
+            .expect("Making the database writeable should succeed");
+
+        writeable.assert_database_value(&key, b"committed");
+        assert_eq!(
+            writeable.hash().expect("Hashing should succeed"),
+            committed_hash,
+            "The working copy should start from the committed state"
+        );
+
+        writeable
+            .set(added_key.clone(), Bytes::from_static(b"added"))
+            .expect("Writing to the working copy should succeed");
+        writeable.assert_database_value(&added_key, b"added");
+
+        let derived_commit = writeable
+            .commit(&repo)
+            .expect("Committing the working copy should succeed");
+        assert_ne!(derived_commit, commit_id);
+
+        // The original commit is untouched: the read-only database still sees it, and so does a
+        // fresh checkout.
+        assert!(
+            !read_only
+                .exists(&added_key)
+                .expect("Existence check should succeed"),
+            "The read-only database should not observe the working copy's writes"
+        );
+        assert_eq!(
+            read_only.hash().expect("Hashing should succeed"),
+            committed_hash
+        );
+
+        let reloaded = Database::<PersistenceLayer, Normal>::checkout(handle, &repo, commit_id)
+            .expect("Checking out the original commit should succeed");
+        assert_eq!(
+            reloaded.hash().expect("Hashing should succeed"),
+            committed_hash
+        );
+    }
+
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_database_checkout_read_only_unknown_commit_fails() {
+        use octez_riscv_data::hash::Hash;
+
+        use super::Database;
+        use crate::commit::CommitId;
+        use crate::errors::OperationalError;
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+
+        let (_runtime, _keepalive, repo, _database) = new_persistent_database::<PersistenceLayer>();
+        let missing_commit = CommitId::from(Hash::hash_bytes(b"missing-commit"));
+
+        assert!(matches!(
+            Database::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(&repo, missing_commit),
+            Err(Error::Operational(OperationalError::CommitNotFound))
+        ));
+    }
+
     #[cfg(rocksdb)]
     #[test]
     fn test_database_checkout_missing_root_blob_fails_operationally() {
@@ -1080,6 +1275,74 @@ pub(crate) mod tests {
         assert!(matches!(
             Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id),
             Err(Error::Operational(OperationalError::CommitDataMissing { root, .. }))
+                if root == *commit_id.as_hash()
+        ));
+    }
+
+    /// A read-only checkout never loads the Merkle root, so - unlike
+    /// [`Database::checkout`], see the test above - it cannot notice that the root blob is
+    /// missing. Reads are served from the store and the root hash is the commit id, so both
+    /// still work; the damage only surfaces when a working copy is made and a tree is needed.
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_read_only_checkout_of_missing_root_blob_defers_the_failure() {
+        use rocksdb::ColumnFamilyDescriptor;
+
+        use super::Database;
+        use crate::errors::OperationalError;
+        use crate::persistence_layer::BLOB_CF;
+        use crate::persistence_layer::KV_CF;
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+        use crate::persistence_layer::rocksdb_checkpoint_options;
+
+        let (runtime, _keepalive, repo, mut database) =
+            new_persistent_database::<PersistenceLayer>();
+        let handle = runtime.handle();
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key.clone(), Bytes::from_static(b"value"))
+            .expect("Writing should succeed");
+
+        let commit_id = database.commit(&repo).expect("Commit should succeed");
+        let commit_path = repo.database_commit_dir(&commit_id);
+
+        let commit_db = rocksdb::DB::open_cf_descriptors(
+            &rocksdb_checkpoint_options(),
+            &commit_path,
+            [
+                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
+                ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
+            ],
+        )
+        .expect("Opening committed RocksDB should succeed");
+
+        let blob_cf = commit_db
+            .cf_handle(BLOB_CF)
+            .expect("Committed RocksDB should contain the blob column family");
+        commit_db
+            .delete_cf(blob_cf, commit_id.as_hash().as_ref())
+            .expect("Deleting the root blob should succeed");
+        commit_db
+            .flush_cf(blob_cf)
+            .expect("Flushing the blob column family should succeed");
+        drop(commit_db);
+
+        let read_only =
+            Database::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(&repo, commit_id)
+                .expect("Read-only checkout should succeed without loading the root");
+
+        read_only.assert_database_value(&key, b"value");
+        assert_eq!(
+            read_only.hash().expect("Hashing should succeed"),
+            *commit_id.as_hash(),
+            "The root hash of a read-only checkout is its commit id"
+        );
+
+        assert!(matches!(
+            read_only.to_writeable(handle, &repo),
+            Err(OperationalError::CommitDataMissing { root, .. })
                 if root == *commit_id.as_hash()
         ));
     }

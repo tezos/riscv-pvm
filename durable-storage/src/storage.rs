@@ -18,6 +18,9 @@ use tempfile::TempDir;
 use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::OperationalError;
+use crate::merkle_worker::CommittedRoot;
+use crate::merkle_worker::MerkleHandle;
+use crate::merkle_worker::MerkleWorker;
 
 /// Types that implement this trait can serve reads from a key-value store.
 ///
@@ -29,6 +32,13 @@ pub trait ReadableKeyValueStore: Sized {
     /// Type of repository required to initialise a key value store.
     type Repo;
 
+    /// How a Normal-mode database over this store tracks its Merkle root.
+    ///
+    /// Writeable stores are pinned to a live tree in a [`MerkleWorker`] by
+    /// [`WriteableKeyValueStore`]; read-only stores are pinned to a [`CommittedRoot`] by
+    /// [`ReadOnlyKeyValueStore`], and so have no tree and no worker thread at all.
+    type Merkle: MerkleHandle<Self>;
+
     /// Retrieves the data associated with the given blob key.
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
@@ -37,7 +47,10 @@ pub trait ReadableKeyValueStore: Sized {
 }
 
 /// Types that implement this trait can be used as the underlying key-value store
-pub trait WriteableKeyValueStore: ReadableKeyValueStore {
+///
+/// Writes change the root hash, so a database over such a store needs a live Merkle tree to track
+/// it: [`ReadableKeyValueStore::Merkle`] is pinned to a [`MerkleWorker`] here.
+pub trait WriteableKeyValueStore: ReadableKeyValueStore<Merkle = MerkleWorker<Self>> {
     /// Create a new instance of the key-value store.
     ///
     /// The backend may make use of the repo provided, for persistence - if required.
@@ -96,7 +109,11 @@ pub trait PersistentKeyValueStore: WriteableKeyValueStore + Sized {
 ///
 /// Stores implementing this trait should read the committed state where it lies. This is safe
 /// as no mutable operations may be performed.
-pub trait ReadOnlyKeyValueStore: ReadableKeyValueStore {
+///
+/// The root hash of such a state cannot change, and is already known - it is the commit id - so
+/// [`ReadableKeyValueStore::Merkle`] is pinned to a [`CommittedRoot`] here. A database over a
+/// read-only store therefore holds no Merkle tree, spawns no worker, and needs no async runtime.
+pub trait ReadOnlyKeyValueStore: ReadableKeyValueStore<Merkle = CommittedRoot> {
     /// The store a read-only view can be upgraded into.
     type Writeable: PersistentKeyValueStore<Repo = Self::Repo>;
 
