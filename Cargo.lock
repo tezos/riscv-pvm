@@ -1203,7 +1203,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -2470,9 +2470,9 @@ dependencies = [
 
 [[package]]
 name = "object"
-version = "0.39.1"
+version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e5a6c098c7a3b6547378093f5cc30bc54fd361ce711e05293a5cc589562739b"
+checksum = "dd229a0361b9d0d4396176e02d65897f487eebeab7caa6d443855ee152ca0b9c"
 dependencies = [
  "flate2",
  "memchr",
@@ -3477,9 +3477,9 @@ dependencies = [
 
 [[package]]
 name = "ruzstd"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3640bec8aad418d7d03c72ea2de10d5c646a598f9883c7babc160d91e3c1b26c"
+checksum = "a252f5e20f038fe7b4ea53e073e65398d652c864cc162fc77c56c2f13717b888"
 dependencies = [
  "twox-hash",
 ]
@@ -3785,7 +3785,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
@@ -4881,7 +4881,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]
