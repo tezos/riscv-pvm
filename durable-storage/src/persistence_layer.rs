@@ -652,6 +652,14 @@ impl WriteableKeyValueStore for PersistenceLayer {
         self.merkle.delete(key.as_ref())
     }
 
+    fn node_written_at(
+        &self,
+        seq: crate::journal::Seq,
+        key: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        self.merkle.log_written(seq, key.as_ref())
+    }
+
     fn blob_set(
         &self,
         key: impl AsRef<[u8]>,
@@ -840,6 +848,13 @@ impl PersistentKeyValueStore for PersistenceLayer {
                 error,
             }),
         }
+    }
+
+    fn next_commit_seq(
+        &self,
+        repo: &DirectoryManager,
+    ) -> Result<crate::journal::Seq, OperationalError> {
+        crate::repo::RegistryRepo::next_commit_seq(repo)
     }
 
     fn checkout_from_path(

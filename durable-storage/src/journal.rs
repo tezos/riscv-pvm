@@ -27,7 +27,7 @@ use crate::errors::GcArgumentError;
 /// no longer needs, which shifts every entry after them, so each one carries the number it was
 /// given rather than being numbered by where it sits. Numbers increase with each commit recorded
 /// and are never reused, so one read before a round still means the same commit after it.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct Seq(u64);
 
 impl Seq {
@@ -46,6 +46,13 @@ impl Seq {
     /// The underlying position.
     pub fn raw(self) -> u64 {
         self.0
+    }
+
+    /// The position numbered `raw`.
+    ///
+    /// For reading a sequence number back out of somewhere it was stored.
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
     }
 }
 

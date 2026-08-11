@@ -75,6 +75,13 @@ struct Cli {
     #[arg(long)]
     json_out: Option<PathBuf>,
 
+    /// How far behind the tip to collect, in commits.
+    ///
+    /// A rollup node collects at the commit it has cemented, not the newest one. With a window,
+    /// the run also measures a second round over a settled store, which is the steady state.
+    #[arg(long, default_value_t = 0)]
+    collect_window: usize,
+
     /// After the last commit, collect at it and measure again.
     ///
     /// Collection at the final commit deletes all commits not reachable from it.
@@ -117,6 +124,7 @@ fn main() -> Result<()> {
         repo_dir: cli.repo_dir,
         json_out: cli.json_out,
         collect: cli.collect,
+        collect_window: cli.collect_window,
     }
     .run()
 }
