@@ -92,6 +92,20 @@ No amount of commit deletion reclaims it.
 Reclaiming it requires deleting the node keys themselves and letting compaction rewrite the files.
 </Warning>
 
+### What refers to what is recorded
+
+As a node is stored, an edge is recorded from each of its children to it, in a `refs` column family of the Merkle store keyed by `child_hash || parent_hash`.
+Empty trees are never stored, so no edge points at one.
+
+Explicit reverse edges rather than reference counts, because they are idempotent: writing an edge twice, or removing it twice, leaves the same state, so a collection interrupted part-way can simply be run again.
+A count that is incremented twice after a crash is silently wrong for good.
+
+Recording them from the child's side is what will let a node's liveness be decided from the node upwards, rather than by traversing every retained root downwards.
+Each edge has room for a stamp saying how recently its child was known to be held; edges are written without one, since the sequence number of the commit being made is not settled while its nodes are being written.
+
+Nothing reads the edges yet.
+They cost a 64-byte key and an 8-byte stamp apiece, at a little under two edges per node.
+
 ### Collecting at a root
 
 A *root* here is a registry commit id: the hash of an entire registry state, and so the root of the Merkle tree over it.
@@ -190,16 +204,11 @@ Sections move out of here as the work lands.
 What remains is collecting the Merkle side, which the mechanism above cannot reach.
 The store the nodes now live in is the place that becomes possible from.
 
-### Deleting nodes: liveness by reverse edges
+### Deleting nodes: the sweep
 
-A commit directory then holds only the values, so it is self-contained in the sense above but no longer holds the nodes those values are indexed by.
-Reading a commit's tree from another process therefore means reading the shared store as well, which is what the slots below are for.
+The edges above are what the sweep walks; what it does with them is what is missing.
 
-Liveness is tracked with explicit reverse edges rather than reference counts, in a column family keyed by `child_hash || parent_hash`.
-Explicit edges are idempotent: writing an edge twice, or removing it twice, leaves the same state, so an interrupted collection can simply be repeated.
-Reference counts cannot offer that, because a count that is incremented twice after a crash is silently wrong.
-
-Each edge carries the sequence number of the most recent root known to contain the child.
+A stamp on an edge is the sequence number of the most recent root the child was proven reachable from.
 Collection reads that first: a stamp at or above the collection floor means the child is still held by a retained root, so the sweep stops there instead of walking up to a root.
 A stamp below the floor is stale, so the sweep walks up, then rewrites the stamp with what it learned.
 

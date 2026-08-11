@@ -34,13 +34,69 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::Weak;
 
+use octez_riscv_data::hash::Hash;
+
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
+use crate::journal::Seq;
 use crate::persistence_layer::rocksdb_node_store_options;
 use crate::storage::StoreId;
 
-/// The Merkle node bodies of one repository.
+/// The column family holding reverse edges, keyed by `child || parent`.
+const REFS_CF: &str = "refs";
+
+/// How recently a reverse edge was known to hold its child alive.
+///
+/// The sequence number of the most recent root the child was proven reachable from. Collection
+/// reads it before doing anything else: at or above the floor means a retained root still holds the
+/// child, so the walk stops there rather than climbing to a root.
+///
+/// [`Stamp::UNKNOWN`] means nothing has been proven yet, so it is below every floor and always
+/// forces the walk. Being wrong in that direction only costs work, which is why edges may be
+/// written that way and filled in later.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct Stamp(u64);
+
+impl Stamp {
+    /// No root has yet been shown to hold the child.
+    pub const UNKNOWN: Self = Self(0);
+
+    /// The stamp for a child held by the root recorded at `seq`.
+    ///
+    /// Offset by one so that [`Stamp::UNKNOWN`] is distinct from, and below, the first recorded
+    /// commit.
+    pub fn at(seq: Seq) -> Self {
+        Self(seq.raw() + 1)
+    }
+
+    /// Whether this stamp shows the child is held by a root at or after `floor`.
+    pub fn holds_at(self, floor: Seq) -> bool {
+        self >= Self::at(floor)
+    }
+
+    fn encode(self) -> [u8; size_of::<u64>()] {
+        self.0.to_le_bytes()
+    }
+
+    fn decode(bytes: &[u8]) -> Self {
+        <[u8; size_of::<u64>()]>::try_from(bytes)
+            .map_or(Self::UNKNOWN, |bytes| Self(u64::from_le_bytes(bytes)))
+    }
+}
+
+/// The key an edge from `parent` to `child` is stored under.
+///
+/// Child first, so that every edge into one child is contiguous and its parents can be found by
+/// walking forward from the child's hash.
+fn edge_key(child: &[u8], parent: &[u8]) -> [u8; 2 * Hash::DIGEST_SIZE] {
+    let mut key = [0u8; 2 * Hash::DIGEST_SIZE];
+    key[..Hash::DIGEST_SIZE].copy_from_slice(child);
+    key[Hash::DIGEST_SIZE..].copy_from_slice(parent);
+    key
+}
+
+/// The Merkle node bodies of one repository, and the edges between them.
 ///
 /// Cheap to clone through the [`Arc`] handed out by [`open_shared`]; the instance itself is opened
 /// once per path.
@@ -170,6 +226,103 @@ impl MerkleStore {
         self.store_id
     }
 
+    /// Record that the node stored under `parent` refers to the one stored under `child`.
+    ///
+    /// Reverse edges rather than reference counts, because they are idempotent: writing an edge
+    /// twice, or removing it twice, leaves the same state, so a collection interrupted part-way can
+    /// simply be run again. A count incremented twice after a crash is silently wrong for good.
+    ///
+    /// The edge carries a [`Stamp`]. Written unstamped here and filled in by whatever later proves
+    /// the child reachable from a root, since the sequence number of the commit being made is not
+    /// settled while its nodes are being written.
+    pub fn set_edge(&self, child: &[u8], parent: &[u8]) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        let key = edge_key(child, parent);
+
+        self.db
+            .put_cf(self.refs_cf(), key, Stamp::UNKNOWN.encode())
+            .map_err(|error| OperationalError::PutFailed {
+                column: REFS_CF.to_owned(),
+                key: key.to_vec(),
+                error,
+            })
+    }
+
+    /// Every node that refers to the one stored under `child`, with the stamp of each edge.
+    ///
+    /// Edge keys begin with the child, so the parents of one child are contiguous and are found by
+    /// walking forward from that prefix.
+    pub fn parents_of(&self, child: &[u8]) -> Result<Vec<(Vec<u8>, Stamp)>, OperationalError> {
+        let mut parents = Vec::new();
+
+        let from = rocksdb::IteratorMode::From(child, rocksdb::Direction::Forward);
+        for entry in self.db.iterator_cf(self.refs_cf(), from) {
+            let (key, value) = entry.map_err(|error| OperationalError::GetFailed {
+                column: REFS_CF.to_owned(),
+                key: child.to_vec(),
+                error,
+            })?;
+
+            // Ordered by key, so the first entry that is not this child's ends the run.
+            if !key.starts_with(child) {
+                break;
+            }
+
+            parents.push((key[child.len()..].to_vec(), Stamp::decode(&value)));
+        }
+
+        Ok(parents)
+    }
+
+    /// Note that the node under `child` is held by a root at `stamp`, through the edge to `parent`.
+    ///
+    /// Only ever called where the child is provably reachable from the stamped root, which is what
+    /// makes the stamp safe to trust later. A stale stamp costs a walk and an over-generous one
+    /// retains garbage; neither can drop something still live.
+    pub fn stamp_edge(
+        &self,
+        child: &[u8],
+        parent: &[u8],
+        stamp: Stamp,
+    ) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        let key = edge_key(child, parent);
+
+        self.db
+            .put_cf(self.refs_cf(), key, stamp.encode())
+            .map_err(|error| OperationalError::PutFailed {
+                column: REFS_CF.to_owned(),
+                key: key.to_vec(),
+                error,
+            })
+    }
+
+    /// Remove the edge recorded from `parent` to `child`.
+    pub fn delete_edge(&self, child: &[u8], parent: &[u8]) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        let key = edge_key(child, parent);
+
+        self.db
+            .delete_cf(self.refs_cf(), key)
+            .map_err(|error| OperationalError::DeleteFailed {
+                column: REFS_CF.to_owned(),
+                key: key.to_vec(),
+                error,
+            })
+    }
+
+    /// The column family holding reverse edges.
+    ///
+    /// Panics if it is absent, which would mean the store was not opened by this module.
+    fn refs_cf(&self) -> &rocksdb::ColumnFamily {
+        self.db
+            .cf_handle(REFS_CF)
+            .expect("the Merkle store always has its refs column family")
+    }
+
     /// Count every node in the store, and the bytes they occupy.
     ///
     /// A full scan rather than a RocksDB estimate: the point of measuring is to know how much of
@@ -195,18 +348,54 @@ impl MerkleStore {
         Ok(totals)
     }
 
+    /// Count every reverse edge, and the bytes they occupy.
+    #[cfg(rocksdb_test_utils)]
+    pub fn edge_totals(
+        &self,
+    ) -> Result<crate::persistence_layer::measurement::CfTotals, OperationalError> {
+        let mut totals = crate::persistence_layer::measurement::CfTotals::default();
+
+        for entry in self
+            .db
+            .iterator_cf(self.refs_cf(), rocksdb::IteratorMode::Start)
+        {
+            let (key, value) = entry.map_err(|error| OperationalError::GetFailed {
+                column: REFS_CF.to_owned(),
+                key: Vec::new(),
+                error,
+            })?;
+
+            totals.entries += 1;
+            totals.key_bytes += key.len() as u64;
+            totals.value_bytes += value.len() as u64;
+        }
+
+        Ok(totals)
+    }
+
     /// Bytes the store's SST files occupy on disk.
     #[cfg(rocksdb_test_utils)]
     pub fn sst_bytes(&self) -> Result<u64, OperationalError> {
-        Ok(self
-            .db
-            .property_int_value("rocksdb.total-sst-files-size")
-            .map_err(|error| OperationalError::GetFailed {
-                column: "merkle".to_owned(),
-                key: Vec::new(),
-                error,
-            })?
-            .unwrap_or(0))
+        let mut total = 0;
+
+        for cf in [
+            self.db
+                .cf_handle("default")
+                .expect("the Merkle store always has its default column family"),
+            self.refs_cf(),
+        ] {
+            total += self
+                .db
+                .property_int_value_cf(cf, "rocksdb.total-sst-files-size")
+                .map_err(|error| OperationalError::GetFailed {
+                    column: "merkle".to_owned(),
+                    key: Vec::new(),
+                    error,
+                })?
+                .unwrap_or(0);
+        }
+
+        Ok(total)
     }
 
     /// Write a self-contained copy of the store to `path`.
@@ -275,8 +464,22 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
 
     // Opened without the registry held: RocksDB takes a lock on the directory, and a store closing
     // right now needs the registry to finish getting out of the way.
-    let db = rocksdb::DB::open(&rocksdb_node_store_options(), &key)
-        .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
+    let mut options = rocksdb_node_store_options();
+    // The refs family is created with the store rather than after it, and a store opened before
+    // edges existed has to gain one.
+    options.create_missing_column_families(true);
+
+    let db = rocksdb::DB::open_cf_descriptors(
+        &options,
+        &key,
+        [
+            // Node bodies. Named rather than implied, because listing any family means listing all
+            // of them.
+            rocksdb::ColumnFamilyDescriptor::new("default", rocksdb_node_store_options()),
+            rocksdb::ColumnFamilyDescriptor::new(REFS_CF, rocksdb_node_store_options()),
+        ],
+    )
+    .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 
     let store = Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
@@ -445,6 +648,153 @@ mod tests {
             open_shared(&tmp.path().join(".").join("merkle")).expect("the open should succeed");
 
         assert!(Arc::ptr_eq(&first, &second), "both should be one instance");
+    }
+
+    fn digest(byte: u8) -> [u8; Hash::DIGEST_SIZE] {
+        [byte; Hash::DIGEST_SIZE]
+    }
+
+    // Every parent recorded against a child is found, and only that child's.
+    #[test]
+    fn finds_the_parents_of_a_child() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+
+        store
+            .set_edge(&digest(1), &digest(10))
+            .expect("setting should succeed");
+        store
+            .set_edge(&digest(1), &digest(11))
+            .expect("setting should succeed");
+        store
+            .set_edge(&digest(2), &digest(12))
+            .expect("setting should succeed");
+
+        let mut parents: Vec<Vec<u8>> = store
+            .parents_of(&digest(1))
+            .expect("reading should succeed")
+            .into_iter()
+            .map(|(parent, _)| parent)
+            .collect();
+        parents.sort();
+
+        assert_eq!(parents, vec![digest(10).to_vec(), digest(11).to_vec()]);
+    }
+
+    // A child nothing refers to has no parents, rather than picking up its neighbours'.
+    #[test]
+    fn an_unreferenced_child_has_no_parents() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+
+        store
+            .set_edge(&digest(1), &digest(10))
+            .expect("setting should succeed");
+
+        assert!(
+            store
+                .parents_of(&digest(2))
+                .expect("reading should succeed")
+                .is_empty()
+        );
+    }
+
+    // Writing the same edge twice leaves the same state, which is what lets an interrupted
+    // collection be repeated.
+    #[test]
+    fn setting_an_edge_twice_is_one_edge() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+
+        store
+            .set_edge(&digest(1), &digest(10))
+            .expect("setting should succeed");
+        store
+            .set_edge(&digest(1), &digest(10))
+            .expect("setting again should succeed");
+
+        assert_eq!(
+            store
+                .parents_of(&digest(1))
+                .expect("reading should succeed")
+                .len(),
+            1
+        );
+    }
+
+    // Removing an edge that is already gone succeeds, for the same reason.
+    #[test]
+    fn deleting_an_edge_twice_succeeds() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+
+        store
+            .set_edge(&digest(1), &digest(10))
+            .expect("setting should succeed");
+
+        store
+            .delete_edge(&digest(1), &digest(10))
+            .expect("deleting should succeed");
+        store
+            .delete_edge(&digest(1), &digest(10))
+            .expect("deleting again should succeed");
+
+        assert!(
+            store
+                .parents_of(&digest(1))
+                .expect("reading should succeed")
+                .is_empty()
+        );
+    }
+
+    // A new edge carries no stamp, and stamping it records what was proven without disturbing the
+    // edge itself.
+    #[test]
+    fn an_edge_starts_unstamped_and_can_be_stamped() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+
+        store
+            .set_edge(&digest(1), &digest(10))
+            .expect("setting should succeed");
+
+        assert_eq!(
+            store
+                .parents_of(&digest(1))
+                .expect("reading should succeed")[0]
+                .1,
+            Stamp::UNKNOWN
+        );
+
+        let seq = Seq::FIRST.next();
+        store
+            .stamp_edge(&digest(1), &digest(10), Stamp::at(seq))
+            .expect("stamping should succeed");
+
+        let parents = store
+            .parents_of(&digest(1))
+            .expect("reading should succeed");
+        assert_eq!(parents.len(), 1, "stamping should not add an edge");
+        assert_eq!(parents[0].1, Stamp::at(seq));
+    }
+
+    // An unknown stamp is below every floor, so it never claims a child is held and always forces
+    // the walk that settles the question.
+    #[test]
+    fn an_unknown_stamp_holds_at_no_floor() {
+        assert!(!Stamp::UNKNOWN.holds_at(Seq::FIRST));
+        assert!(!Stamp::UNKNOWN.holds_at(Seq::FIRST.next()));
+    }
+
+    // A stamp holds at its own floor and at any earlier one, and not at a later one.
+    #[test]
+    fn a_stamp_holds_from_its_own_floor_downwards() {
+        let first = Seq::FIRST;
+        let second = first.next();
+
+        assert!(Stamp::at(second).holds_at(second));
+        assert!(Stamp::at(second).holds_at(first));
+        assert!(!Stamp::at(first).holds_at(second));
     }
 
     // Once every handle is dropped the instance closes, and opening again reads what it wrote

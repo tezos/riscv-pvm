@@ -28,6 +28,12 @@ pub struct BlobBreakdown {
 
     /// Bytes of the node bodies reachable from the committed root, including their keys.
     pub live_bytes: u64,
+
+    /// Reverse edges recorded between nodes.
+    pub edge_entries: u64,
+
+    /// Bytes those edges occupy, keys included.
+    pub edge_bytes: u64,
 }
 
 impl BlobBreakdown {

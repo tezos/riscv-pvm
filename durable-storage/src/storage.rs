@@ -129,6 +129,17 @@ pub trait WriteableKeyValueStore: ReadableKeyValueStore<Merkle = MerkleWorker<Se
     /// Deletes the Merkle node body associated with the given hash.
     fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError>;
 
+    /// Record that the node stored under `parent` refers to the one stored under `child`.
+    ///
+    /// Written as each node is stored, so that liveness can later be decided from a node upwards
+    /// rather than by traversing every retained root downwards. Nodes are immutable, so an edge
+    /// once true stays true until the parent itself is collected.
+    fn edge_set(
+        &self,
+        child: impl AsRef<[u8]>,
+        parent: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError>;
+
     /// Register data under a blob key.
     fn blob_set(
         &self,

@@ -1436,6 +1436,14 @@ mod tests {
             self.inner.node_delete(key)
         }
 
+        fn edge_set(
+            &self,
+            child: impl AsRef<[u8]>,
+            parent: impl AsRef<[u8]>,
+        ) -> Result<(), OperationalError> {
+            self.inner.edge_set(child, parent)
+        }
+
         fn blob_set(
             &self,
             key: impl AsRef<[u8]>,

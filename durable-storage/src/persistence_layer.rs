@@ -621,6 +621,14 @@ impl WriteableKeyValueStore for PersistenceLayer {
         self.merkle.delete(key.as_ref())
     }
 
+    fn edge_set(
+        &self,
+        child: impl AsRef<[u8]>,
+        parent: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        self.merkle.set_edge(child.as_ref(), parent.as_ref())
+    }
+
     fn blob_set(
         &self,
         key: impl AsRef<[u8]>,
