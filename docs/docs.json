@@ -31,6 +31,15 @@
             "pages": ["state-framework/index", "state-framework/components"]
           }
         ]
+      },
+      {
+        "tab": "New Durable Storage",
+        "groups": [
+          {
+            "group": "Concepts",
+            "pages": ["new-durable-storage/garbage-collection"]
+          }
+        ]
       }
     ]
   },
