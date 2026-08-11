@@ -71,6 +71,10 @@ struct Cli {
     #[arg(long)]
     repo_dir: Option<PathBuf>,
 
+    /// Write one JSON object per sample to this path.
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+
     /// After the last commit, delete every commit not reachable from it and measure again.
     ///
     /// Shows what collecting at directory granularity reclaims, and what dead node data survives it.
@@ -109,6 +113,7 @@ fn main() -> Result<()> {
         sample_every: cli.sample_every,
         seed: cli.seed,
         repo_dir: cli.repo_dir,
+        json_out: cli.json_out,
         simulate_dir_gc: cli.simulate_dir_gc,
     }
     .run()

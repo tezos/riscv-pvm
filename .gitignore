@@ -17,3 +17,6 @@ perf.data*
 
 # NodeJS
 node_modules
+
+# Space harness samples, written by `make -C durable-storage space-metrics`
+space-samples.jsonl

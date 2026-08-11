@@ -1,0 +1,17 @@
+[package]
+name = "bench-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Collects and reports durable-storage benchmark results"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+comfy-table.workspace = true
+kernel-bench-utils.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

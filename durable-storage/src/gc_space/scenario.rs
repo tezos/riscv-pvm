@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::io::BufWriter;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -31,6 +32,7 @@ use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 use super::measure::measure;
 use super::prune::prune_unreachable;
+use super::report::record;
 use super::report::report;
 use super::report::report_header;
 use super::report::report_prune;
@@ -98,6 +100,9 @@ pub struct SpaceConfig {
     /// Where the repository lives. A fresh temporary directory when absent, in which case nothing
     /// survives the run.
     pub repo_dir: Option<PathBuf>,
+
+    /// Write one JSON object per sample to this path.
+    pub json_out: Option<PathBuf>,
 
     /// After the last commit, delete every commit not reachable from it and measure again.
     ///
@@ -185,12 +190,19 @@ impl SpaceConfig {
         reset_to_base(&mut out, &repo, &repo_path, &base_commit)?;
 
         let mut samples = Vec::new();
+        let mut json = match &self.json_out {
+            Some(path) => Some(BufWriter::new(fs::File::create(path).with_context(
+                || format!("creating the JSON output file {}", path.display()),
+            )?)),
+            None => None,
+        };
 
         // The base state is sample zero, so the first measured commit has something to be a delta of.
         let (base, mut files) = measure(&repo, &repo_path, &base_commit, 0, Duration::ZERO, None)
             .context("measuring the base state")?;
         report_header(&mut out)?;
         report(&mut out, &base)?;
+        record(&mut json, &base)?;
         samples.push(base);
 
         let mut rng = StdRng::seed_from_u64(self.seed);
@@ -223,7 +235,12 @@ impl SpaceConfig {
             .with_context(|| format!("measuring commit {commit_index}"))?;
             files = current;
             report(&mut out, &sample)?;
+            record(&mut json, &sample)?;
             samples.push(sample);
+        }
+
+        if let Some(json) = &mut json {
+            json.flush().context("flushing the JSON output")?;
         }
 
         summarise(&mut out, &samples)?;
@@ -615,6 +632,7 @@ mod tests {
             sample_every: 1,
             seed: 0,
             repo_dir: Some(repo_dir.to_path_buf()),
+            json_out: None,
             simulate_dir_gc,
         }
     }
@@ -661,8 +679,21 @@ mod tests {
             .run()
             .expect("the run that records the base state should succeed");
 
-        restricted_config(tmp.path(), true)
+        // The second run also writes the samples out, so the JSON path is covered.
+        let json_out = tmp.path().join("samples.json");
+        let mut config = restricted_config(tmp.path(), true);
+        config.json_out = Some(json_out.clone());
+
+        config
             .run()
             .expect("the run that reuses the base state and collects should succeed");
+
+        let written =
+            std::fs::read_to_string(&json_out).expect("the samples file should be written");
+
+        assert!(
+            written.lines().count() > 1,
+            "every sample should be one line of JSON, got {written:?}"
+        );
     }
 }

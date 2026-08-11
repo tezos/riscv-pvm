@@ -9,6 +9,7 @@ members = [
   "tools/analyse-jit-functions",
   "tools/gen-etherlink-store-accesses",
   "tools/kernel-bench-utils",
+  "tools/bench-metrics",
   "test-utils",
 ]
 exclude = ["kernels"]
@@ -84,6 +85,9 @@ vm-fdt = "0.3.0"
 zerocopy = "0.8.50"
 zerocopy-derive = "0.8.27"
 rangemap = "1.7.1"
+
+[workspace.dependencies.kernel-bench-utils]
+path = "tools/kernel-bench-utils"
 
 [workspace.dependencies.tezos-smart-rollup-constants]
 git = "https://gitlab.com/tezos/tezos.git"
