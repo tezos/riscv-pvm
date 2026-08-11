@@ -31,21 +31,60 @@ pub async fn submit_kernel_tps_benchmark(
     transaction_kind: &str,
     mean_tps: f64,
 ) -> Result<(), Box<dyn Error>> {
-    let name = format!("ci.riscv.benchmark.{kernel_name}");
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)?
-        .as_secs();
+    submit_gauges(
+        &[Gauge {
+            name: format!("ci.riscv.benchmark.{kernel_name}"),
+            value: mean_tps,
+            tags: vec![transaction_kind.to_string()],
+            unit: format!("TPS ({transaction_kind})"),
+        }],
+        SystemTime::now(),
+    )
+    .await
+}
 
-    let benchmark_value = MetricPoint::new()
-        .timestamp(timestamp as i64)
-        .value(mean_tps);
+/// One gauge to record against a point in time.
+pub struct Gauge {
+    /// Metric name, by convention prefixed `ci.riscv.`.
+    ///
+    /// Keep the set of names small and stable: a name is a time series, and one that changes
+    /// between runs cannot be graphed or alerted on.
+    pub name: String,
 
-    let series = MetricSeries::new(name, vec![benchmark_value])
-        .type_(MetricIntakeType::GAUGE)
-        .tags(vec![transaction_kind.to_string()])
-        .unit(format!("TPS ({transaction_kind})"));
+    /// Value at this point in time.
+    pub value: f64,
 
-    let payload = MetricPayload::new(vec![series]);
+    /// Tags to record alongside, for splitting one metric by e.g. the shape it was measured at.
+    pub tags: Vec<String>,
+
+    /// Human-readable unit, shown on graphs.
+    pub unit: String,
+}
+
+/// Submit gauges to datadog, all stamped with the same time.
+///
+/// One request carries the whole batch, so a run's metrics land together and share a timestamp,
+/// which matters when they are graphed against each other.
+pub async fn submit_gauges(gauges: &[Gauge], at: SystemTime) -> Result<(), Box<dyn Error>> {
+    if gauges.is_empty() {
+        return Ok(());
+    }
+
+    let timestamp = at.duration_since(SystemTime::UNIX_EPOCH)?.as_secs() as i64;
+
+    let series = gauges
+        .iter()
+        .map(|gauge| {
+            let point = MetricPoint::new().timestamp(timestamp).value(gauge.value);
+
+            MetricSeries::new(gauge.name.clone(), vec![point])
+                .type_(MetricIntakeType::GAUGE)
+                .tags(gauge.tags.clone())
+                .unit(gauge.unit.clone())
+        })
+        .collect();
+
+    let payload = MetricPayload::new(series);
 
     let configuration = datadog::Configuration::new();
     let api = MetricsAPI::with_config(configuration);

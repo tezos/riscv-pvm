@@ -14,6 +14,7 @@ use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -44,11 +45,15 @@ pub(super) fn measure(
     commit_time: Duration,
     previous: Option<&FileSet>,
 ) -> Result<(Sample, FileSet)> {
+    let started = Instant::now();
+
     let database_commits = Reg::database_commits(repo, registry_commit)
         .context("reading the registry manifest being measured")?;
 
     let mut blob = BlobBreakdown::default();
+    let mut value_entries = 0;
     let mut value_stored_bytes = 0;
+    let mut sst_bytes = 0;
     let mut files: FileSet = HashMap::new();
 
     for (db_index, database_commit) in database_commits.iter().enumerate() {
@@ -65,7 +70,12 @@ pub(super) fn measure(
         let values = committed
             .value_totals()
             .map_err(|error| anyhow::anyhow!("scanning the value column family: {error}"))?;
+        value_entries += values.entries;
         value_stored_bytes += values.stored_bytes();
+
+        sst_bytes += committed
+            .sst_bytes()
+            .map_err(|error| anyhow::anyhow!("reading SST file sizes: {error}"))?;
 
         for file in committed
             .sst_files()
@@ -77,14 +87,19 @@ pub(super) fn measure(
 
     let sample = Sample {
         commit: commit_index,
+        registry_commit: registry_commit.hex_encode(),
         blob,
+        value_entries,
         value_stored_bytes,
+        sst_bytes,
         disk: disk_usage(repo_path).context("measuring repository disk usage")?,
+        disk_commits: commits_disk_usage(repo_path).context("measuring committed history usage")?,
         pinned: pinned_by_cf(repo_path).context("attributing pinned bytes to column families")?,
         sharing: previous.map(|previous| sharing_between(previous, &files)),
         levels: level_summary(&files),
         commit_dirs: count_commit_dirs(repo_path)?,
         commit_ms: commit_time.as_millis() as u64,
+        measure_ms: started.elapsed().as_millis() as u64,
     };
 
     Ok((sample, files))

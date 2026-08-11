@@ -10,10 +10,12 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
+
 use crate::persistence_layer::measurement::SstFile;
 
 /// Byte totals for one committed database.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct BlobBreakdown {
     /// Entries in the blob column family, live and dead together.
     pub entries: u64,
@@ -63,7 +65,7 @@ impl BlobBreakdown {
 /// corrections that pull in opposite directions: sharing takes bytes away, while rounding each file
 /// up to whole blocks puts them back. `linked_bytes` measures the same blocks as `unique_bytes` and
 /// differs only in counting them once per link, so their difference is the sharing on its own.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct DiskUsage {
     /// Sum of file lengths, counting hard-linked files once per link.
     pub apparent_bytes: u64,
@@ -93,7 +95,7 @@ impl DiskUsage {
 /// rewrites SSTs the history ends up pinning several versions of the same data. This is what that
 /// costs, attributed to the column family each file belongs to — which matters because moving the
 /// Merkle side into a shared store would remove the `blob` part from every commit at a stroke.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct PinnedBytes {
     /// Pinned bytes holding Merkle node bodies.
     pub blob: u64,
@@ -120,7 +122,7 @@ impl PinnedBytes {
 /// between the two commits, which the earlier checkpoint does not share and which therefore add to
 /// the repository. It should be close to the data a commit actually changed; anything much larger
 /// is compaction rewriting files that did not need to change.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct Sharing {
     /// Files present in both commits, so stored once.
     pub carried_files: u64,
@@ -158,7 +160,7 @@ impl Sharing {
 ///
 /// Included because the shape of the tree explains the sharing: if a database fits inside the base
 /// level, every compaction from level zero rewrites all of it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LevelSummary {
     /// LSM level.
     pub level: i32,
@@ -177,19 +179,34 @@ pub struct LevelSummary {
 pub(super) type FileSet = HashMap<(usize, String), SstFile>;
 
 /// One measurement of the repository, after a commit.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Sample {
     /// Index of the commit just made, counting from 1. Zero is the base state.
     pub commit: usize,
 
+    /// Hex-encoded registry commit measured.
+    pub registry_commit: String,
+
     /// Blob column family totals, summed over the registry's databases.
     pub blob: BlobBreakdown,
+
+    /// Value column family totals, summed over the registry's databases.
+    pub value_entries: u64,
 
     /// Bytes stored in the value column families, summed over the registry's databases.
     pub value_stored_bytes: u64,
 
+    /// Size of the SST files backing the measured commits, as RocksDB reports it.
+    pub sst_bytes: u64,
+
     /// Occupancy of the whole repository directory.
     pub disk: DiskUsage,
+
+    /// Occupancy of the committed history alone, excluding working databases.
+    ///
+    /// Separate from [`Sample::disk`] because this is the part a retention policy governs: a node
+    /// always has a working database, but how much committed history it keeps is a choice.
+    pub disk_commits: DiskUsage,
 
     /// What the committed history pins, attributed by column family.
     pub pinned: PinnedBytes,
@@ -205,4 +222,7 @@ pub struct Sample {
 
     /// How long the commit took.
     pub commit_ms: u64,
+
+    /// How long measuring took, which is dominated by the column family scans.
+    pub measure_ms: u64,
 }

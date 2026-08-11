@@ -6,18 +6,35 @@
 //!
 //! One line per sample while the run proceeds, then a summary of what the whole sequence showed.
 
+use std::fs;
 use std::io;
+use std::io::BufWriter;
 use std::io::Write;
+
+use anyhow::Context;
+use anyhow::Result;
 
 use super::prune::PruneOutcome;
 use super::sample::Sample;
 use super::sample::Sharing;
 
+/// Write a sample to the JSON output, if there is one.
+pub(super) fn record(json: &mut Option<BufWriter<fs::File>>, sample: &Sample) -> Result<()> {
+    let Some(json) = json else {
+        return Ok(());
+    };
+
+    let line = serde_json::to_string(sample).context("encoding a sample")?;
+    writeln!(json, "{line}").context("writing a sample")?;
+
+    Ok(())
+}
+
 pub(super) fn report_header(out: &mut impl Write) -> io::Result<()> {
     writeln!(out)?;
     writeln!(
         out,
-        "{:>7}  {:>10}  {:>10}  {:>10}  {:>7}  {:>10}  {:>10}  {:>9}  {:>10}  {:>7}",
+        "{:>7}  {:>10}  {:>10}  {:>10}  {:>7}  {:>10}  {:>10}  {:>9}  {:>11}  {:>10}  {:>8}  {:>11}",
         "commit",
         "blob MiB",
         "live MiB",
@@ -26,27 +43,39 @@ pub(super) fn report_header(out: &mut impl Write) -> io::Result<()> {
         "value MiB",
         "disk MiB",
         "commit ms",
+        "commits MiB",
         "new MiB",
-        "shared %"
+        "shared %",
+        "rewrote MiB"
     )?;
 
     Ok(())
 }
 
 pub(super) fn report(out: &mut impl Write, sample: &Sample) -> io::Result<()> {
-    // The last two columns are the sharing question: how many bytes this commit added that the
-    // previous one could not share, and what fraction it did manage to reuse.
-    let (new, shared) = match &sample.sharing {
+    // The last three columns are the sharing question: how many bytes this commit added that the
+    // previous one could not share, what fraction it did manage to reuse, and how much of what the
+    // previous checkpoint pinned this one no longer references. That last figure is only non-zero
+    // when a compaction ran, and it is what explains a `shared %` that has collapsed: the content
+    // is the same, but every file holding it has a new name, so none of it can be shared.
+    let (new, shared, rewrote) = match &sample.sharing {
         Some(sharing) => (
             format!("{:.1}", mib(sharing.new_bytes)),
             format!("{:.1}%", sharing.carried_fraction() * 100.0),
+            format!("{:.1}", mib(sharing.dropped_bytes)),
         ),
-        None => ("-".to_owned(), "-".to_owned()),
+        None => ("-".to_owned(), "-".to_owned(), "-".to_owned()),
     };
 
+    // `disk` is the whole repository, the live databases included, so a compaction shows there as
+    // soon as it lands. `commits` is the retained history alone, which is the same population the
+    // sharing columns compare: without it a row can show the repository growing by fifty megabytes
+    // while claiming its checkpoint shared almost everything, because the bytes are not in a
+    // checkpoint yet.
     writeln!(
         out,
-        "{:>7}  {:>10.1}  {:>10.1}  {:>10.1}  {:>6.1}%  {:>10.1}  {:>10.1}  {:>9}  {:>10}  {:>7}",
+        "{:>7}  {:>10.1}  {:>10.1}  {:>10.1}  {:>6.1}%  {:>10.1}  {:>10.1}  {:>9}  {:>11.1}  \
+         {:>10}  {:>8}  {:>11}",
         sample.commit,
         mib(sample.blob.stored_bytes),
         mib(sample.blob.live_bytes),
@@ -55,8 +84,10 @@ pub(super) fn report(out: &mut impl Write, sample: &Sample) -> io::Result<()> {
         mib(sample.value_stored_bytes),
         mib(sample.disk.unique_bytes),
         sample.commit_ms,
+        mib(sample.disk_commits.unique_bytes),
         new,
         shared,
+        rewrote,
     )?;
 
     Ok(())
@@ -145,17 +176,43 @@ pub(super) fn summarise(out: &mut impl Write, samples: &[Sample]) -> io::Result<
         if !shared.is_empty() {
             let new_bytes: u64 = shared.iter().map(|s| s.new_bytes).sum();
             let new_files: u64 = shared.iter().map(|s| s.new_files).sum();
-            let mean_carried =
-                shared.iter().map(|s| s.carried_fraction()).sum::<f64>() / shared.len() as f64;
+            let overall = pooled_sharing(shared.iter().copied());
+            let quiet: Vec<&Sharing> = shared
+                .iter()
+                .copied()
+                .filter(|s| s.dropped_files == 0)
+                .collect();
 
             writeln!(
                 out,
-                "  sharing: each measured commit reused {:.1}% of the previous commit's bytes, \
-                 adding {:.1} MiB in {} new file(s) on average",
-                mean_carried * 100.0,
+                "  sharing: {:.1}% of the bytes checkpoints pinned were already on disk \
+                 ({:.1} MiB of {:.1} MiB), adding {:.1} MiB in {} new file(s) per commit",
+                overall.fraction() * 100.0,
+                mib(overall.carried),
+                mib(overall.total()),
                 mib(new_bytes) / shared.len() as f64,
                 new_files / shared.len() as u64,
             )?;
+
+            // What a compaction costs, as the gap between the two. Reporting only the figure that
+            // includes the rewrites hides how much sharing there is to lose; reporting only the
+            // one that excludes them hides that it was lost.
+            if quiet.len() < shared.len() && !quiet.is_empty() {
+                let steady = pooled_sharing(quiet.iter().copied());
+                let dropped: u64 = shared.iter().map(|s| s.dropped_bytes).sum();
+
+                writeln!(
+                    out,
+                    "  {} of {} measured commit(s) followed a compaction; without them sharing is \
+                     {:.1}%, so compaction costs {:.1} points of it, rewriting {:.1} MiB the \
+                     earlier checkpoints still pin",
+                    shared.len() - quiet.len(),
+                    shared.len(),
+                    steady.fraction() * 100.0,
+                    (steady.fraction() - overall.fraction()) * 100.0,
+                    mib(dropped),
+                )?;
+            }
         }
 
         writeln!(out, "  levels at the last commit:")?;
@@ -233,6 +290,44 @@ pub(super) fn report_prune(
     )?;
 
     Ok(())
+}
+
+/// Carried and new bytes summed over a set of commits, for one sharing figure over all of them.
+#[derive(Default)]
+struct PooledSharing {
+    carried: u64,
+    new: u64,
+}
+
+impl PooledSharing {
+    fn total(&self) -> u64 {
+        self.carried + self.new
+    }
+
+    fn fraction(&self) -> f64 {
+        if self.total() == 0 {
+            return 0.0;
+        }
+
+        self.carried as f64 / self.total() as f64
+    }
+}
+
+/// Sum the commits' bytes and take one ratio, rather than averaging their per-commit ratios.
+///
+/// An average of ratios weights a commit that pinned forty megabytes the same as one that pinned
+/// eighty. Summing first weights each commit by what it actually pinned, which is what makes the
+/// figure comparable between runs of different lengths — and it is the same statistic whether or
+/// not the compaction commits are included, so the two can be subtracted.
+fn pooled_sharing<'a>(sharing: impl Iterator<Item = &'a Sharing>) -> PooledSharing {
+    let mut pooled = PooledSharing::default();
+
+    for one in sharing {
+        pooled.carried += one.carried_bytes;
+        pooled.new += one.new_bytes;
+    }
+
+    pooled
 }
 
 fn mib(bytes: u64) -> f64 {
