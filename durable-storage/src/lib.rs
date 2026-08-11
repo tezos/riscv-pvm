@@ -36,6 +36,7 @@ pub mod errors;
 // when `rocksdb` is enabled.
 #[cfg(rocksdb_test_utils)]
 pub mod gc_space;
+pub mod journal;
 pub mod key;
 // The long-running test exercises the persistence backend directly, so it is
 // only available when `rocksdb` is enabled.
