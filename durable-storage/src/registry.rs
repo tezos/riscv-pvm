@@ -1312,6 +1312,28 @@ pub(super) mod tests {
         );
     });
 
+    kv_test!(test_copied_database_commits_shared_nodes_into_its_own_store, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo.clone());
+
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"alpha");
+
+        // Copying hands the destination a copy of the source's store and the *same* in-memory
+        // nodes, so both databases now owe those nodes a write. Tracking "already stored" as a
+        // bare flag on the node would let the first commit satisfy the obligation and the second
+        // skip it, leaving a commit that refers to nodes which never reached its own store - which
+        // only shows up on checkout, once the in-memory nodes are gone.
+        registry.copy_database(0, 1).expect("Copy should succeed");
+
+        let root_commit = registry.commit().expect("Commit should succeed");
+        let checked_out = Registry::<KV, Normal>::checkout(repo, root_commit)
+            .expect("Checkout should succeed");
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        checked_out.databases[0].assert_database_value(&key, b"alpha");
+        checked_out.databases[1].assert_database_value(&key, b"alpha");
+    });
+
     // Not `kv_test!`s: the in-memory backend copies a commit into memory either way, so it has no
     // read-only store.
     #[cfg(rocksdb)]
