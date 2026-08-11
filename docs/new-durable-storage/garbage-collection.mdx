@@ -100,17 +100,23 @@ Without this, committing rewrote every node resolved in memory, changed or not �
 A checkpoint is created with `Checkpoint::create_checkpoint`, which flushes the memtables of both column families first — `rust-rocksdb` passes a `log_size_for_flush` of zero, which RocksDB defines as *always flush*.
 So every commit produces one new level-zero file per column family, whatever it holds.
 
-Level-zero compaction triggers on the *number* of files, four by default, so it runs every four commits however little each commit wrote.
+Level-zero compaction triggers on the *number* of files, so it runs however little each commit wrote.
 Keys are spread by hash, so a level-zero file spans the whole key space and overlaps everything below it.
 Each compaction therefore rewrites the entire base level into new files, and every checkpoint taken before it stops sharing them.
 
 <Warning>
 Writing less per commit does not reduce this.
 The trigger counts files, and a forced flush produces one per commit regardless of what it holds, so compaction runs on a cadence set by how often you commit rather than by how much you write.
-Reducing it means flushing less often, raising the trigger, or not compacting the working database automatically at all — and each of those leaves more files for a lookup to search, so it needs bloom filters to pay for itself.
 </Warning>
 
-This is now the whole of the gap between what a commit changes and what retaining it costs.
+The trigger is therefore set to twenty rather than RocksDB's default of four, which makes that cadence five times coarser and cuts the cost of retaining a commit by most of what compaction was adding to it.
+
+Both column families also carry whole-key bloom filters.
+A lookup is by whole key in both — blobs by content hash, values by their key — so a filter lets a lookup skip a file outright, where otherwise it consults the index of every file whose range covers the key, which for hash-spread keys is most of them.
+Filters matter more as level zero holds more files, but the coarser trigger does not in fact cost reads: compacting often does not keep level zero small, because each compaction rewrites the whole base level, and flushes accumulate behind it while it runs.
+
+What remains of the gap is the flush.
+A commit still forces a level-zero file per column family whatever it holds, so cadence still drives compaction — five times less often, but by the same mechanism.
 
 ## Planned mechanism
 
