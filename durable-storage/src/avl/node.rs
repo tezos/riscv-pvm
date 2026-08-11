@@ -7,6 +7,8 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -43,6 +45,7 @@ use crate::key::Key;
 use crate::storage::Loadable;
 use crate::storage::ReadableKeyValueStore;
 use crate::storage::Storable;
+use crate::storage::StoreId;
 use crate::storage::StoreOptions;
 use crate::storage::WriteableKeyValueStore;
 
@@ -58,6 +61,61 @@ struct StoredNode {
     data: Hash,
     left: Hash,
     right: Hash,
+}
+
+/// Records the store a node's body has already been written to, so that committing can skip it.
+///
+/// [`Storable::store`] takes `&self`, so the memo is kept behind interior mutability, in the same
+/// spirit as the hash cache on [`Node`].
+///
+/// It records *which* store rather than a bare "already stored" flag because one tree can be
+/// shared between stores: [`crate::registry::Registry::copy_database`] hands the destination a
+/// copy of the source's store and the same in-memory nodes. A node still owing a copy at that
+/// moment owes it to both, and a flag would let the first commit satisfy the obligation and the
+/// second skip it - leaving a commit that refers to nodes which never reached its store.
+///
+/// The low bit records whether that write also included the node's value data, so a
+/// [`StoreOptions::with_node_data`] commit is never skipped on the strength of a
+/// [`StoreOptions::without_node_data`] one that came before it.
+#[derive(Debug, Default)]
+struct StoredIn(AtomicU64);
+
+impl StoredIn {
+    /// The memo of a node that is not known to be in any store.
+    ///
+    /// Distinguishable from a real store because [`StoreId::next`] hands out ids from one.
+    const NOT_STORED: u64 = StoreId::NONE.raw();
+
+    /// Whether the body is already in `store`, with the value data too if `node_data` needs it.
+    fn covers(&self, store: StoreId, node_data: bool) -> bool {
+        let memo = self.0.load(AtomicOrdering::Relaxed);
+        if memo == Self::NOT_STORED {
+            return false;
+        }
+
+        StoreId::from(memo >> 1) == store && (!node_data || memo & 1 == 1)
+    }
+
+    /// Record that the body - and, if `node_data`, the value data - is now in `store`.
+    fn record(&self, store: StoreId, node_data: bool) {
+        self.0.store(
+            (store.raw() << 1) | u64::from(node_data),
+            AtomicOrdering::Relaxed,
+        );
+    }
+
+    /// Forget where the body was written, because it no longer describes this node.
+    fn clear(&self) {
+        self.0.store(Self::NOT_STORED, AtomicOrdering::Relaxed);
+    }
+}
+
+impl Clone for StoredIn {
+    /// A clone holds the same content as the original, so it is in whichever store the original
+    /// had reached.
+    fn clone(&self) -> Self {
+        Self(AtomicU64::new(self.0.load(AtomicOrdering::Relaxed)))
+    }
 }
 
 /// A node that supports rebalancing and Merklisation.
@@ -78,6 +136,12 @@ pub struct Node<TreeId, DataId, M: Mode> {
     ///
     /// An uninitialised hash is a hash that has not been set or has been dirtied.
     hash: OnceLock<Hash>,
+
+    /// Which store this node's body has already been written to, if any.
+    ///
+    /// Cleared by [`Node::invalidate_hash`], so it is dropped by exactly the mutations that
+    /// change what this node hashes to.
+    stored_in: StoredIn,
 }
 
 impl Node<LazyTreeId, LazyDataId, Normal> {
@@ -99,6 +163,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
             left: self.left.into_proof(),
             right: self.right.into_proof(),
             hash: self.hash.clone(),
+            stored_in: StoredIn::default(),
         })
     }
 
@@ -117,6 +182,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
             left,
             right,
             hash: OnceLock::new(),
+            stored_in: StoredIn::default(),
         }
     }
 
@@ -131,8 +197,12 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
 
 impl<TreeId, DataId, M: Mode> Node<TreeId, DataId, M> {
     /// Mark the hash of this node as dirty.
+    ///
+    /// Also forgets which store the body reached: the node no longer hashes to what was written
+    /// there, so that copy does not describe it any more.
     fn invalidate_hash(&mut self) {
         self.hash = OnceLock::new();
+        self.stored_in.clear();
     }
 
     /// Direct access to the left child identifier.
@@ -229,6 +299,7 @@ impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
             left: TreeId::default(),
             right: TreeId::default(),
             hash: OnceLock::new(),
+            stored_in: StoredIn::default(),
         }
     }
 
@@ -255,6 +326,7 @@ impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
             left,
             right,
             hash: Default::default(),
+            stored_in: StoredIn::default(),
         };
 
         Ok((ctx, node))
@@ -289,6 +361,8 @@ impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
     /// A mutable reference to the difference in heights between child branches.
     #[inline]
     pub(super) fn balance_factor_mut(&mut self) -> &mut i8 {
+        self.invalidate_hash();
+
         &mut self.balance_factor
     }
 
@@ -896,6 +970,15 @@ where
         store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
+        // Nothing to write if this node is already in this store, and nothing below it either.
+        // Nodes are content-addressed: changing a descendant changes every hash above it, so an
+        // unchanged node cannot have a changed descendant. Skipping the body therefore skips the
+        // whole subtree, which is what keeps a commit to the size of what it changed.
+        let store_id = store.store_id();
+        if self.stored_in.covers(store_id, options.node_data()) {
+            return Ok(());
+        }
+
         // The stored representation is more compact. We don't include the `data` field, as that
         // should be written to the KV store separately. `left`/`right` are the hashes of the
         // child *trees* (the same values folded into this node's hash).
@@ -923,6 +1006,10 @@ where
 
         self.left.store(store, options)?;
         self.right.store(store, options)?;
+
+        // Recorded last: until the children are down, a later commit skipping this subtree would
+        // skip nodes that never reached the store.
+        self.stored_in.record(store_id, options.node_data());
 
         Ok(())
     }
@@ -998,6 +1085,12 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
         let left = TreeId::load(left, store)?;
         let right = TreeId::load(right, store)?;
 
+        // This node was just read out of `store`, so its body is there and so is its value data -
+        // whether the commit that wrote the tree carried it or the database wrote it directly.
+        // Recording that is what stops a checked-out tree from rewriting every node it touches.
+        let stored_in = StoredIn::default();
+        stored_in.record(store.store_id(), true);
+
         Ok(Self {
             balance_factor: Atom::new(balance_factor),
             key,
@@ -1005,6 +1098,7 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
             left,
             right,
             hash: OnceLock::new(),
+            stored_in,
         })
     }
 }

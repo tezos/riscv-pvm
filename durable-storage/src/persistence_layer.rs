@@ -49,6 +49,7 @@ use crate::repo::DirectoryManager;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::ReadOnlyKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
+use crate::storage::StoreId;
 use crate::storage::WriteableKeyValueStore;
 
 /// The name of the column family used for storing blob-keyed data.
@@ -391,6 +392,9 @@ pub struct PersistenceLayer {
     /// We need to own this in order to keep alive the temporary directory for the lifetime of the
     /// persistence layer.
     _tempdir: TempDir,
+
+    /// Distinguishes this store from every other, including checkpoints taken of it.
+    store_id: StoreId,
 }
 
 impl PersistenceLayer {
@@ -421,6 +425,7 @@ impl PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(temp_db),
             _tempdir: tempdir,
+            store_id: StoreId::next(),
         })
     }
 
@@ -431,6 +436,10 @@ impl PersistenceLayer {
 
 impl ReadableKeyValueStore for PersistenceLayer {
     type Repo = DirectoryManager;
+
+    fn store_id(&self) -> StoreId {
+        self.store_id
+    }
 
     type Merkle = MerkleWorker<Self>;
 
@@ -453,12 +462,18 @@ pub struct ReadOnlyPersistenceLayer {
     /// Unlike [`PersistenceLayer`], no manual-drop is needed: dropping this closes the handle
     /// and there is nothing to destroy afterwards.
     db_instance: rocksdb::DB,
+
+    /// Distinguishes this view from every other store.
+    store_id: StoreId,
 }
 
 impl ReadableKeyValueStore for ReadOnlyPersistenceLayer {
     type Repo = DirectoryManager;
 
     type Merkle = CommittedRoot;
+    fn store_id(&self) -> StoreId {
+        self.store_id
+    }
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         blob_get_from(&self.db_instance, key.as_ref())
@@ -486,6 +501,7 @@ impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
 
         Ok(Self {
             db_instance: open_committed_read_only(commit_path)?,
+            store_id: StoreId::next(),
         })
     }
 
@@ -515,6 +531,7 @@ impl WriteableKeyValueStore for PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(db),
             _tempdir: tempdir,
+            store_id: StoreId::next(),
         })
     }
 
@@ -741,6 +758,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(database),
             _tempdir: working_path,
+            store_id: StoreId::next(),
         })
     }
 

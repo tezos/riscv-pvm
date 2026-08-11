@@ -22,6 +22,52 @@ use crate::merkle_worker::CommittedRoot;
 use crate::merkle_worker::MerkleHandle;
 use crate::merkle_worker::MerkleWorker;
 
+/// Identifies one key-value store, so that data can be known to be in *this* store rather than
+/// merely in some store.
+///
+/// A tree is shared between stores by cloning - [`crate::registry::Registry::copy_database`] hands
+/// the destination a copy of the source's store and the same in-memory nodes. Whether a node still
+/// needs storing therefore cannot be a single flag on the node: the same node owes a copy to each
+/// store, and one store satisfying its obligation says nothing about the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreId(u64);
+
+impl StoreId {
+    /// The id no store has, meaning "not in any store".
+    pub const NONE: Self = Self(0);
+
+    /// Allocate an id no other store holds.
+    pub fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+
+    /// The raw value, for recording compactly.
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for StoreId {
+    fn from(raw: u64) -> Self {
+        Self(raw)
+    }
+}
+
+/// A freshly allocated id, not [`StoreId::NONE`].
+///
+/// Reached through `#[derive(Default)]` on stores that hold a [`StoreId`], such as
+/// [`in_memory::InMemoryKeyValueStore`] - a defaulted store is empty and genuinely its own, so a
+/// fresh identity is the right answer rather than [`StoreId::NONE`]. It is also the safe direction:
+/// a store that wrongly believed it shared an identity would skip storing data it does not have,
+/// where one with an identity of its own merely stores something again.
+impl Default for StoreId {
+    fn default() -> Self {
+        Self::next()
+    }
+}
+
 /// Types that implement this trait can serve reads from a key-value store.
 ///
 /// This is the half of the store interface that requires no ability to modify the stored data.
@@ -31,6 +77,12 @@ use crate::merkle_worker::MerkleWorker;
 pub trait ReadableKeyValueStore: Sized {
     /// Type of repository required to initialise a key value store.
     type Repo;
+
+    /// This store's identity, distinct from every other live store including copies of itself.
+    ///
+    /// A copy is a distinct store: it holds what the original held when it was copied, but nothing
+    /// written to the original afterwards. See [`StoreId`].
+    fn store_id(&self) -> StoreId;
 
     /// How a Normal-mode database over this store tracks its Merkle root.
     ///

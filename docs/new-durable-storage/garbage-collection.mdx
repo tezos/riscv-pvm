@@ -73,29 +73,27 @@ The only reachability logic that exists is `long_test/registry/gc.rs`, which the
 ## Why retaining a commit costs more than its changes
 
 Checkpoints hard-link the files that were live when they were taken, so retaining a commit should cost only what that commit changed: the next checkpoint links the same files for everything untouched.
-Measured, it costs far more than that, and the reason is not the design but two things about how commits are written.
+It costs more than that, and the reason is not the design but how commits reach the store.
 
 Sharing is not all-or-nothing.
-On an ordinary commit, consecutive checkpoints share 90-98% of their bytes, exactly as the layout intends.
-The cost comes from two effects that break that sharing, and they are independent of each other.
+On an ordinary commit, consecutive checkpoints share around 98% of their bytes, which is what the layout intends.
+What breaks it now is compaction, and only compaction — a second cause, commits rewriting nodes that had not changed, has been fixed.
 
-### Commits rewrite every resolved node
+### Commits store only the nodes they changed
 
-`Storable for Node` writes a node's body and then recurses into both children unconditionally.
-The only thing that stops the recursion is a child that has never been resolved into memory: `LazyNodeId::store` returns early when its node is absent, assuming it was persisted before.
+A node records which store it is already in.
+Committing skips such a node and, with it, the whole subtree beneath: nodes are content-addressed, so changing a descendant changes every hash above it, and an unchanged node cannot have a changed descendant.
 
-Nothing tracks whether a resolved node is *dirty*, so committing rewrites every node that has been resolved, changed or not.
-The bodies are byte-identical to what is already stored, but RocksDB has no way to know that: each one is a fresh write that lands in the memtable and is flushed into new files.
+The record is dropped by the same thing that invalidates a node's cached hash, so it survives exactly the mutations that leave the stored copy still correct.
+It names the store rather than being a plain flag, because a tree can be shared between stores: copying a database hands the destination a copy of the source's store and the same in-memory nodes, so a node not yet written owes a copy to each of them.
+A flag would let the first commit satisfy that obligation and the second skip it, leaving a commit that refers to nodes which never reached its store.
 
-Two consequences follow.
-A state that has just been built has its whole tree resolved, so every commit rewrites the whole tree.
-A state that was checked out starts with nothing resolved, but the resolved set only grows — modifying a key resolves its whole path to the root, and nothing ever un-resolves it — so the volume a commit rewrites climbs with every commit since the checkout, converging on the whole tree.
+One cost remains from this: a node written before its tree was shared is not recognised as being in the store that was copied, even though the copy holds it, so it is written again once.
+Distinguishing writes made before the two stores diverged from writes made after would need more than a single identity.
 
-Neither consequence applies to committing the same state twice: a commit id is the hash of the state, so the second call finds the commit already published and takes no checkpoint.
-It still rewrites the resolved tree into the memtable, but it pins nothing new.
+Committing the same state twice now does nothing at either end: the nodes are already recorded as being in this store, and a commit id is the hash of the state, so the publish step finds it already published and takes no checkpoint.
 
-Checking out lazily therefore delays this rather than avoiding it.
-Keeping the rewrite proportional to what changed needs dirty tracking.
+Without this, committing rewrote every node resolved in memory, changed or not — the whole tree for a state just built, and a growing share of it for a state checked out, since the resolved set only ever grows.
 
 ### Compaction rewrites whole levels
 
@@ -107,10 +105,12 @@ Keys are spread by hash, so a level-zero file spans the whole key space and over
 Each compaction therefore rewrites the entire base level into new files, and every checkpoint taken before it stops sharing them.
 
 <Warning>
-Dirty tracking does not fix this second effect, and neither does writing less per commit.
-The trigger counts files, and a forced flush produces a file per commit regardless of size.
-Reducing it means flushing less often, raising the trigger, or not compacting the working database automatically at all.
+Writing less per commit does not reduce this.
+The trigger counts files, and a forced flush produces one per commit regardless of what it holds, so compaction runs on a cadence set by how often you commit rather than by how much you write.
+Reducing it means flushing less often, raising the trigger, or not compacting the working database automatically at all — and each of those leaves more files for a lookup to search, so it needs bloom filters to pay for itself.
 </Warning>
+
+This is now the whole of the gap between what a commit changes and what retaining it costs.
 
 ## Planned mechanism
 
