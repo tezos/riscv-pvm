@@ -57,6 +57,21 @@ struct RegistryManifest {
     database_hashes: Vec<CommitId>,
 }
 
+/// The database commits referenced by the registry committed at `commit_id`.
+///
+/// Reads the manifest through the repository alone. Collection needs this to decide which database
+/// commits a retained registry commit still holds alive, and has no key-value store to reach it
+/// through.
+pub(crate) fn database_commits<Repo: RegistryRepo>(
+    repo: &Repo,
+    commit_id: &CommitId,
+) -> Result<Vec<CommitId>, OperationalError> {
+    let manifest: RegistryManifest =
+        deserialise(&repo.read_registry_commit(commit_id)?).map_err(OperationalError::from)?;
+
+    Ok(manifest.database_hashes)
+}
+
 /// Registry that owns a set of databases and the repository used to manage
 /// registry state.
 pub struct Registry<KV: ReadableKeyValueStore, M: Mode> {
@@ -187,15 +202,6 @@ where
         let databases = Self::checkout_databases(&runtime, &repo, &manifest.database_hashes)?;
 
         Self::from_restored_databases(repo, runtime, databases, commit_id)
-    }
-
-    /// The database commit ids referenced by the registry committed at `commit_id`.
-    #[cfg(rocksdb_test_utils)]
-    pub(crate) fn database_commits(
-        repo: &KV::Repo,
-        commit_id: &CommitId,
-    ) -> Result<Vec<CommitId>, OperationalError> {
-        Ok(Self::read_checkout_manifest(repo, commit_id)?.database_hashes)
     }
 
     fn checkout_databases(

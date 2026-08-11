@@ -75,11 +75,11 @@ struct Cli {
     #[arg(long)]
     json_out: Option<PathBuf>,
 
-    /// After the last commit, delete every commit not reachable from it and measure again.
+    /// After the last commit, collect at it and measure again.
     ///
     /// Shows what collecting at directory granularity reclaims, and what dead node data survives it.
     #[arg(long)]
-    simulate_dir_gc: bool,
+    collect: bool,
 }
 
 fn main() -> Result<()> {
@@ -114,7 +114,7 @@ fn main() -> Result<()> {
         seed: cli.seed,
         repo_dir: cli.repo_dir,
         json_out: cli.json_out,
-        simulate_dir_gc: cli.simulate_dir_gc,
+        collect: cli.collect,
     }
     .run()
 }

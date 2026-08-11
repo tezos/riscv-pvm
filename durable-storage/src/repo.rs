@@ -4,6 +4,7 @@
 
 //! Repository management for the Durable Storage
 
+use std::collections::HashSet;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
@@ -11,6 +12,7 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
+use octez_riscv_data::hash::Hash;
 use tempfile::TempDir;
 
 use crate::commit::CommitId;
@@ -174,6 +176,36 @@ pub trait RegistryRepo: Clone {
 
     /// Every commit recorded by [`RegistryRepo::record_commit`], in the order they were recorded.
     fn commit_journal(&self) -> Result<Vec<JournalEntry>, OperationalError>;
+
+    /// Keep only the journal entries whose root is in `retained`, dropping the rest.
+    ///
+    /// Replaces the journal in one step, so an interrupted prune leaves either the old journal or
+    /// the new one.
+    fn prune_journal(&self, retained: &HashSet<CommitId>) -> Result<(), OperationalError>;
+
+    /// Every registry commit the repository currently holds a manifest for.
+    ///
+    /// Unordered. Collection enumerates what is present rather than what the journal mentions, so
+    /// that a manifest left behind by an interrupted commit or an interrupted collection is still
+    /// found.
+    fn registry_commits(&self) -> Result<Vec<CommitId>, OperationalError>;
+
+    /// Every database commit the repository currently holds.
+    ///
+    /// Unordered, and enumerated from what is present for the same reason as
+    /// [`RegistryRepo::registry_commits`].
+    fn database_commits(&self) -> Result<Vec<CommitId>, OperationalError>;
+
+    /// Remove the manifest for the registry commit `id`.
+    ///
+    /// Removing one that is already gone succeeds, so collection can be repeated after an
+    /// interruption.
+    fn remove_registry_commit(&self, id: &CommitId) -> Result<(), OperationalError>;
+
+    /// Remove the database commit `id`.
+    ///
+    /// Idempotent, for the same reason as [`RegistryRepo::remove_registry_commit`].
+    fn remove_database_commit(&self, id: &CommitId) -> Result<(), OperationalError>;
 }
 
 impl RegistryRepo for DirectoryManager {
@@ -224,6 +256,79 @@ impl RegistryRepo for DirectoryManager {
             Err(error) => Err(OperationalError::FileReadFailed { error }),
         }
     }
+
+    fn prune_journal(&self, retained: &HashSet<CommitId>) -> Result<(), OperationalError> {
+        let kept: Vec<u8> = self
+            .commit_journal()?
+            .into_iter()
+            .filter(|entry| retained.contains(&entry.root))
+            .flat_map(|entry| entry.encode())
+            .collect();
+
+        // Written beside the journal and renamed over it, so the replacement is atomic: a crash
+        // leaves either the journal as it was or the pruned one, never a half-written mixture.
+        let pending = self.journal_file().with_extension("pending");
+        std::fs::write(&pending, &kept)
+            .map_err(|error| OperationalError::FileWriteFailed { error })?;
+        std::fs::rename(&pending, self.journal_file())
+            .map_err(|error| OperationalError::FileWriteFailed { error })
+    }
+
+    fn registry_commits(&self) -> Result<Vec<CommitId>, OperationalError> {
+        commit_ids_in(&self.registry_commits_dir)
+    }
+
+    fn database_commits(&self) -> Result<Vec<CommitId>, OperationalError> {
+        commit_ids_in(&self.database_commits_dir)
+    }
+
+    fn remove_registry_commit(&self, id: &CommitId) -> Result<(), OperationalError> {
+        match std::fs::remove_file(self.registry_commit_file(id)) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(OperationalError::FileWriteFailed { error }),
+        }
+    }
+
+    fn remove_database_commit(&self, id: &CommitId) -> Result<(), OperationalError> {
+        let dir = self.database_commit_dir(id);
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(OperationalError::DirRemovalFailed { path: dir, error }),
+        }
+    }
+}
+
+/// The commit ids named by the entries of `dir`.
+///
+/// Entries whose name is not a commit id are left alone: the durable storage does not put anything
+/// else in these directories, so one that appears belongs to something else and is not ours to
+/// interpret or remove.
+fn commit_ids_in(dir: &Path) -> Result<Vec<CommitId>, OperationalError> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|error| OperationalError::FileReadFailed { error })?;
+
+    let mut ids = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| OperationalError::FileReadFailed { error })?;
+
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+
+        let Ok(bytes) = hex::decode(&name) else {
+            continue;
+        };
+
+        let Ok(digest) = <[u8; Hash::DIGEST_SIZE]>::try_from(bytes.as_slice()) else {
+            continue;
+        };
+
+        ids.push(CommitId::from(Hash::from(digest)));
+    }
+
+    Ok(ids)
 }
 
 #[cfg(test)]

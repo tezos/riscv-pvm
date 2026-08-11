@@ -261,7 +261,7 @@ pub(super) fn report_prune(
     writeln!(out)?;
     writeln!(
         out,
-        "simulated directory-level collection: removed {} database commit(s) and {} manifest(s)",
+        "directory-level collection: removed {} database commit(s) and {} manifest(s)",
         outcome.databases_removed, outcome.registries_removed,
     )?;
     writeln!(

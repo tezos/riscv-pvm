@@ -29,6 +29,7 @@
 //!   operations on disk.
 
 pub mod avl;
+pub mod collect;
 pub mod commit;
 pub mod database;
 pub mod errors;

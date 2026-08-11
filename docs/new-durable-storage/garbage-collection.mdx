@@ -3,13 +3,13 @@ title: "Garbage collection"
 description: "What the durable storage reclaims, what it does not, and why values and Merkle nodes need different mechanisms"
 ---
 
-The durable storage keeps every state it has ever committed.
-Nothing removes a commit, so disk use only ever grows.
+The durable storage reclaims the values a commit holds once no retained commit needs them, and none of what its Merkle nodes hold.
+Disk use therefore still grows without bound, but only in one of the two halves of a commit.
 
-A rollup node cannot run that way.
 `octez-smart-rollup-node` expects its context to drop states older than a chosen one, so that a node keeps only the history it still needs.
+That is the operation this page describes, and the half of it that is missing.
 
-This page describes how commits occupy disk today, which parts of them the storage already reclaims, and which parts it cannot reclaim at all.
+This page describes how commits occupy disk, which parts of them the storage reclaims, and which parts it cannot reclaim at all.
 The two halves of a commit behave completely differently, and the difference is what the garbage collection design follows from.
 
 ## How commits occupy disk
@@ -65,10 +65,43 @@ No amount of commit deletion reclaims it, because the dead nodes sit in files th
 Reclaiming them requires deleting the node keys themselves and letting compaction rewrite the files.
 </Warning>
 
-### There is no entry point
+### Collecting at a root
 
-Nothing in the crate exposes a garbage collection operation.
-The only reachability logic that exists is `long_test/registry/gc.rs`, which the long-running test uses to bound its own disk use: it computes the database commits reachable from the registry manifests it retains, and removes the rest.
+A *root* here is a registry commit id: the hash of an entire registry state, and so the root of the Merkle tree over it.
+
+Collecting at a root drops the registry commits recorded before it, together with the database commits that none of the surviving registry commits still reference.
+
+A repository records the order in which commits were made, as a sequence number per root, in a journal beside the manifests.
+Collection retains by that order: every root recorded at or after the target survives, and the rest are dropped.
+Retaining by insertion order rather than by ancestry keeps states whose provenance is unclear, such as one committed without a parent.
+Where a root has been committed more than once, the storage keeps its highest position, so re-committing a state can only extend how long it is retained — which is also how you pin a root you want kept.
+
+```text
+                                   floor: the target's position
+                                   |
+  position     1      4      7     |    10      12      15
+  root        r1     r2     r3     |     T      r5      r6
+              +------ dropped -----+     +------ retained ------+
+```
+
+A commit id stays the registry root hash, so committing the same state twice remains idempotent.
+Sequence numbers are recorded beside a root, not folded into its identity.
+
+Database commits are content-addressed and therefore shared: unrelated registry commits name the same database commit whenever their states agree.
+Removal follows reachability rather than recorded order, so a database commit survives for as long as any retained registry commit still names it.
+
+Collection is safe to interrupt and repeat.
+It prunes the journal to the retained roots, removes the manifests of the registry commits it dropped, then removes the database commits no retained manifest reaches.
+Everything retained is intact at each point in between, and each step after the first enumerates what is present rather than what the journal says should be, so a round left unfinished is picked up by the next one.
+Pruning first is also what makes a stale target safe: a root an earlier round already collected past is no longer in the journal, so collecting at it is refused rather than taken as a floor that would retain commits whose data has already gone.
+
+<Warning>
+Collection must not run while the repository is being committed to, and two collections must not overlap.
+Neither is enforced.
+</Warning>
+
+This reclaims the value side of a commit only.
+The Merkle nodes it held stay where they are, for the reason above: they sit in files that the retained commits still need.
 
 ## Why retaining a commit costs more than its changes
 
@@ -126,35 +159,7 @@ Everything above describes how the storage behaves today.
 Sections move out of here as the work lands.
 </Note>
 
-The two halves of a commit are reclaimed by two different mechanisms, for the reasons above.
-
-### Retained roots
-
-A *root* here is a registry commit id: the hash of an entire registry state, and so the root of the Merkle tree over it.
-A repository records the order in which commits were made, as a sequence number per root.
-Collecting at a root `H` retains every root whose sequence number is at least that of `H`, and drops the rest.
-
-```text
-                                   floor: the sequence number of H
-                                   |
-  sequence     1      4      7     |    10      12      15
-  root        r1     r2     r3     |     H      r5      r6
-              +------ dropped -----+     +------ retained ------+
-```
-
-Retaining by insertion order rather than by ancestry keeps states whose provenance is unclear, such as a state committed without a parent.
-Where a root has been committed more than once, the storage keeps the highest sequence number for it.
-
-Parents and sequence numbers are recorded beside a root, not folded into its identity.
-A commit id therefore stays the registry root hash, so committing the same state twice stays the no-op it already is.
-
-### Key-value side: directory reachability
-
-Values keep their current layout of one checkpoint directory per database commit.
-Collection computes the database commits reachable from the retained registry manifests, then removes the unreachable commit directories and manifests.
-The work is crash-safe and resumable, because removing an already-removed directory is not an error.
-
-This also keeps commit directories openable read-only by other processes, which is how external tooling reads a running node's storage.
+What remains is the Merkle side, which the mechanism above cannot reach.
 
 ### Merkle side: one shared store
 
@@ -205,7 +210,7 @@ A future mode that drops individual newer roots, such as collecting abandoned br
 
 Committing separates into two operations.
 
-A **partial commit** writes the value checkpoint, the registry manifest and the root record.
+A **partial commit** writes the value checkpoint, the registry manifest and the journal entry, which is what committing does today.
 A **full commit** additionally checkpoints the shared Merkle store into a numbered slot.
 The rollup node chooses when to take a full commit, and distinguishes the two.
 
@@ -225,6 +230,8 @@ What the split removes is the Merkle store's flush from every commit: the store 
 
 ### Interface
 
-The storage exposes collection as an operation that starts in the background, together with the operations a rollup node needs to observe and control it: whether a collection has finished, cancelling one, and waiting for one to complete.
+Collection runs to completion in the caller's thread today.
+The storage instead exposes it as an operation that starts in the background, together with the operations a rollup node needs to observe and control it: whether a collection has finished, cancelling one, and waiting for one to complete.
+Serialising it against committing, which the caller is currently responsible for, belongs with those.
 
 Exporting a snapshot copies everything reachable from one root into a fresh store, which is the same traversal collection performs, so the two share an implementation.

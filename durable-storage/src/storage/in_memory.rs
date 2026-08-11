@@ -49,19 +49,6 @@ impl InMemoryRepo {
             .remove(id);
         Ok(())
     }
-
-    /// Remove the registry manifest stored for `id` if it exists
-    #[cfg(rocksdb_test_utils)]
-    pub(crate) fn remove_registry_commit(
-        &self,
-        id: &crate::commit::CommitId,
-    ) -> Result<(), OperationalError> {
-        self.registry_commits
-            .write()
-            .map_err(|_| OperationalError::LockPoisoned)?
-            .remove(id);
-        Ok(())
-    }
 }
 
 /// In-memory key-value store
@@ -483,5 +470,48 @@ impl crate::repo::RegistryRepo for InMemoryRepo {
             .read()
             .map_err(|_| OperationalError::LockPoisoned)?
             .clone())
+    }
+
+    fn prune_journal(
+        &self,
+        retained: &std::collections::HashSet<crate::commit::CommitId>,
+    ) -> Result<(), OperationalError> {
+        self.journal
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .retain(|entry| retained.contains(&entry.root));
+        Ok(())
+    }
+
+    fn registry_commits(&self) -> Result<Vec<crate::commit::CommitId>, OperationalError> {
+        Ok(self
+            .registry_commits
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .keys()
+            .copied()
+            .collect())
+    }
+
+    fn database_commits(&self) -> Result<Vec<crate::commit::CommitId>, OperationalError> {
+        Ok(self
+            .commits
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .keys()
+            .copied()
+            .collect())
+    }
+
+    fn remove_registry_commit(&self, id: &crate::commit::CommitId) -> Result<(), OperationalError> {
+        self.registry_commits
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .remove(id);
+        Ok(())
+    }
+
+    fn remove_database_commit(&self, id: &crate::commit::CommitId) -> Result<(), OperationalError> {
+        self.remove_commit(id)
     }
 }

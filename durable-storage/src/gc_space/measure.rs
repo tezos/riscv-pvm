@@ -27,7 +27,6 @@ use super::sample::LevelSummary;
 use super::sample::PinnedBytes;
 use super::sample::Sample;
 use super::sample::Sharing;
-use super::scenario::Reg;
 use crate::avl::node::walk_stored_tree;
 use crate::commit::CommitId;
 use crate::persistence_layer::ReadOnlyPersistenceLayer;
@@ -47,7 +46,7 @@ pub(super) fn measure(
 ) -> Result<(Sample, FileSet)> {
     let started = Instant::now();
 
-    let database_commits = Reg::database_commits(repo, registry_commit)
+    let database_commits = crate::registry::database_commits(repo, registry_commit)
         .context("reading the registry manifest being measured")?;
 
     let mut blob = BlobBreakdown::default();
@@ -206,7 +205,7 @@ pub(crate) fn disk_usage(root: &Path) -> Result<DiskUsage> {
 ///
 /// Note this is what the history *references*, not what deleting it would free: commits hard-link
 /// the working database's files, so blocks counted here can be held by the working database too.
-/// Use [`SpaceConfig::simulate_dir_gc`] for what deletion actually reclaims.
+/// Use [`SpaceConfig::collect`] for what deletion actually reclaims.
 pub(super) fn commits_disk_usage(repo_path: &Path) -> Result<DiskUsage> {
     let mut usage = DiskUsage::default();
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
