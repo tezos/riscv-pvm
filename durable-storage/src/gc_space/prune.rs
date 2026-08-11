@@ -8,15 +8,18 @@
 //! retained root reaches. What survives it is the point — see [`prune_unreachable`].
 
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::Result;
 
 use super::measure::commits_disk_usage;
 use super::measure::disk_usage;
+use super::measure::peak_rss_bytes;
 use super::sample::DiskUsage;
 use crate::collect::Suspend;
-use crate::collect::collect_all;
+use crate::collect::collect;
+use crate::collect::collect_nodes;
 use crate::commit::CommitId;
 use crate::repo::DirectoryManager;
 
@@ -36,16 +39,36 @@ pub(super) fn prune_unreachable(
         ..PruneOutcome::default()
     };
 
-    let (collected, swept) = collect_all(repo, target, &Suspend::new()).context("collecting")?;
+    // Timed in three parts, because they scale with different things: the commit side with the
+    // number of commit directories, the sweep with the number of nodes in the store whether they
+    // are dead or not, and the compaction with the bytes it has to rewrite.
+    let started = Instant::now();
+    let collected = collect(repo, target, &Suspend::new()).context("collecting commits")?;
+    outcome.commits_ms = started.elapsed().as_millis() as u64;
+
+    // The sweep holds a key and an answer per node in the store, so what it needs to run is worth
+    // knowing alongside how long it takes: at scale that is the binding constraint, not the time.
+    let before_sweep = peak_rss_bytes();
+
+    let started = Instant::now();
+    let swept = collect_nodes(repo, target, &Suspend::new()).context("collecting nodes")?;
+    outcome.sweep_ms = started.elapsed().as_millis() as u64;
+
+    outcome.rss_before_sweep = before_sweep;
+    outcome.peak_rss = peak_rss_bytes();
+
     outcome.databases_removed = collected.database_commits as u64;
     outcome.registries_removed = collected.registry_commits as u64;
     outcome.nodes_removed = swept.nodes as u64;
     outcome.node_bytes_removed = swept.bytes;
     outcome.edges_removed = swept.edges as u64;
+    outcome.nodes_examined = swept.examined as u64;
 
     // A delete only marks the key; the space comes back when compaction rewrites the files without
     // it. Forcing that here is what makes the freed figure below the real one rather than a promise.
+    let started = Instant::now();
     repo.merkle_store().compact();
+    outcome.compact_ms = started.elapsed().as_millis() as u64;
 
     outcome.after = disk_usage(repo_path).context("measuring usage after pruning")?;
     outcome.after_commits =
@@ -80,6 +103,24 @@ pub struct PruneOutcome {
 
     /// Reverse edges removed with them.
     pub edges_removed: u64,
+
+    /// Nodes the round had to consider, whether or not they turned out to be dead.
+    pub nodes_examined: u64,
+
+    /// Milliseconds spent removing commit directories and manifests.
+    pub commits_ms: u64,
+
+    /// Milliseconds spent deciding which nodes are live and deleting the rest.
+    pub sweep_ms: u64,
+
+    /// Milliseconds spent compacting the store so the deletions return disk.
+    pub compact_ms: u64,
+
+    /// High-water resident memory before the sweep began.
+    pub rss_before_sweep: u64,
+
+    /// High-water resident memory after it, so the rise is what the sweep needed.
+    pub peak_rss: u64,
 }
 
 impl PruneOutcome {

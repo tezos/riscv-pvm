@@ -48,6 +48,17 @@ use crate::storage::StoreId;
 /// The column family holding reverse edges, keyed by `child || parent`.
 const REFS_CF: &str = "refs";
 
+/// The column family listing nodes by the commit they were last known to be held by.
+///
+/// Keyed `seq || hash`, with the sequence number big-endian so that ordering by key is ordering by
+/// commit. This is what makes collection proportional to the garbage rather than to the store: a
+/// round at a floor scans only the entries below it, and a node known to be held by a recent commit
+/// is never looked at.
+const WRITTEN_CF: &str = "written";
+
+/// Bytes of the sequence number in a [`WRITTEN_CF`] key.
+const SEQ_BYTES: usize = size_of::<u64>();
+
 /// How recently a reverse edge was known to hold its child alive.
 ///
 /// The sequence number of the most recent root the child was proven reachable from. Collection
@@ -96,6 +107,28 @@ fn collected_marker(store_dir: &Path) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// The key listing `hash` as held by the commit at `seq`.
+///
+/// The sequence number leads and is big-endian, so ordering by key is ordering by commit and a
+/// range scan can stop at a floor.
+fn written_key(seq: Seq, hash: &[u8]) -> [u8; SEQ_BYTES + Hash::DIGEST_SIZE] {
+    let mut key = [0u8; SEQ_BYTES + Hash::DIGEST_SIZE];
+    key[..SEQ_BYTES].copy_from_slice(&seq.raw().to_be_bytes());
+    key[SEQ_BYTES..].copy_from_slice(hash);
+    key
+}
+
+/// Read back a key written by [`written_key`].
+fn split_written_key(key: &[u8]) -> Option<(Seq, Vec<u8>)> {
+    if key.len() != SEQ_BYTES + Hash::DIGEST_SIZE {
+        return None;
+    }
+
+    let seq = u64::from_be_bytes(key[..SEQ_BYTES].try_into().ok()?);
+
+    Some((Seq::from_raw(seq), key[SEQ_BYTES..].to_vec()))
+}
+
 /// The key an edge from `parent` to `child` is stored under.
 ///
 /// Child first, so that every edge into one child is contiguous and its parents can be found by
@@ -135,7 +168,14 @@ pub struct MerkleStore {
     ///
     /// Every database of a repository shares it, which is what lets a node written through one be
     /// recognised as already stored by the others.
-    store_id: StoreId,
+    ///
+    /// Replaced whenever a collection deletes anything. A node skips being written when it records
+    /// this identity, and after a collection that record is no longer evidence that the body is
+    /// still here - the collection may have taken it. Changing the identity makes every such record
+    /// stop matching, so the next commit writes what it touches rather than skipping it. The cost is
+    /// one commit's worth of rewriting after a round; the alternative is a commit silently referring
+    /// to a node that was collected out from under it.
+    store_id: std::sync::atomic::AtomicU64,
 
     /// Whether anything has ever been collected from this store.
     ///
@@ -219,6 +259,11 @@ impl MerkleStore {
     pub fn note_collected(&self) -> Result<(), OperationalError> {
         self.writeable()?;
 
+        // A new identity, so that no node still in memory can claim to be stored here on the
+        // strength of a write that happened before this round. See the field's documentation.
+        self.store_id
+            .store(StoreId::next().raw(), std::sync::atomic::Ordering::Relaxed);
+
         if self
             .collected
             .swap(true, std::sync::atomic::Ordering::Relaxed)
@@ -272,7 +317,7 @@ impl MerkleStore {
 
     /// Identity of this store, for recording that a node has already been written to it.
     pub fn store_id(&self) -> StoreId {
-        self.store_id
+        StoreId::from(self.store_id.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// Record that the node stored under `parent` refers to the one stored under `child`.
@@ -361,6 +406,123 @@ impl MerkleStore {
                 key: key.to_vec(),
                 error,
             })
+    }
+
+    /// Note that the node under `key` is held by the commit at `seq`.
+    ///
+    /// Written as the node is stored, so a node created by a commit that is still retained is never
+    /// a candidate for collection. Re-written by a sweep that proves an older node still held, which
+    /// is what moves it out of the range future rounds scan.
+    pub fn log_written(&self, seq: Seq, key: &[u8]) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        let entry = written_key(seq, key);
+
+        self.db
+            .put_cf(self.written_cf(), entry, [])
+            .map_err(|error| OperationalError::PutFailed {
+                column: WRITTEN_CF.to_owned(),
+                key: entry.to_vec(),
+                error,
+            })
+    }
+
+    /// Forget that the node under `key` was held by the commit at `seq`.
+    pub fn unlog_written(&self, seq: Seq, key: &[u8]) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        let entry = written_key(seq, key);
+
+        self.db
+            .delete_cf(self.written_cf(), entry)
+            .map_err(|error| OperationalError::DeleteFailed {
+                column: WRITTEN_CF.to_owned(),
+                key: entry.to_vec(),
+                error,
+            })
+    }
+
+    /// Up to `limit` nodes last known to be held by a commit before `floor`, starting after `after`.
+    ///
+    /// These are exactly the nodes whose liveness is in question at that floor: anything held by a
+    /// retained commit sorts at or above it and is not returned. Batched rather than collected
+    /// whole, so a sweep of a large store does not have to hold the store's worth of keys in memory.
+    ///
+    /// `after` is the last entry of the previous batch, or `None` to start from the oldest.
+    pub fn candidates_below(
+        &self,
+        floor: Seq,
+        limit: usize,
+        after: Option<(Seq, Vec<u8>)>,
+    ) -> Result<Vec<(Seq, Vec<u8>)>, OperationalError> {
+        let start = match &after {
+            // One past the previous batch's last entry, which sorting by key makes a suffix bump.
+            Some((seq, key)) => {
+                let mut start = written_key(*seq, key).to_vec();
+                start.push(0);
+                start
+            }
+            None => Vec::new(),
+        };
+
+        let limit_key = written_key(floor, &[0u8; Hash::DIGEST_SIZE]);
+
+        let from = rocksdb::IteratorMode::From(&start, rocksdb::Direction::Forward);
+        let mut candidates = Vec::new();
+
+        for entry in self.db.iterator_cf(self.written_cf(), from) {
+            let (key, _) = entry.map_err(|error| OperationalError::GetFailed {
+                column: WRITTEN_CF.to_owned(),
+                key: Vec::new(),
+                error,
+            })?;
+
+            // Ordered by sequence number, so the first entry at or above the floor ends the range.
+            if key.as_ref() >= limit_key.as_slice() {
+                break;
+            }
+
+            let Some((seq, hash)) = split_written_key(&key) else {
+                continue;
+            };
+
+            candidates.push((seq, hash));
+
+            if candidates.len() >= limit {
+                break;
+            }
+        }
+
+        Ok(candidates)
+    }
+
+    /// How many nodes are listed in the write log.
+    #[cfg(rocksdb_test_utils)]
+    pub fn written_entries(&self) -> Result<u64, OperationalError> {
+        let mut entries = 0;
+
+        for entry in self
+            .db
+            .iterator_cf(self.written_cf(), rocksdb::IteratorMode::Start)
+        {
+            entry.map_err(|error| OperationalError::GetFailed {
+                column: WRITTEN_CF.to_owned(),
+                key: Vec::new(),
+                error,
+            })?;
+            entries += 1;
+        }
+
+        Ok(entries)
+    }
+
+    /// The column family listing nodes by the commit holding them.
+    ///
+    /// Panics if it is absent, which would mean the store was not opened by this module.
+    fn written_cf(&self) -> &rocksdb::ColumnFamily {
+        self.db
+            .cf_handle(WRITTEN_CF)
+            .expect("the Merkle store always has its written column family")
     }
 
     /// The column family holding reverse edges.
@@ -464,6 +626,7 @@ impl MerkleStore {
                 .cf_handle("default")
                 .expect("the Merkle store always has its default column family"),
             self.refs_cf(),
+            self.written_cf(),
         ] {
             total += self
                 .db
@@ -507,6 +670,10 @@ impl MerkleStore {
         self.db.compact_range(unbounded, unbounded);
         self.db
             .compact_range_cf(self.refs_cf(), unbounded, unbounded);
+        // Relisting a live node writes a new entry and a tombstone for the old one, so a round
+        // leaves as much behind here as it does among the nodes themselves.
+        self.db
+            .compact_range_cf(self.written_cf(), unbounded, unbounded);
     }
 
     /// Put everything written so far beyond reach of a crash.
@@ -574,6 +741,7 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
             // of them.
             rocksdb::ColumnFamilyDescriptor::new("default", rocksdb_node_store_options()),
             rocksdb::ColumnFamilyDescriptor::new(REFS_CF, rocksdb_node_store_options()),
+            rocksdb::ColumnFamilyDescriptor::new(WRITTEN_CF, rocksdb_node_store_options()),
         ],
     )
     .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
@@ -583,7 +751,7 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
         collected: std::sync::atomic::AtomicBool::new(collected_marker(&key).exists()),
         path: key.clone(),
         read_only: false,
-        store_id: StoreId::next(),
+        store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
     });
 
     let mut open = open_stores()
@@ -626,7 +794,7 @@ pub fn open_read_only(path: &Path) -> Result<Arc<MerkleStore>, OperationalError>
         collected: std::sync::atomic::AtomicBool::new(collected_marker(path).exists()),
         // Never registered, so nothing looks this up and Drop finds no entry of its own to remove.
         path: path.to_path_buf(),
-        store_id: StoreId::next(),
+        store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
     }))
 }
 

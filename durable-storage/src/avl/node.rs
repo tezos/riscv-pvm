@@ -1009,6 +1009,10 @@ where
             }
         }
 
+        // Listed under the commit being made, so that a collection dropping that commit finds this
+        // node without having to consider every other one in the store.
+        store.node_written_at(options.commit_seq(), tree_hash)?;
+
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {
             self.data.store_data(self.key.as_ref(), store)?;

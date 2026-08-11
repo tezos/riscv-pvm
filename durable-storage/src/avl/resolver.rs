@@ -1444,6 +1444,14 @@ mod tests {
             self.inner.edge_set(child, parent)
         }
 
+        fn node_written_at(
+            &self,
+            seq: crate::journal::Seq,
+            key: impl AsRef<[u8]>,
+        ) -> Result<(), OperationalError> {
+            self.inner.node_written_at(seq, key)
+        }
+
         fn blob_set(
             &self,
             key: impl AsRef<[u8]>,

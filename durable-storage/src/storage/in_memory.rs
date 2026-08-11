@@ -167,6 +167,15 @@ impl WriteableKeyValueStore for InMemoryKeyValueStore {
         Ok(())
     }
 
+    /// Discards the record, for the same reason as [`InMemoryKeyValueStore::edge_set`].
+    fn node_written_at(
+        &self,
+        _seq: crate::journal::Seq,
+        _key: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        Ok(())
+    }
+
     fn blob_set(
         &self,
         key: impl AsRef<[u8]>,
@@ -280,6 +289,14 @@ const STORE_FILE: &str = "in_memory_snapshot.bin";
 
 #[cfg(test_utils)]
 impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
+    /// Always the first position.
+    ///
+    /// Nothing here records which commit a node belongs to, since nothing collects from an
+    /// in-memory store, so there is no position worth reporting.
+    fn next_commit_seq(&self, _repo: &Self::Repo) -> Result<crate::journal::Seq, OperationalError> {
+        Ok(crate::journal::Seq::FIRST)
+    }
+
     fn commit_to_path(&self, path: &std::path::Path) -> Result<(), OperationalError> {
         let blobs = self
             .blobs
@@ -501,6 +518,18 @@ impl crate::repo::RegistryRepo for InMemoryRepo {
         journal.push(crate::journal::JournalEntry { seq, root: *root });
 
         Ok(seq)
+    }
+
+    fn next_commit_seq(&self) -> Result<crate::journal::Seq, OperationalError> {
+        let journal = self
+            .journal
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+
+        Ok(match journal.last() {
+            Some(last) => last.seq.next(),
+            None => crate::journal::Seq::FIRST,
+        })
     }
 
     fn commit_journal(&self) -> Result<Vec<crate::journal::JournalEntry>, OperationalError> {

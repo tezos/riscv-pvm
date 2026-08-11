@@ -25,7 +25,7 @@ use crate::errors::OperationalError;
 /// Sequence numbers increase with each commit recorded and are never reused. They are internal to
 /// the repository: nothing outside it should persist one, since collection removes the entries it
 /// drops.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
+#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct Seq(u64);
 
 impl Seq {
@@ -40,6 +40,13 @@ impl Seq {
     /// The underlying position.
     pub fn raw(self) -> u64 {
         self.0
+    }
+
+    /// The position numbered `raw`.
+    ///
+    /// For reading a sequence number back out of somewhere it was stored.
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
     }
 }
 

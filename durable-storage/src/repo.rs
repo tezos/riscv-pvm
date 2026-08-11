@@ -316,6 +316,13 @@ pub trait RegistryRepo: Clone {
     /// Every commit recorded by [`RegistryRepo::record_commit`], in the order they were recorded.
     fn commit_journal(&self) -> Result<Vec<JournalEntry>, OperationalError>;
 
+    /// The position the next [`RegistryRepo::record_commit`] will use.
+    ///
+    /// Read before a commit writes its nodes, so they can be recorded as belonging to it. A commit
+    /// that then fails leaves that position unused, which costs nothing: positions order commits
+    /// and need not be contiguous.
+    fn next_commit_seq(&self) -> Result<Seq, OperationalError>;
+
     /// Keep only the journal entries whose root is in `retained`, dropping the rest.
     ///
     /// Replaces the journal in one step, so an interrupted prune leaves either the old journal or
@@ -368,14 +375,18 @@ impl RegistryRepo for DirectoryManager {
             .map_err(|error| OperationalError::FileWriteFailed { error })
     }
 
+    fn next_commit_seq(&self) -> Result<Seq, OperationalError> {
+        Ok(match self.last_journal_entry()? {
+            Some(last) => last.seq.next(),
+            None => Seq::FIRST,
+        })
+    }
+
     fn record_commit(&self, root: &CommitId) -> Result<Seq, OperationalError> {
         #[cfg(rocksdb)]
         self.writeable()?;
 
-        let seq = match self.last_journal_entry()? {
-            Some(last) => last.seq.next(),
-            None => Seq::FIRST,
-        };
+        let seq = self.next_commit_seq()?;
 
         let entry = JournalEntry { seq, root: *root };
 

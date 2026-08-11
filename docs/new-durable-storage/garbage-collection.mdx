@@ -20,7 +20,7 @@ A repository is a directory tree of databases and commits:
     commits/<commit_id>/                database commits
   registries/commits/<commit_id>        registry manifests
   registries/journal                    the order commits were made in
-  merkle/                               Merkle node bodies, shared by the repository
+  merkle/                               Merkle node bodies and the log of what wrote them
   merkle-commits/<n>/                   recoverable images of that store
   merkle-commits/<n>.lease              what a reader of one holds
 ```
@@ -138,9 +138,15 @@ They cost a 64-byte key and an 8-byte stamp apiece, at a little under two edges 
 
 Collecting at a root deletes the node bodies that no retained root still reaches, and the edges that mentioned them.
 
-Whether a node is still held is asked from the node upwards, by walking its reverse edges, rather than by traversing every retained root downwards.
-A stamp at or above the collection floor ends the walk immediately: a retained root already holds the child.
-Otherwise the walk climbs, and what it learns is written back onto the edges that led to a live root, so the next collection reads the answer instead of walking for it.
+Each node is listed in a `written` column family of the Merkle store, keyed by the commit it was last known to be held by, with the sequence number first so that ordering by key is ordering by commit.
+A round reads **only the entries below its floor**: a node a retained commit wrote, or one an earlier round proved still held, sorts at or above the floor and is never looked at.
+
+That is what keeps a round proportional to the garbage rather than to the store.
+Considering every node instead costs the whole repository on every round however little there is to reclaim, which at hundreds of millions of entries is hours of work and tens of gigabytes of bookkeeping.
+
+Whether a candidate is still held is asked from the node upwards, by walking its reverse edges.
+A stamp at or above the floor ends the walk immediately: a retained root already holds the child.
+Otherwise the walk climbs, and what it learns is written back onto the edges that led to a live root.
 
 With a floor of 10, node `X` is settled without walking to a root at all: the edge to `B` is stamped at or above it, so `X` is still held.
 
@@ -158,16 +164,36 @@ flowchart BT
     B --> RB
 ```
 
+A candidate that turns out to be live is relisted under the newest retained root, which lifts it out of the range future rounds scan until the floor passes that root.
+Candidates are read in batches and settled as they are reached, so a round holds a batch rather than a store.
+
+<Warning>
+This depends on collecting **behind** the tip.
+Collect at the newest commit and the floor equals the newest retained root, so everything relisted falls below the next round's floor and the whole live set is examined again.
+A rollup node collecting at the commit it has cemented has that gap; anything collecting at its own tip does not.
+</Warning>
+
 A stamp is only ever written where the node is provably reachable from the stamped root.
 Nodes are content-addressed and therefore immutable, so if a parent is reachable from a root and that parent refers to a child, the child is reachable from that root too, permanently.
 A stale stamp costs a walk and an over-generous one retains garbage; neither can drop something still live.
 
 The graph has no cycles to guard against: a node's hash is derived from its children's, so a node can never be its own ancestor.
 
-<Warning>
+<Note>
 Deleting a node writes a tombstone; the bytes come back when compaction rewrites the files without it.
-Collection asks for that compaction, so what it reports as freed is freed.
-</Warning>
+Collection does not force that — reclamation follows the full-commit cadence rather than every round, because compacting the store costs the store rather than the garbage.
+</Note>
+
+### Committing after a collection
+
+A node is skipped at commit time when it records that it is already in the store.
+After a round has deleted anything, that record is no longer evidence the body is still there, so the store takes a **new identity** and every such record stops matching.
+The next commit writes what it touches instead of skipping it.
+
+Without that, a working state whose lineage a round had dropped would skip writing nodes the round had just deleted, and commit something referring to bodies that are gone.
+A read into a collected node says so; a commit over one would not, which is why this is closed by construction rather than by convention.
+
+It costs one commit's worth of rewriting after a round that deleted something, and nothing after a round that did not.
 
 ## Why retaining a commit costs more than its changes
 

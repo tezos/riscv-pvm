@@ -140,6 +140,16 @@ pub trait WriteableKeyValueStore: ReadableKeyValueStore<Merkle = MerkleWorker<Se
         parent: impl AsRef<[u8]>,
     ) -> Result<(), OperationalError>;
 
+    /// Record the node under `key` as belonging to the commit at `seq`.
+    ///
+    /// What makes collection proportional to the garbage rather than to the store: a round scans
+    /// only the nodes whose commit it is dropping, and never looks at one a retained commit wrote.
+    fn node_written_at(
+        &self,
+        seq: crate::journal::Seq,
+        key: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError>;
+
     /// Register data under a blob key.
     fn blob_set(
         &self,
@@ -174,6 +184,13 @@ pub trait PersistentKeyValueStore: WriteableKeyValueStore + Sized {
 
     /// Write the current key-value state to the repository.
     fn commit(&self, repo: &Self::Repo, id: &CommitId) -> Result<(), OperationalError>;
+
+    /// The position the commit about to be made will be recorded at.
+    ///
+    /// Asked of the store rather than the repository so that a backend which records nothing can
+    /// say so without every caller having to know which kind of repository it has. Read before the
+    /// nodes are written, since each is recorded as belonging to that commit.
+    fn next_commit_seq(&self, repo: &Self::Repo) -> Result<crate::journal::Seq, OperationalError>;
 
     /// Checkout the state from `source_path` but leave it untouched. Modifications to the
     /// resulting state will be reflected in `working_path`.
@@ -489,6 +506,14 @@ cfg_if::cfg_if! {
 pub struct StoreOptions {
     /// Persist the key-value pairs from MAVL nodes
     node_data: bool,
+
+    /// Which commit the nodes being stored belong to.
+    ///
+    /// Recorded against each node so that collection can find, without looking at the rest of the
+    /// store, the nodes whose commit has since been dropped. Defaults to the very first position,
+    /// which is the conservative answer: a node recorded there is examined by any collection rather
+    /// than being skipped by one.
+    written_at: crate::journal::Seq,
 }
 
 impl StoreOptions {
@@ -498,7 +523,10 @@ impl StoreOptions {
     /// [`crate::merkle_layer::MerkleLayer`] in isolation, this is necessary as there is no other
     /// component that will be writing the key-value data to the store.
     pub fn with_node_data(self) -> Self {
-        Self { node_data: true }
+        Self {
+            node_data: true,
+            ..self
+        }
     }
 
     /// Do not persist key-value data of nodes.
@@ -508,12 +536,28 @@ impl StoreOptions {
     /// mutates the store directly ahead of commitments. At commitment time, you only need to
     /// persist the remaining tree and node structures.
     pub fn without_node_data(self) -> Self {
-        Self { node_data: false }
+        Self {
+            node_data: false,
+            ..self
+        }
     }
 
     /// Returns whether node key-value data should be persisted.
     pub fn node_data(&self) -> bool {
         self.node_data
+    }
+
+    /// Record the nodes being stored as belonging to the commit at `seq`.
+    pub fn written_at(self, seq: crate::journal::Seq) -> Self {
+        Self {
+            written_at: seq,
+            ..self
+        }
+    }
+
+    /// Which commit the nodes being stored belong to.
+    pub fn commit_seq(&self) -> crate::journal::Seq {
+        self.written_at
     }
 }
 
