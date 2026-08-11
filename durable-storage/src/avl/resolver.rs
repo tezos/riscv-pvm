@@ -1388,13 +1388,20 @@ mod tests {
     use crate::storage::in_memory::InMemoryRepo;
 
     /// A wrapper around an in-memory key-value store that counts the number of `blob_get` calls.
-    #[derive(Debug, Default)]
+    #[derive(Debug)]
     struct CountingKeyValueStore {
         inner: InMemoryKeyValueStore,
         blob_get_calls: AtomicUsize,
     }
 
     impl CountingKeyValueStore {
+        fn init() -> Self {
+            Self {
+                inner: InMemoryKeyValueStore::init(),
+                blob_get_calls: Default::default(),
+            }
+        }
+
         fn blob_get_calls(&self) -> usize {
             self.blob_get_calls.load(Ordering::SeqCst)
         }
@@ -1404,6 +1411,10 @@ mod tests {
         type Repo = InMemoryRepo;
 
         type Merkle = crate::merkle_worker::MerkleWorker<Self>;
+        fn store_id(&self) -> crate::storage::StoreId {
+            // Delegated, so that wrapping a store does not make it look like a different one.
+            self.inner.store_id()
+        }
 
         fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
             self.blob_get_calls.fetch_add(1, Ordering::SeqCst);
@@ -1417,7 +1428,7 @@ mod tests {
 
     impl WriteableKeyValueStore for CountingKeyValueStore {
         fn new(_repo: &Self::Repo) -> Result<Self, OperationalError> {
-            Ok(Self::default())
+            Ok(Self::init())
         }
 
         fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
@@ -1487,7 +1498,7 @@ mod tests {
         let tree_hash = tree.hash();
         let root_hash = Hash::from_foldable(tree.root().expect("tree should have a root node"));
 
-        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        let persistence_layer = Arc::new(CountingKeyValueStore::init());
         persist_tree(&tree, persistence_layer.as_ref());
 
         let lazy_resolver = LazyResolver::new(persistence_layer.clone());
@@ -1538,7 +1549,7 @@ mod tests {
 
     #[test]
     fn lazy_resolver_returns_invariant_error_when_hash_is_missing() {
-        let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
+        let persistence_layer = Arc::new(InMemoryKeyValueStore::init());
         let mut lazy_resolver = LazyResolver::new(persistence_layer);
 
         let node_without_hash = LazyNodeId(LazyId {
@@ -1575,7 +1586,7 @@ mod tests {
     #[test]
     fn lazy_resolver_maps_missing_cas_entries_to_commit_data_missing() {
         let missing_hash = Hash::hash_bytes(b"missing");
-        let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
+        let persistence_layer = Arc::new(InMemoryKeyValueStore::init());
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
         let node_id = LazyNodeId::from(missing_hash);
@@ -1604,7 +1615,7 @@ mod tests {
         // into storage is keyed by the tree hash.
         let tree_hash = tree.hash();
 
-        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        let persistence_layer = Arc::new(CountingKeyValueStore::init());
         persist_tree(&tree, persistence_layer.as_ref());
 
         let mut node_id: LazyNodeId = LazyNodeId::from(tree_hash);
@@ -1638,7 +1649,7 @@ mod tests {
         // Lazy references into storage are keyed by the tree hash (the node body lives there).
         let tree_hash = tree.hash();
 
-        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        let persistence_layer = Arc::new(CountingKeyValueStore::init());
         persist_tree(&tree, persistence_layer.as_ref());
 
         let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(tree_hash)).into();
@@ -1736,7 +1747,7 @@ mod tests {
         // keyed by the tree hash.
         let persisted_tree_hash = original_tree.hash();
 
-        let persistence_layer = Arc::new(InMemoryKeyValueStore::default());
+        let persistence_layer = Arc::new(InMemoryKeyValueStore::init());
         persist_tree(&original_tree, persistence_layer.as_ref());
 
         let mut lazy_tree: Tree<LazyNodeId> = Some(LazyNodeId::from(persisted_tree_hash)).into();
@@ -1782,7 +1793,7 @@ mod tests {
         // body is now stored directly under it.
         let tree_hash = tree.hash();
 
-        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        let persistence_layer = Arc::new(CountingKeyValueStore::init());
         persist_tree(&tree, persistence_layer.as_ref());
 
         (tree_hash, tree, persistence_layer)
@@ -1975,7 +1986,7 @@ mod tests {
 
     #[test]
     fn prove_resolver_empty_tree() {
-        let persistence_layer = Arc::new(CountingKeyValueStore::default());
+        let persistence_layer = Arc::new(CountingKeyValueStore::init());
         let lazy_resolver = LazyResolver::new(persistence_layer);
 
         let empty_lazy_tree: LazyTreeId = LazyTreeId::default();
