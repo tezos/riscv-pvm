@@ -996,8 +996,18 @@ where
         // lookup instead of first reading a tree->node pointer. The hashes themselves are
         // unchanged, so commitments and proofs are unaffected.
         let tree_hash = Tree::<Hash>::present_hash(*self.hash());
+        let children = [repr.left, repr.right];
         let bytes = serialise(repr)?;
         store.node_set(tree_hash, bytes)?;
+
+        // Recorded alongside the body, so that what refers to a node is known from the node's own
+        // side and its liveness can be decided without traversing every root. An empty tree is
+        // never stored, so there is nothing to point at.
+        for child in children {
+            if child != Tree::<Hash>::empty_hash() {
+                store.edge_set(child, tree_hash)?;
+            }
+        }
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {

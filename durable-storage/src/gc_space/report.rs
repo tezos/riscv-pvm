@@ -142,6 +142,26 @@ pub(super) fn summarise(out: &mut impl Write, samples: &[Sample]) -> io::Result<
             )?;
         }
 
+        // What the reverse edges cost, against the bodies they are recorded for. This is the price
+        // of being able to decide a node's liveness from the node upwards, and it is paid in the
+        // shared store rather than in every retained commit.
+        let edge_growth = last.blob.edge_bytes.saturating_sub(first.blob.edge_bytes);
+        let edges_added = last
+            .blob
+            .edge_entries
+            .saturating_sub(first.blob.edge_entries);
+
+        if edges_added > 0 {
+            writeln!(
+                out,
+                "  {} edge(s) written, {:.2} per node, {:.1} MiB, adding {:.1}% to the Merkle store",
+                edges_added,
+                edges_added as f64 / node_growth.max(1) as f64,
+                mib(edge_growth),
+                edge_growth as f64 / blob_growth.max(1) as f64 * 100.0,
+            )?;
+        }
+
         // What retention costs, and which half of the storage it is spent holding. The `blob` part
         // is duplication a shared Merkle store would remove outright, as opposed to the dead node
         // data above, which only deleting the node keys can reclaim.

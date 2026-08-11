@@ -96,11 +96,17 @@ pub(super) fn measure(
         .totals()
         .map_err(|error| anyhow::anyhow!("scanning the Merkle store: {error}"))?;
 
+    let edges = merkle
+        .edge_totals()
+        .map_err(|error| anyhow::anyhow!("scanning the Merkle store edges: {error}"))?;
+
     let blob = BlobBreakdown {
         entries: totals.entries,
         stored_bytes: totals.stored_bytes(),
         live_entries: live.len() as u64,
         live_bytes,
+        edge_entries: edges.entries,
+        edge_bytes: edges.stored_bytes(),
     };
 
     sst_bytes += merkle

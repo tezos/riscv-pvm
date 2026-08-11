@@ -234,8 +234,8 @@ impl<NodeId> Tree<NodeId> {
     /// The hash of the empty [`Tree`].
     ///
     /// Empty trees are never stored, so this is the hash that terminates a walk over the stored
-    /// representation of a tree: a child hash equal to it has no body to read.
-    #[cfg(rocksdb_test_utils)]
+    /// representation of a tree: a child hash equal to it has no body to read, and no edge is
+    /// recorded to it when its parent is stored.
     pub(crate) fn empty_hash() -> Hash {
         *EMPTY_TREE_HASH
     }
