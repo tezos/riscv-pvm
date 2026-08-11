@@ -921,6 +921,48 @@ where
     }
 }
 
+/// Visit every node body reachable from the tree stored under `tree_hash`.
+///
+/// `visit` receives the blob key each body is stored under and the length of the stored bytes,
+/// once per body reached. Nothing is materialised in memory: a body is stored under the hash of
+/// the *tree* holding it, and its `left`/`right` fields are the hashes of the child trees, so the
+/// stored representation can be walked directly. Empty trees are never stored, so a child hash
+/// equal to [`Tree::empty_hash`] terminates that branch.
+///
+/// Shared subtrees are visited once per reference, since content-addressed children may be
+/// reachable by more than one path. `visit` should deduplicate by the visited hash if required.
+#[cfg(rocksdb_test_utils)]
+pub(crate) fn walk_stored_tree(
+    store: &impl ReadableKeyValueStore,
+    tree_hash: Hash,
+    mut visit: impl FnMut(Hash, usize),
+) -> Result<(), OperationalError> {
+    let empty = Tree::<Hash>::empty_hash();
+    let mut pending = vec![tree_hash];
+
+    while let Some(hash) = pending.pop() {
+        if hash == empty {
+            continue;
+        }
+
+        let bytes = store
+            .blob_get(hash)
+            .map_err(|error| OperationalError::CommitDataMissing {
+                root: hash,
+                source: Box::new(error),
+            })?;
+        let bytes = bytes.as_ref();
+
+        visit(hash, bytes.len());
+
+        let StoredNode { left, right, .. } = deserialise(bytes)?;
+        pending.push(left);
+        pending.push(right);
+    }
+
+    Ok(())
+}
+
 impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, Normal> {
     fn load(id: Hash, store: &impl ReadableKeyValueStore) -> Result<Self, OperationalError> {
         let StoredNode {
