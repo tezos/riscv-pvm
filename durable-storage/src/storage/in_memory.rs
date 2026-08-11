@@ -16,6 +16,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 
 use super::ReadableKeyValueStore;
+use super::StoreId;
 use super::WriteableKeyValueStore;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
@@ -51,16 +52,28 @@ impl InMemoryRepo {
 }
 
 /// In-memory key-value store
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct InMemoryKeyValueStore {
     /// Holds blobs.
     blobs: RwLock<HashMap<Bytes, Bytes>>,
 
     /// Holds the underlying key-value pairs
     values: RwLock<HashMap<Bytes, BytesMut>>,
+
+    /// Distinguishes this store from every other, including copies of it.
+    store_id: StoreId,
 }
 
 impl InMemoryKeyValueStore {
+    /// Create a new `in-memory` key value store.
+    pub fn init() -> Self {
+        Self {
+            blobs: Default::default(),
+            values: Default::default(),
+            store_id: StoreId::next(),
+        }
+    }
+
     pub fn try_clone(&self) -> Result<Self, OperationalError> {
         let blobs = self
             .blobs
@@ -77,6 +90,9 @@ impl InMemoryKeyValueStore {
         Ok(Self {
             blobs: RwLock::new(blobs),
             values: RwLock::new(values),
+            // A copy is its own store: it holds what the original held at this moment, and nothing
+            // written to the original afterwards.
+            store_id: StoreId::next(),
         })
     }
 }
@@ -85,6 +101,9 @@ impl ReadableKeyValueStore for InMemoryKeyValueStore {
     type Repo = InMemoryRepo;
 
     type Merkle = MerkleWorker<Self>;
+    fn store_id(&self) -> StoreId {
+        self.store_id
+    }
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         let blob_store = self
@@ -115,7 +134,7 @@ impl ReadableKeyValueStore for InMemoryKeyValueStore {
 
 impl WriteableKeyValueStore for InMemoryKeyValueStore {
     fn new(_repo: &Self::Repo) -> Result<Self, OperationalError> {
-        Ok(Self::default())
+        Ok(Self::init())
     }
 
     fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
@@ -326,6 +345,7 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
                     .map(|(k, v)| (k, BytesMut::from(v.as_ref())))
                     .collect(),
             ),
+            store_id: StoreId::next(),
         })
     }
 
@@ -347,6 +367,7 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
                     .map(|(k, v)| (k.clone(), BytesMut::from(v.as_ref())))
                     .collect(),
             ),
+            store_id: StoreId::next(),
         })
     }
 }
@@ -362,7 +383,7 @@ mod tests {
     // `InMemoryKeyValueStore`, which are themselves only used in tests
     #[test]
     fn test_commit_to_path_checkout_roundtrip() {
-        let store = InMemoryKeyValueStore::default();
+        let store = InMemoryKeyValueStore::init();
 
         store
             .blob_set(b"blob-key", b"blob-data")
