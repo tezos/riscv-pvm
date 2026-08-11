@@ -44,6 +44,12 @@ pub enum OperationalError {
         error: std::io::Error,
     },
 
+    #[error("Failed to remove directory {path}: {error}")]
+    DirRemovalFailed {
+        path: PathBuf,
+        error: std::io::Error,
+    },
+
     #[error("Failed to publish the commit staged at {staged} as {commit}: {error}")]
     CommitPublishFailed {
         staged: PathBuf,
@@ -119,6 +125,9 @@ pub enum OperationalError {
     #[error("The root hash of restored registry does not match the commit id.")]
     RegistryCommitMismatch,
 
+    #[error("This repository was opened for reading only")]
+    RepositoryIsReadOnly,
+
     /// The lazy resolver encountered an internally inconsistent identifier state.
     ///
     /// `LazyId` values must always hold either (though can hold both):
@@ -166,6 +175,36 @@ pub enum InvalidArgumentError {
 
     #[error("Database index out of bounds")]
     DatabaseIndexOutOfBounds,
+}
+
+/// Errors that occur while collecting what a repository no longer needs
+///
+/// Collection is asked for a target, so it has a class of failure the rest of the storage does
+/// not: the target itself can be one that cannot be collected at. That is the caller's to handle
+/// rather than a sign the repository is broken, so it is kept apart from [`OperationalError`] -
+/// the boundary to the node reports an operational error as a failure, and an argument error as a
+/// value the caller can act on.
+#[derive(Debug, thiserror::Error)]
+pub enum GcError {
+    #[error("Operational error: {0}")]
+    Operational(#[from] OperationalError),
+
+    #[error("Invalid argument error: {0}")]
+    InvalidArgument(#[from] GcArgumentError),
+}
+
+/// Errors that occur because collection was asked for something it cannot do
+///
+/// Not fatal, and the repository is left as it was found. As for [`InvalidArgumentError`], these
+/// describe the request rather than the state of the storage.
+#[derive(Debug, thiserror::Error)]
+pub enum GcArgumentError {
+    /// No commit was recorded for the target, so there is no floor to retain from.
+    ///
+    /// Also how a target an earlier round already collected past is refused: its journal entry
+    /// went with the round that passed it.
+    #[error("No commit was recorded for the collection target {target}")]
+    CollectionTargetNotRecorded { target: String },
 }
 
 /// Errors that occur during Durable Storage operations

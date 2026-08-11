@@ -29,6 +29,7 @@
 //!   operations on disk.
 
 pub mod avl;
+pub mod collect;
 pub mod commit;
 pub mod database;
 pub mod errors;
@@ -36,12 +37,15 @@ pub mod errors;
 // when `rocksdb` is enabled.
 #[cfg(rocksdb_test_utils)]
 pub mod gc_space;
+pub mod journal;
 pub mod key;
 // The long-running test exercises the persistence backend directly, so it is
 // only available when `rocksdb` is enabled.
 #[cfg(rocksdb_test_utils)]
 pub mod long_test;
 mod merkle_layer;
+#[cfg(rocksdb)]
+pub mod merkle_store;
 mod merkle_worker;
 pub mod persistence_layer;
 pub mod registry;

@@ -42,10 +42,12 @@ use crate::database::Database;
 use crate::key::Key;
 use crate::persistence_layer::PersistenceLayer;
 use crate::registry::Registry;
+use crate::registry::database_commits;
 use crate::repo::DirectoryManager;
+use crate::repo::RegistryRepo;
 
 /// The registry type this harness measures.
-pub(super) type Reg = Registry<PersistenceLayer, Normal>;
+type Reg = Registry<PersistenceLayer, Normal>;
 
 /// Name of the file recording a reusable base state in the repository directory.
 const BASE_STATE_FILE: &str = "gc_space_base.json";
@@ -104,13 +106,13 @@ pub struct SpaceConfig {
     /// Write one JSON object per sample to this path.
     pub json_out: Option<PathBuf>,
 
-    /// After the last commit, delete every commit not reachable from it and measure again.
+    /// After the last commit, collect at it and measure again.
     ///
-    /// This is what collecting at directory granularity would reclaim, so running with it splits
-    /// the storage into three parts: what a directory-level collection frees, what remains and is
-    /// still needed, and what remains but is dead. The last part is the dead node data, which sits
-    /// in files the surviving commit still references and which no directory deletion can reach.
-    pub simulate_dir_gc: bool,
+    /// This is what collecting at directory granularity reclaims, so running with it splits the
+    /// storage into three parts: what collection frees, what remains and is still needed, and what
+    /// remains but is dead. The last part is the dead node data, which sits in files the surviving
+    /// commit still references and which no directory deletion can reach.
+    pub collect: bool,
 }
 
 impl SpaceConfig {
@@ -245,14 +247,20 @@ impl SpaceConfig {
 
         summarise(&mut out, &samples)?;
 
-        if self.simulate_dir_gc {
-            // The base state is retained alongside the last commit, not because a collection would
-            // keep it, but because a persistent `--repo-dir` records it for later runs to check out.
-            // Pruning it would leave `gc_space_base.json` naming a commit whose directory is gone, and
-            // the next run of the same shape would fail instead of reusing the base.
-            let retained = [last_commit, base_commit];
-            let outcome = prune_unreachable(&repo, &repo_path, &retained)
-                .context("simulating a directory-level collection")?;
+        if self.collect {
+            // The base state is retained alongside the last commit, not because collecting at the last
+            // commit would keep it, but because a persistent `--repo-dir` records it for later runs to
+            // check out. Dropping it would leave `gc_space_base.json` naming a commit whose directory
+            // is gone, and the next run of the same shape would fail instead of reusing the base.
+            //
+            // Recording it again is how a root is pinned: retention goes by the order commits were
+            // recorded in, and a root keeps its highest position, so re-recording moves the base above
+            // the floor without committing anything or touching its identity.
+            repo.record_commit(&base_commit)
+                .context("pinning the base state before collecting")?;
+
+            let outcome = prune_unreachable(&repo, &repo_path, &last_commit)
+                .context("collecting at directory level")?;
             report_prune(&mut out, &outcome, samples.last())?;
         }
 
@@ -364,7 +372,7 @@ fn reset_to_base(
     base: &CommitId,
 ) -> Result<()> {
     let reachable =
-        Reg::database_commits(repo, base).context("reading the base state's registry manifest")?;
+        database_commits(repo, base).context("reading the base state's registry manifest")?;
 
     let mut removed = 0;
 
@@ -649,7 +657,7 @@ mod tests {
     /// A run small enough for the test suite, still covering every measurement the harness makes:
     /// more than one database, a large-value tail, and enough commits for a sample to be a delta of
     /// the one before it.
-    fn restricted_config(repo_dir: &Path, simulate_dir_gc: bool) -> SpaceConfig {
+    fn restricted_config(repo_dir: &Path, collect: bool) -> SpaceConfig {
         SpaceConfig {
             databases: 2,
             keys_per_database: 100,
@@ -665,7 +673,7 @@ mod tests {
             seed: 0,
             repo_dir: Some(repo_dir.to_path_buf()),
             json_out: None,
-            simulate_dir_gc,
+            collect,
         }
     }
 

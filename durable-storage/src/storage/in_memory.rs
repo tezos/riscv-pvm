@@ -33,6 +33,10 @@ pub struct InMemoryRepo {
 
     #[cfg(test_utils)]
     registry_commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, Vec<u8>>>>,
+
+    /// The order in which registry commits were recorded, oldest first.
+    #[cfg(test_utils)]
+    journal: std::sync::Arc<RwLock<Vec<crate::journal::JournalEntry>>>,
 }
 
 #[cfg(test_utils)]
@@ -40,19 +44,6 @@ impl InMemoryRepo {
     /// Remove the snapshot stored for `id` if it exists
     pub fn remove_commit(&self, id: &crate::commit::CommitId) -> Result<(), OperationalError> {
         self.commits
-            .write()
-            .map_err(|_| OperationalError::LockPoisoned)?
-            .remove(id);
-        Ok(())
-    }
-
-    /// Remove the registry manifest stored for `id` if it exists
-    #[cfg(rocksdb_test_utils)]
-    pub(crate) fn remove_registry_commit(
-        &self,
-        id: &crate::commit::CommitId,
-    ) -> Result<(), OperationalError> {
-        self.registry_commits
             .write()
             .map_err(|_| OperationalError::LockPoisoned)?
             .remove(id);
@@ -105,6 +96,15 @@ impl ReadableKeyValueStore for InMemoryKeyValueStore {
         self.store_id
     }
 
+    /// Reads a node from the same map as [`InMemoryKeyValueStore::blob_get`].
+    ///
+    /// Unlike the persistent backend, nothing is shared between stores here: a copy is a copy, and
+    /// nodes live in the store that wrote them. Nothing needs the sharing the persistent backend
+    /// gets from a repository-wide store, since an in-memory commit is a copy either way.
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        self.blob_get(key)
+    }
+
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         let blob_store = self
             .blobs
@@ -139,6 +139,18 @@ impl WriteableKeyValueStore for InMemoryKeyValueStore {
 
     fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
         self.try_clone()
+    }
+
+    fn node_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        self.blob_set(key, data)
+    }
+
+    fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+        self.blob_delete(key)
     }
 
     fn blob_set(
@@ -311,6 +323,8 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
     }
 
     fn checkout_from_path(
+        // Nodes live in the store itself, so there is nothing to reach through the repo
+        _repo: &Self::Repo,
         source_path: &std::path::Path,
         // The in-memory store keeps no working copy on disk
         _working_path: tempfile::TempDir,
@@ -383,6 +397,7 @@ mod tests {
     // `InMemoryKeyValueStore`, which are themselves only used in tests
     #[test]
     fn test_commit_to_path_checkout_roundtrip() {
+        let repo = InMemoryRepo::default();
         let store = InMemoryKeyValueStore::default();
 
         store
@@ -411,8 +426,9 @@ mod tests {
 
         let working_path =
             tempfile::TempDir::new().expect("Should be able to create a working dir");
-        let restored = InMemoryKeyValueStore::checkout_from_path(commit_dir.path(), working_path)
-            .expect("Should be able to checkout from a path");
+        let restored =
+            InMemoryKeyValueStore::checkout_from_path(&repo, commit_dir.path(), working_path)
+                .expect("Should be able to checkout from a path");
 
         assert_eq!(
             *store.blobs.read().expect("Lock should not be poisoned"),
@@ -452,5 +468,74 @@ impl crate::repo::RegistryRepo for InMemoryRepo {
             .map_err(|_| OperationalError::LockPoisoned)?;
         commits.insert(*id, bytes.to_vec());
         Ok(())
+    }
+
+    fn record_commit(
+        &self,
+        root: &crate::commit::CommitId,
+    ) -> Result<crate::journal::Seq, OperationalError> {
+        let mut journal = self
+            .journal
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+
+        let seq = match journal.last() {
+            Some(last) => last.seq.next(),
+            None => crate::journal::Seq::FIRST,
+        };
+
+        journal.push(crate::journal::JournalEntry { seq, root: *root });
+
+        Ok(seq)
+    }
+
+    fn read_commit_journal(&self) -> Result<Vec<crate::journal::JournalEntry>, OperationalError> {
+        self.journal
+            .read()
+            .map(|journal| journal.clone())
+            .map_err(|_| OperationalError::LockPoisoned)
+    }
+
+    fn prune_journal(
+        &self,
+        retained: &std::collections::HashSet<crate::commit::CommitId>,
+    ) -> Result<(), OperationalError> {
+        self.journal
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .retain(|entry| retained.contains(&entry.root));
+        Ok(())
+    }
+
+    fn registry_commits(&self) -> Result<Vec<crate::commit::CommitId>, OperationalError> {
+        Ok(self
+            .registry_commits
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .keys()
+            .copied()
+            .collect())
+    }
+
+    fn database_commits(&self) -> Result<Vec<crate::commit::CommitId>, OperationalError> {
+        Ok(self
+            .commits
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .keys()
+            .copied()
+            .collect())
+    }
+
+    fn remove_registry_commit(&self, id: &crate::commit::CommitId) -> Result<(), OperationalError> {
+        self.registry_commits
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .remove(id);
+        Ok(())
+    }
+
+    fn remove_database_commit(&self, id: &crate::commit::CommitId) -> Result<(), OperationalError> {
+        self.remove_commit(id)
     }
 }
