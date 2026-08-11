@@ -178,9 +178,52 @@ fn add_creation_options(options: &mut rocksdb::Options) {
     options.set_error_if_exists(true);
 }
 
+/// Compaction knobs read from the environment, for measuring what compaction costs a repository
+/// that retains checkpoints.
+///
+/// Retaining checkpoints makes compaction expensive in a way ordinary RocksDB use does not: a
+/// checkpoint hard-links the files live when it was taken, so a rewrite ends the sharing it had
+/// with every checkpoint still holding the files that rewrite replaced. These exist so a sweep
+/// can measure that trade-off without a rebuild, and are compiled out of ordinary builds.
+///
+/// Sitting in [`rocksdb_default_options`] puts these on every instance this module opens, not
+/// the working database alone. A read-only checkout of a commit never compacts, so they change
+/// nothing there; the working database, across both its column families, is what they are for.
+///
+/// The `OCTEZ_NDS_` prefix is deliberate where the rest of this repository uses `OCTEZ_RISCV_`:
+/// the new durable storage is not the RISC-V PVM's alone, and is meant to serve the WASM PVM
+/// too.
+///
+/// - `OCTEZ_NDS_ROCKSDB_L0_TRIGGER`: files at level zero before compaction runs. The default of 4,
+///   combined with the flush every commit forces, means compaction runs every four commits whatever
+///   they contain.
+/// - `OCTEZ_NDS_ROCKSDB_DISABLE_AUTO_COMPACTION`: stop compacting the working database at all.
+///   Presence is what is read rather than the value, so anything enables it, `0` included. Level
+///   zero is then free to grow for as long as the sweep runs: RocksDB conditions each of its
+///   level-zero write stalls on automatic compaction being enabled, precisely because no
+///   compaction would arrive to relieve one.
+#[cfg(rocksdb_test_utils)]
+fn add_measurement_tuning(options: &mut rocksdb::Options) {
+    if let Ok(trigger) = std::env::var("OCTEZ_NDS_ROCKSDB_L0_TRIGGER") {
+        let trigger = trigger
+            .parse()
+            .expect("OCTEZ_NDS_ROCKSDB_L0_TRIGGER should be a number");
+
+        options.set_level_zero_file_num_compaction_trigger(trigger);
+    }
+
+    if std::env::var("OCTEZ_NDS_ROCKSDB_DISABLE_AUTO_COMPACTION").is_ok() {
+        options.set_disable_auto_compactions(true);
+    }
+}
+
 fn rocksdb_default_options() -> rocksdb::Options {
     let mut options = rocksdb::Options::default();
     set_memtable_to_hash_link_list(&mut options);
+
+    #[cfg(rocksdb_test_utils)]
+    add_measurement_tuning(&mut options);
+
     options
 }
 
