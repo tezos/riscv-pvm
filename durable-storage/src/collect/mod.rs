@@ -55,6 +55,35 @@ use crate::registry;
 use crate::repo::DirectoryManager;
 use crate::repo::RegistryRepo;
 
+/// A request for a collection in progress to stop early.
+///
+/// Collection is the longest thing the storage does, and a full commit or a reap should not have to
+/// wait for one to finish. Both halves check this often enough to stop promptly, and stopping is
+/// safe at any point: each step leaves everything retained intact, and enumerates what is present
+/// rather than what it expected, so the next round finishes what this one left.
+///
+/// Cloning shares the request, so the handle given to a collection and the one kept by whoever may
+/// need to interrupt it are the same signal.
+#[derive(Debug, Default, Clone)]
+pub struct Suspend(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Suspend {
+    /// A request that has not been made.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ask the collection using this to stop as soon as it can.
+    pub fn request(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether stopping has been asked for.
+    pub fn requested(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// What a collection round reclaimed.
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct Collected {
@@ -63,6 +92,11 @@ pub struct Collected {
 
     /// Database commits that were removed.
     pub database_commits: usize,
+
+    /// Whether the round stopped early because it was asked to.
+    ///
+    /// What it did remove is still removed; the rest is left for the next round.
+    pub suspended: bool,
 }
 
 /// Drop everything the repository no longer needs to serve `target` and the commits after it.
@@ -74,6 +108,7 @@ pub struct Collected {
 pub fn collect<Repo: RegistryRepo>(
     repo: &Repo,
     target: &CommitId,
+    suspend: &Suspend,
 ) -> Result<Collected, OperationalError> {
     let retained_roots = journal::roots_to_retain(&repo.commit_journal()?, target)?;
 
@@ -87,6 +122,11 @@ pub fn collect<Repo: RegistryRepo>(
     let mut collected = Collected::default();
 
     for id in repo.registry_commits()? {
+        if suspend.requested() {
+            collected.suspended = true;
+            return Ok(collected);
+        }
+
         if retained_roots.contains(&id) {
             continue;
         }
@@ -96,6 +136,11 @@ pub fn collect<Repo: RegistryRepo>(
     }
 
     for id in repo.database_commits()? {
+        if suspend.requested() {
+            collected.suspended = true;
+            return Ok(collected);
+        }
+
         if reachable.contains(&id) {
             continue;
         }
@@ -119,9 +164,18 @@ pub fn collect<Repo: RegistryRepo>(
 pub fn collect_all(
     repo: &DirectoryManager,
     target: &CommitId,
+    suspend: &Suspend,
 ) -> Result<(Collected, SweptNodes), OperationalError> {
-    let collected = collect(repo, target)?;
-    let swept = collect_nodes(repo, target)?;
+    let collected = collect(repo, target, suspend)?;
+
+    // A suspended first half leaves commits the second half would treat as retained, so the sweep
+    // would keep nodes that are on their way out. Correct, but wasted work: the next round does
+    // both halves against a settled set.
+    if collected.suspended {
+        return Ok((collected, SweptNodes::default()));
+    }
+
+    let swept = collect_nodes(repo, target, suspend)?;
 
     Ok((collected, swept))
 }
@@ -134,6 +188,7 @@ pub fn collect_all(
 pub fn collect_nodes(
     repo: &DirectoryManager,
     target: &CommitId,
+    suspend: &Suspend,
 ) -> Result<SweptNodes, OperationalError> {
     let entries = repo.commit_journal()?;
     let positions = journal::latest_positions(&entries);
@@ -168,7 +223,7 @@ pub fn collect_nodes(
         }
     }
 
-    sweep::sweep(repo.merkle_store(), &roots, floor)
+    sweep::sweep(repo.merkle_store(), &roots, floor, suspend)
 }
 
 /// The database commits referenced by any of `roots`.
@@ -275,7 +330,8 @@ mod tests {
         let second = fixture.commit(b"a", b"2");
         let third = fixture.commit(b"a", b"3");
 
-        let collected = collect(&fixture.repo, &third).expect("collection should succeed");
+        let collected =
+            collect(&fixture.repo, &third, &Suspend::new()).expect("collection should succeed");
 
         assert_eq!(collected.registry_commits, 2);
         assert_eq!(fixture.registry_commits(), HashSet::from([third]));
@@ -315,7 +371,7 @@ mod tests {
             "the second root should still reference the first database's commit"
         );
 
-        collect(&fixture.repo, &second).expect("collection should succeed");
+        collect(&fixture.repo, &second, &Suspend::new()).expect("collection should succeed");
 
         let present = fixture.database_commits();
         for id in &shared {
@@ -329,6 +385,53 @@ mod tests {
             .expect("the retained root should still check out");
     }
 
+    // A round asked to stop before it starts removes nothing and says so, leaving the repository
+    // exactly as it was for the next round to finish.
+    #[test]
+    fn a_suspended_round_removes_nothing_and_reports_it() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(b"a", b"1");
+        let second = fixture.commit(b"a", b"2");
+
+        let before = (fixture.registry_commits(), fixture.database_commits());
+
+        let suspend = Suspend::new();
+        suspend.request();
+
+        let collected =
+            collect(&fixture.repo, &second, &suspend).expect("collection should succeed");
+
+        assert!(collected.suspended);
+        assert_eq!(collected.registry_commits, 0);
+        assert_eq!(collected.database_commits, 0);
+        assert_eq!(
+            (fixture.registry_commits(), fixture.database_commits()),
+            before
+        );
+    }
+
+    // What a suspended round left is picked up by the next one, so suspending costs progress but
+    // never correctness.
+    #[test]
+    fn a_later_round_finishes_what_a_suspended_one_left() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(b"a", b"1");
+        let second = fixture.commit(b"a", b"2");
+
+        let suspend = Suspend::new();
+        suspend.request();
+        collect(&fixture.repo, &second, &suspend).expect("the suspended round should succeed");
+
+        let collected = collect(&fixture.repo, &second, &Suspend::new())
+            .expect("the later round should succeed");
+
+        assert!(!collected.suspended);
+        assert_eq!(collected.registry_commits, 1);
+        assert_eq!(fixture.registry_commits(), HashSet::from([second]));
+    }
+
     // Collecting at the oldest root is a no-op, since everything is at or after it.
     #[test]
     fn collecting_at_the_oldest_root_removes_nothing() {
@@ -338,7 +441,8 @@ mod tests {
         fixture.commit(b"a", b"2");
 
         let before = (fixture.registry_commits(), fixture.database_commits());
-        let collected = collect(&fixture.repo, &first).expect("collection should succeed");
+        let collected =
+            collect(&fixture.repo, &first, &Suspend::new()).expect("collection should succeed");
 
         assert_eq!(collected, Collected::default());
         assert_eq!(
@@ -356,10 +460,11 @@ mod tests {
         fixture.commit(b"a", b"1");
         let second = fixture.commit(b"a", b"2");
 
-        collect(&fixture.repo, &second).expect("the first round should succeed");
+        collect(&fixture.repo, &second, &Suspend::new()).expect("the first round should succeed");
         let after_first = (fixture.registry_commits(), fixture.database_commits());
 
-        let collected = collect(&fixture.repo, &second).expect("the second round should succeed");
+        let collected = collect(&fixture.repo, &second, &Suspend::new())
+            .expect("the second round should succeed");
 
         assert_eq!(collected, Collected::default());
         assert_eq!(
@@ -377,10 +482,10 @@ mod tests {
         let first = fixture.commit(b"a", b"1");
         let second = fixture.commit(b"a", b"2");
 
-        collect(&fixture.repo, &second).expect("collection should succeed");
+        collect(&fixture.repo, &second, &Suspend::new()).expect("collection should succeed");
 
         assert!(matches!(
-            collect(&fixture.repo, &first),
+            collect(&fixture.repo, &first, &Suspend::new()),
             Err(OperationalError::CollectionTargetNotRecorded { .. })
         ));
     }
@@ -394,7 +499,7 @@ mod tests {
         fixture.commit(b"a", b"1");
         let second = fixture.commit(b"a", b"2");
 
-        collect(&fixture.repo, &second).expect("collection should succeed");
+        collect(&fixture.repo, &second, &Suspend::new()).expect("collection should succeed");
 
         let third = fixture.commit(b"a", b"3");
 
@@ -489,7 +594,8 @@ mod node_tests {
 
         let before = fixture.nodes();
 
-        let (_, swept) = collect_all(&fixture.repo, &third).expect("collection should succeed");
+        let (_, swept) =
+            collect_all(&fixture.repo, &third, &Suspend::new()).expect("collection should succeed");
 
         assert!(swept.nodes > 0, "the earlier commits left nodes behind");
         assert!(swept.edges > 0, "their edges should go with them");
@@ -516,6 +622,73 @@ mod node_tests {
         }
     }
 
+    // A node a collection took reads back as collected, rather than as an inconsistent store.
+    // The distinction is what lets a caller recover by checking out again instead of treating the
+    // repository as broken.
+    #[test]
+    fn a_collected_node_reads_back_as_collected() {
+        let mut fixture = Fixture::new();
+
+        let first = fixture.commit(&[b"a", b"b", b"c"], b"1");
+        let second = fixture.commit(&[b"a", b"b", b"c"], b"2");
+
+        // The tree root of the first commit's database, which the second commit supersedes.
+        let superseded = *registry::database_commits(&fixture.repo, &first)
+            .expect("reading the manifest should succeed")
+            .first()
+            .expect("the registry has a database")
+            .as_hash();
+
+        assert!(
+            fixture.repo.merkle_store().get(superseded.as_ref()).is_ok(),
+            "the node should be there before collecting"
+        );
+
+        let (_, swept) = collect_all(&fixture.repo, &second, &Suspend::new())
+            .expect("collection should succeed");
+        assert!(swept.nodes > 0, "the first commit should have left nodes");
+
+        assert!(
+            fixture.repo.merkle_store().has_collected(),
+            "the store should remember that it collected"
+        );
+
+        let error = match fixture.repo.merkle_store().get(superseded.as_ref()) {
+            Ok(_) => panic!("the superseded root should have been collected"),
+            Err(error) => error,
+        };
+
+        assert!(
+            matches!(
+                error,
+                crate::errors::Error::Operational(OperationalError::NodeCollected { .. })
+            ),
+            "expected a collected-node error, got {error:?}"
+        );
+    }
+
+    // A store that has never collected reports an absent node as simply absent, so the distinction
+    // means something.
+    #[test]
+    fn an_absent_node_is_not_blamed_on_collection() {
+        let fixture = Fixture::new();
+
+        assert!(!fixture.repo.merkle_store().has_collected());
+
+        let error = match fixture.repo.merkle_store().get(&[7u8; 32]) {
+            Ok(_) => panic!("nothing was ever written under that hash"),
+            Err(error) => error,
+        };
+
+        assert!(
+            !matches!(
+                error,
+                crate::errors::Error::Operational(OperationalError::NodeCollected { .. })
+            ),
+            "a store that never collected should not blame collection, got {error:?}"
+        );
+    }
+
     // Collecting at the oldest root keeps every node, since every commit is retained.
     #[test]
     fn collecting_at_the_oldest_root_keeps_every_node() {
@@ -525,7 +698,8 @@ mod node_tests {
         fixture.commit(&[b"a"], b"2");
 
         let before = (fixture.nodes(), fixture.edges());
-        let (_, swept) = collect_all(&fixture.repo, &first).expect("collection should succeed");
+        let (_, swept) =
+            collect_all(&fixture.repo, &first, &Suspend::new()).expect("collection should succeed");
 
         assert_eq!(swept, SweptNodes::default());
         assert_eq!((fixture.nodes(), fixture.edges()), before);
@@ -539,10 +713,12 @@ mod node_tests {
         fixture.commit(&[b"a", b"b"], b"1");
         let second = fixture.commit(&[b"a", b"b"], b"2");
 
-        collect_all(&fixture.repo, &second).expect("the first round should succeed");
+        collect_all(&fixture.repo, &second, &Suspend::new())
+            .expect("the first round should succeed");
         let after_first = (fixture.nodes(), fixture.edges());
 
-        let swept = collect_nodes(&fixture.repo, &second).expect("the second round should succeed");
+        let swept = collect_nodes(&fixture.repo, &second, &Suspend::new())
+            .expect("the second round should succeed");
 
         assert_eq!(swept, SweptNodes::default());
         assert_eq!((fixture.nodes(), fixture.edges()), after_first);
@@ -556,10 +732,11 @@ mod node_tests {
         fixture.commit(&[b"a"], b"1");
         let second = fixture.commit(&[b"a"], b"2");
 
-        collect_all(&fixture.repo, &second).expect("collection should succeed");
+        collect_all(&fixture.repo, &second, &Suspend::new()).expect("collection should succeed");
 
         let third = fixture.commit(&[b"a"], b"3");
-        collect_all(&fixture.repo, &third).expect("the second collection should succeed");
+        collect_all(&fixture.repo, &third, &Suspend::new())
+            .expect("the second collection should succeed");
 
         let restored = Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), third)
             .expect("the newest root should check out");
@@ -585,7 +762,7 @@ mod node_tests {
         fixture.commit(&[b"a", b"b", b"c"], b"1");
         let second = fixture.commit(&[b"a"], b"2");
 
-        collect_all(&fixture.repo, &second).expect("collection should succeed");
+        collect_all(&fixture.repo, &second, &Suspend::new()).expect("collection should succeed");
 
         let restored = Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), second)
             .expect("the retained root should check out");

@@ -43,8 +43,97 @@ use crate::errors::OperationalError;
 /// is not a slot and is replaced by the next attempt.
 const PENDING_PREFIX: &str = ".pending-";
 
+/// Suffix of the file a slot's lease is taken on.
+///
+/// Beside the slot rather than inside it, so that taking a lease does not write into a directory
+/// whose whole point is being an untouched image, and so the lock survives the slot's removal long
+/// enough for the remover to hold it.
+const LEASE_SUFFIX: &str = ".lease";
+
 /// Which full commit a slot holds, counting from one.
 pub type SlotId = u64;
+
+/// A held claim on a slot, keeping it from being reaped.
+///
+/// Slots are what other processes read, since the live store cannot be opened by a second writer.
+/// A reader takes one of these for as long as it is reading, and reaping skips any slot that is
+/// leased.
+///
+/// The claim is an `flock`, so the kernel drops it when the process holding it dies. A reader that
+/// crashes therefore cannot pin a slot forever, which a lockfile checked by hand would allow.
+#[derive(Debug)]
+pub struct SlotLease {
+    /// Releasing the lock is this handle being dropped.
+    _file: fs::File,
+
+    /// Which slot is claimed.
+    slot: SlotId,
+}
+
+impl SlotLease {
+    /// Which slot this lease claims.
+    pub fn slot(&self) -> SlotId {
+        self.slot
+    }
+}
+
+/// Claim `slot` for reading, so that reaping leaves it alone.
+///
+/// Fails with [`OperationalError::CommitNotFound`] if there is no such slot. Several readers may
+/// hold a lease on the same slot at once; only reaping needs it to itself.
+pub fn lease_slot(slots_dir: &Path, slot: SlotId) -> Result<SlotLease, OperationalError> {
+    if !slot_path(slots_dir, slot).exists() {
+        return Err(OperationalError::CommitNotFound);
+    }
+
+    let file = lease_file(slots_dir, slot)?;
+
+    // Shared: readers do not exclude each other, only the reaper.
+    if !try_flock(&file, libc::LOCK_SH)? {
+        return Err(OperationalError::CommitNotFound);
+    }
+
+    Ok(SlotLease { _file: file, slot })
+}
+
+/// Open, creating if needed, the file a slot's lease is taken on.
+fn lease_file(slots_dir: &Path, slot: SlotId) -> Result<fs::File, OperationalError> {
+    let path = lease_path(slots_dir, slot);
+
+    fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|error| OperationalError::TempCreationFailed { path, error })
+}
+
+/// Where a slot's lease is taken.
+fn lease_path(slots_dir: &Path, slot: SlotId) -> PathBuf {
+    slots_dir.join(format!("{slot}{LEASE_SUFFIX}"))
+}
+
+/// Take `operation` on `file` without waiting, reporting whether it was granted.
+///
+/// Never blocks: a reaper that waited on a reader would hold up whatever asked it to reap, and the
+/// answer it wants - leave this one alone for now - is available immediately.
+fn try_flock(file: &fs::File, operation: libc::c_int) -> Result<bool, OperationalError> {
+    use std::os::fd::AsRawFd;
+
+    // Safety: the descriptor is owned by `file` and outlives the call.
+    if unsafe { libc::flock(file.as_raw_fd(), operation | libc::LOCK_NB) } == 0 {
+        return Ok(true);
+    }
+
+    let error = std::io::Error::last_os_error();
+
+    match error.raw_os_error() {
+        // Held by someone else, which is an answer rather than a failure.
+        Some(libc::EWOULDBLOCK) => Ok(false),
+        _ => Err(OperationalError::FileReadFailed { error }),
+    }
+}
 
 impl MerkleStore {
     /// Take a full commit: checkpoint this store into a new slot under `slots_dir`.
@@ -128,8 +217,9 @@ pub fn latest_slot(slots_dir: &Path) -> Result<Option<SlotId>, OperationalError>
 /// Reaping is what actually returns the disk a slot was holding: until then its hard links keep the
 /// files that were live when it was taken, however much compaction has rewritten since.
 ///
-/// Keeping fewer than one is refused rather than obeyed, since it would leave the repository with
-/// no image to recover from.
+/// A slot someone holds a [`SlotLease`] on is left where it is and reported in the log, to be
+/// reaped by a later round once the reader has finished. Keeping fewer than one slot is refused
+/// rather than obeyed, since it would leave the repository with no image to recover from.
 pub fn reap_slots(slots_dir: &Path, keep: usize) -> Result<usize, OperationalError> {
     let keep = keep.max(1);
     let slots = slots(slots_dir)?;
@@ -140,17 +230,44 @@ pub fn reap_slots(slots_dir: &Path, keep: usize) -> Result<usize, OperationalErr
 
     let mut reaped = 0;
     for slot in slots.into_iter().take(drop_count) {
-        let path = slot_path(slots_dir, slot);
-
-        match fs::remove_dir_all(&path) {
-            Ok(()) => reaped += 1,
-            // Already gone, which is what a repeated reap finds.
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(OperationalError::DirRemovalFailed { path, error }),
+        if reap_slot(slots_dir, slot)? {
+            reaped += 1;
         }
     }
 
     Ok(reaped)
+}
+
+/// Remove one slot if nothing is reading it, reporting whether it went.
+fn reap_slot(slots_dir: &Path, slot: SlotId) -> Result<bool, OperationalError> {
+    let lease = lease_file(slots_dir, slot)?;
+
+    // Exclusive, and held for the removal: a reader taking a shared lease meanwhile would find the
+    // slot half-removed otherwise.
+    if !try_flock(&lease, libc::LOCK_EX)? {
+        log::info!("leaving Merkle store slot {slot} in place: a reader holds a lease on it");
+        return Ok(false);
+    }
+
+    let path = slot_path(slots_dir, slot);
+
+    match fs::remove_dir_all(&path) {
+        Ok(()) => {}
+        // Already gone, which is what a repeated reap finds.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(OperationalError::DirRemovalFailed { path, error }),
+    }
+
+    // The lock is on this file, so it is unlinked last and while still held. A reader arriving
+    // afterwards creates a fresh one and is granted a lease on a slot that is no longer there,
+    // which is why taking a lease checks that the slot exists and reading it can still fail.
+    if let Err(error) = fs::remove_file(lease_path(slots_dir, slot))
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(OperationalError::FileWriteFailed { error });
+    }
+
+    Ok(true)
 }
 
 /// Put the contents of `slot` back where the live store is opened from.
@@ -377,6 +494,80 @@ mod tests {
                 .as_ref(),
             b"body"
         );
+    }
+
+    // A leased slot is left alone by reaping, and the one after it still goes.
+    #[test]
+    fn reaping_leaves_a_leased_slot_alone() {
+        let tmp = TestableTmpdir::new();
+        let (store, slots_dir) = fixture(&tmp);
+
+        for _ in 0..3 {
+            store.take_slot(&slots_dir).expect("taking should succeed");
+        }
+
+        let lease = lease_slot(&slots_dir, 1).expect("leasing should succeed");
+        assert_eq!(lease.slot(), 1);
+
+        assert_eq!(
+            reap_slots(&slots_dir, 1).expect("reaping should succeed"),
+            1,
+            "only the unleased older slot should go"
+        );
+        assert_eq!(
+            slots(&slots_dir).expect("listing should succeed"),
+            vec![1, 3],
+            "the leased slot should still be there"
+        );
+
+        // Once the reader is done, a later round takes it.
+        drop(lease);
+        assert_eq!(
+            reap_slots(&slots_dir, 1).expect("reaping should succeed"),
+            1
+        );
+        assert_eq!(slots(&slots_dir).expect("listing should succeed"), vec![3]);
+    }
+
+    // Several readers can hold a slot at once; leases exclude the reaper, not each other.
+    #[test]
+    fn leases_do_not_exclude_each_other() {
+        let tmp = TestableTmpdir::new();
+        let (store, slots_dir) = fixture(&tmp);
+
+        store.take_slot(&slots_dir).expect("taking should succeed");
+
+        let first = lease_slot(&slots_dir, 1).expect("the first lease should succeed");
+        let second = lease_slot(&slots_dir, 1).expect("the second lease should succeed");
+
+        drop((first, second));
+    }
+
+    // A slot that is not there cannot be leased, so a reader learns that rather than holding a
+    // claim on nothing.
+    #[test]
+    fn an_absent_slot_cannot_be_leased() {
+        let tmp = TestableTmpdir::new();
+        let (_store, slots_dir) = fixture(&tmp);
+
+        assert!(matches!(
+            lease_slot(&slots_dir, 7),
+            Err(OperationalError::CommitNotFound)
+        ));
+    }
+
+    // A lease file is not mistaken for a slot.
+    #[test]
+    fn a_lease_file_is_not_a_slot() {
+        let tmp = TestableTmpdir::new();
+        let (store, slots_dir) = fixture(&tmp);
+
+        store.take_slot(&slots_dir).expect("taking should succeed");
+        let lease = lease_slot(&slots_dir, 1).expect("leasing should succeed");
+
+        assert_eq!(slots(&slots_dir).expect("listing should succeed"), vec![1]);
+
+        drop(lease);
     }
 
     // Restoring over a store that is still there is refused, rather than mixing the two.

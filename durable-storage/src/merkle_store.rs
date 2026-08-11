@@ -87,6 +87,15 @@ impl Stamp {
     }
 }
 
+/// The file recording that a store has collected at least once.
+///
+/// Beside the store rather than a key inside it, which a sweep would scan and take for a node.
+fn collected_marker(store_dir: &Path) -> PathBuf {
+    let mut path = store_dir.as_os_str().to_owned();
+    path.push("-collected");
+    PathBuf::from(path)
+}
+
 /// The key an edge from `parent` to `child` is stored under.
 ///
 /// Child first, so that every edge into one child is contiguous and its parents can be found by
@@ -127,6 +136,13 @@ pub struct MerkleStore {
     /// Every database of a repository shares it, which is what lets a node written through one be
     /// recognised as already stored by the others.
     store_id: StoreId,
+
+    /// Whether anything has ever been collected from this store.
+    ///
+    /// Changes what an absent node means. Before a collection it can only be a bug; after one it is
+    /// most likely a state being read while its nodes were reclaimed, which is worth telling apart.
+    /// Persisted, since the distinction outlives the process that collected.
+    collected: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for MerkleStore {
@@ -179,8 +195,39 @@ impl MerkleStore {
 
         match value {
             Some(value) => Ok(value),
+            // Once anything has been collected here, an absent node is most likely one that was
+            // reclaimed while something was still reading it, which the caller can recover from by
+            // checking out again. Said plainly rather than left to look like a corrupt store.
+            None if self.has_collected() => Err(OperationalError::NodeCollected {
+                root: <[u8; Hash::DIGEST_SIZE]>::try_from(key)
+                    .map(Hash::from)
+                    .unwrap_or_else(|_| Hash::from([0u8; Hash::DIGEST_SIZE])),
+            })?,
             None => Err(InvalidArgumentError::KeyNotFound)?,
         }
+    }
+
+    /// Whether anything has ever been collected from this store.
+    pub fn has_collected(&self) -> bool {
+        self.collected.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Record that a collection has removed something from this store.
+    ///
+    /// Written through to disk, so that a later process reading a node the collection took still
+    /// learns why it is missing.
+    pub fn note_collected(&self) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        if self
+            .collected
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(());
+        }
+
+        std::fs::write(collected_marker(&self.path), [])
+            .map_err(|error| OperationalError::FileWriteFailed { error })
     }
 
     /// Store `data` as the node body under `key`.
@@ -533,6 +580,7 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
 
     let store = Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
+        collected: std::sync::atomic::AtomicBool::new(collected_marker(&key).exists()),
         path: key.clone(),
         read_only: false,
         store_id: StoreId::next(),
@@ -575,6 +623,7 @@ pub fn open_read_only(path: &Path) -> Result<Arc<MerkleStore>, OperationalError>
     Ok(Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
         read_only: true,
+        collected: std::sync::atomic::AtomicBool::new(collected_marker(path).exists()),
         // Never registered, so nothing looks this up and Drop finds no entry of its own to remove.
         path: path.to_path_buf(),
         store_id: StoreId::next(),

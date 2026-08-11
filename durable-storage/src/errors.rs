@@ -131,6 +131,20 @@ pub enum OperationalError {
     #[error("This repository was opened for reading only")]
     RepositoryIsReadOnly,
 
+    /// A node is absent from a store that has collected, so collection is the likely reason.
+    ///
+    /// Distinct from [`OperationalError::CommitDataMissing`] on purpose. That one means the storage
+    /// is inconsistent and there is nothing to be done about it. This one means a state was being
+    /// read while the nodes behind it were reclaimed, which is a hazard of holding a checkout across
+    /// a collection rather than a corrupt store: checking the state out again resolves it.
+    ///
+    /// It cannot be told apart from a genuinely missing node with certainty - a store cannot know
+    /// which of its absent keys it deleted - so this is reported wherever a collection has ever run.
+    #[error(
+        "Node {root:?} is absent from a store that has collected; a state was likely read while its nodes were being reclaimed"
+    )]
+    NodeCollected { root: Hash },
+
     /// The lazy resolver encountered an internally inconsistent identifier state.
     ///
     /// `LazyId` values must always hold either (though can hold both):

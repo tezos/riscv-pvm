@@ -29,6 +29,7 @@ use std::collections::HashMap;
 
 use octez_riscv_data::hash::Hash;
 
+use super::Suspend;
 use crate::avl::node::stored_children;
 use crate::errors::OperationalError;
 use crate::journal::Seq;
@@ -46,6 +47,12 @@ pub struct SweptNodes {
 
     /// Reverse edges removed with them.
     pub edges: usize,
+
+    /// Whether the sweep stopped early because it was asked to.
+    ///
+    /// What it deleted is deleted; the rest is left for the next round, which starts again from
+    /// what is present.
+    pub suspended: bool,
 }
 
 /// Delete every node in `store` that no root in `roots` still reaches.
@@ -57,6 +64,7 @@ pub fn sweep(
     store: &MerkleStore,
     roots: &HashMap<Hash, Seq>,
     floor: Seq,
+    suspend: &Suspend,
 ) -> Result<SweptNodes, OperationalError> {
     let mut liveness = Liveness {
         store,
@@ -75,8 +83,21 @@ pub fn sweep(
     let mut swept = SweptNodes::default();
 
     for (key, len) in dead {
+        // Checked per node rather than per batch: deciding one is a walk of bounded length, so this
+        // is as fine-grained as stopping needs to be.
+        if suspend.requested() {
+            swept.suspended = true;
+            return Ok(swept);
+        }
+
         if liveness.of(&key)?.is_some() {
             continue;
+        }
+
+        // Noted before the first removal, so that a crash part-way still leaves a store that knows
+        // an absent node may be one it collected.
+        if swept.nodes == 0 {
+            store.note_collected()?;
         }
 
         swept.edges += remove_node(store, &key)?;

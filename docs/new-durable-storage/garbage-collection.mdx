@@ -22,6 +22,7 @@ A repository is a directory tree of databases and commits:
   registries/journal                    the order commits were made in
   merkle/                               Merkle node bodies, shared by the repository
   merkle-commits/<n>/                   recoverable images of that store
+  merkle-commits/<n>.lease              what a reader of one holds
 ```
 
 Each database is a RocksDB instance holding the values you store, keyed by your key.
@@ -96,11 +97,6 @@ Collection is safe to interrupt and repeat.
 It prunes the journal to the retained roots, removes the manifests of the registry commits it dropped, then removes the database commits no retained manifest reaches.
 Everything retained is intact at each point in between, and each step after the first enumerates what is present rather than what the journal says should be, so a round left unfinished is picked up by the next one.
 Pruning first is also what makes a stale target safe: a root an earlier round already collected past is no longer in the journal, so collecting at it is refused rather than taken as a floor that would retain commits whose data has already gone.
-
-<Warning>
-Collection must not run while the repository is being committed to, and two collections must not overlap.
-Neither is enforced.
-</Warning>
 
 The two sections below are what that removal means for each half of a commit.
 
@@ -244,6 +240,42 @@ The high-water mark is the live set plus roughly one full-commit period of garba
 Reaping never removes the last slot, so a repository always has something to recover from.
 </Warning>
 
+### Leases for other processes
+
+Full commits are what other processes read, since the live store cannot be opened by a second writer.
+A reader takes a lease on the one it opens, and reaping leaves a leased slot where it is for a later round to take.
+
+Leases are `flock`s, so the kernel releases one held by a process that dies and a crashed reader cannot pin a slot forever.
+Several readers may hold the same slot at once; only reaping needs it to itself, and it never waits for a reader.
+
+<Warning>
+A lease is taken on a file beside the slot, not inside it.
+A reader that takes one just as a reap removes the slot can therefore be granted a lease on a slot that is no longer there, so opening it can still fail.
+</Warning>
+
+## Interrupting a collection
+
+Collection is the longest thing the storage does, and a full commit or a reap should not wait for one to finish.
+A collection can be asked to stop, and both halves check often enough to stop promptly.
+
+Stopping is safe at any point.
+What was removed stays removed, each step leaves everything retained intact, and every step enumerates what is present rather than what it expected — so the next round finishes what the last one left.
+A round that stopped says so, and stops before the Merkle sweep rather than sweeping against a commit set that is still half-collected.
+
+## When a state is read after its nodes go
+
+Collection must not run while the repository is being committed to, and two collections must not overlap.
+Neither is enforced; the caller serialises them.
+
+A reader holding a state across a collection is a different matter, and one the storage can say something useful about.
+Once anything has been collected from a Merkle store, the store records it, and an absent node is then reported as collected rather than as missing commit data.
+The two mean different things: missing commit data means the storage is inconsistent and there is nothing to be done, while a collected node means a state was read while the nodes behind it were reclaimed, which checking the state out again resolves.
+
+<Note>
+A store cannot know which of its absent keys it deleted, so this is reported wherever a collection has ever run.
+It says a collection is the likely explanation, not a certain one.
+</Note>
+
 ## Planned mechanism
 
 <Note>
@@ -251,12 +283,6 @@ This section describes work that is not implemented yet.
 Everything above describes how the storage behaves today.
 Sections move out of here as the work lands.
 </Note>
-
-### Leases for other processes
-
-Slots are what other processes read, since the live store cannot be opened by a second writer.
-A reader takes a lease on the slot it opens, and reaping respects leases.
-Leases use `flock`, so the kernel releases one held by a process that dies.
 
 ### Where the flush belongs
 
@@ -266,7 +292,7 @@ Putting the durability boundary and the flush boundary in the same place is what
 
 ### Interface
 
-Collection runs to completion in the caller's thread today.
+Collection runs in the caller's thread today, and stopping one is a request the caller makes and then waits on by returning.
 The storage instead exposes it as an operation that starts in the background, together with the operations a rollup node needs to observe and control it: whether a collection has finished, cancelling one, and waiting for one to complete.
 Serialising it against committing, which the caller is currently responsible for, belongs with those.
 

@@ -15,6 +15,7 @@ use anyhow::Result;
 use super::measure::commits_disk_usage;
 use super::measure::disk_usage;
 use super::sample::DiskUsage;
+use crate::collect::Suspend;
 use crate::collect::collect_all;
 use crate::commit::CommitId;
 use crate::repo::DirectoryManager;
@@ -35,7 +36,7 @@ pub(super) fn prune_unreachable(
         ..PruneOutcome::default()
     };
 
-    let (collected, swept) = collect_all(repo, target).context("collecting")?;
+    let (collected, swept) = collect_all(repo, target, &Suspend::new()).context("collecting")?;
     outcome.databases_removed = collected.database_commits as u64;
     outcome.registries_removed = collected.registry_commits as u64;
     outcome.nodes_removed = swept.nodes as u64;
