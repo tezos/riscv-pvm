@@ -195,9 +195,9 @@ fn add_creation_options(options: &mut rocksdb::Options) {
 /// the new durable storage is not the RISC-V PVM's alone, and is meant to serve the WASM PVM
 /// too.
 ///
-/// - `OCTEZ_NDS_ROCKSDB_L0_TRIGGER`: files at level zero before compaction runs. The default of 4,
-///   combined with the flush every commit forces, means compaction runs every four commits whatever
-///   they contain.
+/// - `OCTEZ_NDS_ROCKSDB_L0_TRIGGER`: files at level zero before compaction runs, overriding the
+///   default of twenty set below. At RocksDB's own default of four, combined with the flush every
+///   commit forces, compaction runs every four commits whatever they contain.
 /// - `OCTEZ_NDS_ROCKSDB_DISABLE_AUTO_COMPACTION`: stop compacting the working database at all.
 ///   Presence is what is read rather than the value, so anything enables it, `0` included. Level
 ///   zero is then free to grow for as long as the sweep runs: RocksDB conditions each of its
@@ -218,9 +218,41 @@ fn add_measurement_tuning(options: &mut rocksdb::Options) {
     }
 }
 
+/// Number of level-zero files to accumulate before compacting them downwards.
+///
+/// Compaction is unusually expensive here because commits are retained: a checkpoint hard-links the
+/// files live when it was taken, so rewriting a file ends sharing for every checkpoint taken before
+/// it. Keys are spread by hash, so a level-zero file spans the whole key space and overlaps
+/// everything below, which makes each compaction a rewrite of the whole base level.
+///
+/// The trigger counts *files*, and creating a checkpoint flushes the memtable, so one file appears
+/// per commit however little it contains. Left at RocksDB's default of four, compaction therefore
+/// runs every four commits regardless of how much was written. Raising it makes the cadence coarser,
+/// which is paid for by the bloom filters below: more files at level zero means more of them to
+/// search on a lookup that finds nothing.
+const LEVEL_ZERO_COMPACTION_TRIGGER: i32 = 20;
+
+/// Bits per key for the bloom filters, giving roughly a 1% false positive rate.
+const BLOOM_FILTER_BITS_PER_KEY: f64 = 10.0;
+
+/// Add bloom filters, so a lookup can skip files that cannot hold the key.
+///
+/// Both column families are looked up by whole key and never scanned by range - blobs by content
+/// hash, values by their key - which is exactly the shape bloom filters serve. Without them a
+/// lookup consults the index of every file whose key range covers the key, which for hash-spread
+/// keys is most of them.
+fn add_bloom_filters(options: &mut rocksdb::Options) {
+    let mut table_options = rocksdb::BlockBasedOptions::default();
+    table_options.set_bloom_filter(BLOOM_FILTER_BITS_PER_KEY, false);
+
+    options.set_block_based_table_factory(&table_options);
+}
+
 fn rocksdb_default_options() -> rocksdb::Options {
     let mut options = rocksdb::Options::default();
     set_memtable_to_hash_link_list(&mut options);
+    add_bloom_filters(&mut options);
+    options.set_level_zero_file_num_compaction_trigger(LEVEL_ZERO_COMPACTION_TRIGGER);
 
     #[cfg(rocksdb_test_utils)]
     add_measurement_tuning(&mut options);
