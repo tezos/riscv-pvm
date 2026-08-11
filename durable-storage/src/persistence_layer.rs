@@ -31,6 +31,7 @@
 
 use std::mem::ManuallyDrop;
 use std::path::Path;
+use std::sync::Arc;
 
 use bincode::BorrowDecode;
 use bincode::Encode;
@@ -43,6 +44,7 @@ use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
+use crate::merkle_store::MerkleStore;
 use crate::merkle_worker::CommittedRoot;
 use crate::merkle_worker::MerkleWorker;
 use crate::repo::DirectoryManager;
@@ -301,6 +303,20 @@ fn rocksdb_blob_cf_creation_options() -> rocksdb::Options {
     options
 }
 
+/// Options for the repository-wide Merkle node store.
+///
+/// Created on first use and reopened on every use after that, so unlike a database instance it must
+/// tolerate already existing - a repository outlives any one run against it.
+///
+/// No merge operator: nodes are written whole and never appended to, unlike values, which take
+/// offset writes. Otherwise the same as everything else here - the store is looked up by content
+/// hash, so it wants the same filters and the same compaction cadence.
+pub(crate) fn rocksdb_node_store_options() -> rocksdb::Options {
+    let mut options = rocksdb_default_options();
+    options.create_if_missing(true);
+    options
+}
+
 /// These options are used for opening a rocksdb instance from a checkpoint.
 pub(crate) fn rocksdb_checkpoint_options() -> rocksdb::Options {
     let mut options = rocksdb_default_options();
@@ -316,39 +332,39 @@ fn blob_cf_of(db: &rocksdb::DB) -> &rocksdb::ColumnFamily {
         .expect("the rocksdb instance should always contain the data cf")
 }
 
-/// Retrieve the data associated with a blob key from `db`.
-fn blob_get_from<'db>(
-    db: &'db rocksdb::DB,
+/// Report the outcome of a pinned lookup, given the `column` it was made in.
+///
+/// The lookup differs between callers - a column family or the default one, in this instance or in
+/// the repository-wide Merkle store - but what becomes of its result does not. `column` names the
+/// place in any failure, so that a missing node and a missing value do not read as the same fault.
+pub(crate) fn found_or_missing<'db>(
+    outcome: Result<Option<rocksdb::DBPinnableSlice<'db>>, rocksdb::Error>,
+    column: &str,
     key: &[u8],
 ) -> Result<rocksdb::DBPinnableSlice<'db>, Error> {
-    let entry =
-        db.get_pinned_cf(blob_cf_of(db), key)
-            .map_err(|error| OperationalError::GetFailed {
-                column: BLOB_CF.to_string(),
-                key: key.to_owned(),
-                error,
-            })?;
-
-    match entry {
-        Some(value) => Ok(value),
-        None => Err(InvalidArgumentError::KeyNotFound)?,
-    }
-}
-
-/// Retrieve the value associated with a key from `db`.
-fn get_from<'db>(db: &'db rocksdb::DB, key: &[u8]) -> Result<rocksdb::DBPinnableSlice<'db>, Error> {
-    let value = db
-        .get_pinned(key)
-        .map_err(|error| OperationalError::GetFailed {
-            column: KV_CF.to_owned(),
-            key: key.to_owned(),
-            error,
-        })?;
+    let value = outcome.map_err(|error| OperationalError::GetFailed {
+        column: column.to_owned(),
+        key: key.to_owned(),
+        error,
+    })?;
 
     match value {
         Some(value) => Ok(value),
         None => Err(InvalidArgumentError::KeyNotFound)?,
     }
+}
+
+/// Retrieve the data associated with a blob key from `db`.
+fn blob_get_from<'db>(
+    db: &'db rocksdb::DB,
+    key: &[u8],
+) -> Result<rocksdb::DBPinnableSlice<'db>, Error> {
+    found_or_missing(db.get_pinned_cf(blob_cf_of(db), key), BLOB_CF, key)
+}
+
+/// Retrieve the value associated with a key from `db`.
+fn get_from<'db>(db: &'db rocksdb::DB, key: &[u8]) -> Result<rocksdb::DBPinnableSlice<'db>, Error> {
+    found_or_missing(db.get_pinned(key), KV_CF, key)
 }
 
 /// Open the database committed at `commit_path` in read-only mode.
@@ -445,8 +461,11 @@ pub struct PersistenceLayer {
     /// persistence layer.
     _tempdir: TempDir,
 
-    /// Distinguishes this store from every other, including checkpoints taken of it.
-    store_id: StoreId,
+    /// Where Merkle node bodies are read from and written to.
+    ///
+    /// Shared by every database of the repository, so a node reached from several of them is stored
+    /// once. See [`MerkleStore`].
+    merkle: Arc<MerkleStore>,
 }
 
 impl PersistenceLayer {
@@ -477,12 +496,17 @@ impl PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(temp_db),
             _tempdir: tempdir,
-            store_id: StoreId::next(),
+            merkle: repo.merkle_store().clone(),
         })
     }
 
     fn blob_cf(&self) -> &rocksdb::ColumnFamily {
         blob_cf_of(&self.db_instance)
+    }
+
+    /// The repository-wide store holding this database's Merkle node bodies.
+    pub fn merkle_store(&self) -> &Arc<MerkleStore> {
+        &self.merkle
     }
 }
 
@@ -490,7 +514,11 @@ impl ReadableKeyValueStore for PersistenceLayer {
     type Repo = DirectoryManager;
 
     fn store_id(&self) -> StoreId {
-        self.store_id
+        self.merkle.store_id()
+    }
+
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        self.merkle.get(key.as_ref())
     }
 
     type Merkle = MerkleWorker<Self>;
@@ -515,8 +543,11 @@ pub struct ReadOnlyPersistenceLayer {
     /// and there is nothing to destroy afterwards.
     db_instance: rocksdb::DB,
 
-    /// Distinguishes this view from every other store.
-    store_id: StoreId,
+    /// Where Merkle node bodies are read from.
+    ///
+    /// The commit directory holds this database's values; its nodes live in the repository's store,
+    /// which is why reading a commit in place still needs the repository.
+    merkle: Arc<MerkleStore>,
 }
 
 impl ReadableKeyValueStore for ReadOnlyPersistenceLayer {
@@ -524,7 +555,11 @@ impl ReadableKeyValueStore for ReadOnlyPersistenceLayer {
 
     type Merkle = CommittedRoot;
     fn store_id(&self) -> StoreId {
-        self.store_id
+        self.merkle.store_id()
+    }
+
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        self.merkle.get(key.as_ref())
     }
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
@@ -540,10 +575,13 @@ impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
     type Writeable = PersistenceLayer;
 
     fn checkout_read_only(repo: &Self::Repo, id: &CommitId) -> Result<Self, OperationalError> {
-        Self::checkout_read_only_from_path(&repo.database_commit_dir(id))
+        Self::checkout_read_only_from_path(repo, &repo.database_commit_dir(id))
     }
 
-    fn checkout_read_only_from_path(commit_path: &Path) -> Result<Self, OperationalError> {
+    fn checkout_read_only_from_path(
+        repo: &Self::Repo,
+        commit_path: &Path,
+    ) -> Result<Self, OperationalError> {
         // A directory that is not a published commit is no commit at all - an interrupted removal
         // by an older version of `commit` can leave one behind, and opening it would fail further
         // in, with an error about the database rather than about the commit.
@@ -553,7 +591,7 @@ impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
 
         Ok(Self {
             db_instance: open_committed_read_only(commit_path)?,
-            store_id: StoreId::next(),
+            merkle: repo.merkle_store().clone(),
         })
     }
 
@@ -583,12 +621,24 @@ impl WriteableKeyValueStore for PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(db),
             _tempdir: tempdir,
-            store_id: StoreId::next(),
+            merkle: repo.merkle_store().clone(),
         })
     }
 
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError> {
         Self::clone_as_checkpoint(&self.db_instance, repo)
+    }
+
+    fn node_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        self.merkle.set(key.as_ref(), data.as_ref())
+    }
+
+    fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+        self.merkle.delete(key.as_ref())
     }
 
     fn blob_set(
@@ -706,6 +756,12 @@ impl PersistentKeyValueStore for PersistenceLayer {
             return Ok(());
         }
 
+        // The checkpoint below captures this database's values. The Merkle nodes they are indexed
+        // by live in the repository's store, which the checkpoint does not touch, so they are put
+        // beyond reach of a crash first - otherwise a commit could survive while the nodes it
+        // refers to did not.
+        self.merkle.sync()?;
+
         // Stage the checkpoint in a directory of its own and move it into place, rather than
         // checkpointing straight into `commit_path`: RocksDB stages a checkpoint at
         // `<destination>.tmp`, so two commits of one id would otherwise share - and clobber - a
@@ -776,6 +832,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
     }
 
     fn checkout_from_path(
+        repo: &DirectoryManager,
         commit_path: &Path,
         working_path: TempDir,
     ) -> Result<Self, OperationalError> {
@@ -810,7 +867,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(database),
             _tempdir: working_path,
-            store_id: StoreId::next(),
+            merkle: repo.merkle_store().clone(),
         })
     }
 
@@ -818,7 +875,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
         let commit_path = repo.database_commit_dir(id);
         let working_path = repo.temp_database_dir()?;
 
-        Self::checkout_from_path(&commit_path, working_path)
+        Self::checkout_from_path(repo, &commit_path, working_path)
     }
 }
 

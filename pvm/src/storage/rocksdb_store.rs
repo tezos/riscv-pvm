@@ -77,7 +77,7 @@ impl PersistentBlobStore for RocksDBStore {
         let tmp_commit_path = PathBuf::from(path.as_ref()).join("tmp");
 
         let inner = if persist_path.exists() {
-            PersistenceLayer::checkout_from_path(persist_path.as_path(), tempdir)
+            PersistenceLayer::checkout_from_path(&repo, persist_path.as_path(), tempdir)
         } else {
             PersistenceLayer::new(&repo)
         }?;
