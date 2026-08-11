@@ -302,6 +302,11 @@ fn save_base(
             .commit_to_path(&in_memory_dir.join(&hex))
             .context("snapshotting an in-memory database")?;
     }
+
+    // Those snapshots hold the databases' values; the nodes indexing them are in the repository's
+    // Merkle store, so they are saved alongside.
+    super::save_merkle_base(failure_dir, persistent_repo)?;
+
     Ok(())
 }
 
@@ -335,7 +340,7 @@ fn restore_base(
         let working = persistent_repo
             .temp_database_dir()
             .context("creating a scratch directory")?;
-        PersistenceLayer::checkout_from_path(&persistent_dir.join(&hex), working)
+        PersistenceLayer::checkout_from_path(persistent_repo, &persistent_dir.join(&hex), working)
             .context("loading a persistent database snapshot")?
             .commit(persistent_repo, &db_commit)
             .context("registering a persistent database")?;
@@ -343,10 +348,14 @@ fn restore_base(
         let working = persistent_repo
             .temp_database_dir()
             .context("creating a scratch directory")?;
-        InMemoryKeyValueStore::checkout_from_path(&in_memory_dir.join(&hex), working)
-            .context("loading an in-memory database snapshot")?
-            .commit(in_memory_repo, &db_commit)
-            .context("registering an in-memory database")?;
+        InMemoryKeyValueStore::checkout_from_path(
+            in_memory_repo,
+            &in_memory_dir.join(&hex),
+            working,
+        )
+        .context("loading an in-memory database snapshot")?
+        .commit(in_memory_repo, &db_commit)
+        .context("registering an in-memory database")?;
     }
     Ok(())
 }
@@ -365,6 +374,11 @@ pub fn replay_failure(dir: &Path) -> Result<()> {
     let repo_dir = out_dir.join("repo");
     fs::create_dir_all(&repo_dir)
         .with_context(|| format!("creating repo dir {}", repo_dir.display()))?;
+
+    // Before the handle is constructed, since that opens the Merkle store and the databases
+    // restored below refer to the nodes saved with the artifact.
+    super::restore_merkle_base(dir, &repo_dir)?;
+
     let persistent_repo =
         DirectoryManager::new(&repo_dir).context("creating the directory manager")?;
     let in_memory_repo = InMemoryRepo::default();
