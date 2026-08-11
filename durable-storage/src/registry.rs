@@ -235,6 +235,10 @@ where
             .repo
             .write_registry_commit(&registry_commit, &encoded)?;
 
+        // Recorded after the manifest, so that an interrupted commit leaves a manifest collection
+        // can reclaim rather than a recorded root with nothing behind it.
+        self.inner.repo.record_commit(&registry_commit)?;
+
         Ok(registry_commit)
     }
 }

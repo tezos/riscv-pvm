@@ -33,6 +33,10 @@ pub struct InMemoryRepo {
 
     #[cfg(test_utils)]
     registry_commits: std::sync::Arc<RwLock<HashMap<crate::commit::CommitId, Vec<u8>>>>,
+
+    /// The order in which registry commits were recorded, oldest first.
+    #[cfg(test_utils)]
+    journal: std::sync::Arc<RwLock<Vec<crate::journal::JournalEntry>>>,
 }
 
 #[cfg(test_utils)]
@@ -452,5 +456,32 @@ impl crate::repo::RegistryRepo for InMemoryRepo {
             .map_err(|_| OperationalError::LockPoisoned)?;
         commits.insert(*id, bytes.to_vec());
         Ok(())
+    }
+
+    fn record_commit(
+        &self,
+        root: &crate::commit::CommitId,
+    ) -> Result<crate::journal::Seq, OperationalError> {
+        let mut journal = self
+            .journal
+            .write()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+
+        let seq = match journal.last() {
+            Some(last) => last.seq.next(),
+            None => crate::journal::Seq::FIRST,
+        };
+
+        journal.push(crate::journal::JournalEntry { seq, root: *root });
+
+        Ok(seq)
+    }
+
+    fn commit_journal(&self) -> Result<Vec<crate::journal::JournalEntry>, OperationalError> {
+        Ok(self
+            .journal
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .clone())
     }
 }

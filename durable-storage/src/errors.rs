@@ -119,6 +119,9 @@ pub enum OperationalError {
     #[error("The root hash of restored registry does not match the commit id.")]
     RegistryCommitMismatch,
 
+    #[error("No commit was recorded for the collection target {target}")]
+    CollectionTargetNotRecorded { target: String },
+
     /// The lazy resolver encountered an internally inconsistent identifier state.
     ///
     /// `LazyId` values must always hold either (though can hold both):

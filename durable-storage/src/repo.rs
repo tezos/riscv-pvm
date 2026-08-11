@@ -4,6 +4,10 @@
 
 //! Repository management for the Durable Storage
 
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -11,6 +15,9 @@ use tempfile::TempDir;
 
 use crate::commit::CommitId;
 use crate::errors::OperationalError;
+use crate::journal;
+use crate::journal::JournalEntry;
+use crate::journal::Seq;
 
 /// The [`DirectoryManager`] represents the root directory where commitments & internal data should
 /// be stored.
@@ -30,6 +37,9 @@ pub struct DirectoryManager {
 
     /// Directory prefix for [`crate::registry::Registry`] commitments
     registry_commits_dir: PathBuf,
+
+    /// Directory holding registry-wide data, including the commit journal
+    registries_dir: PathBuf,
 }
 
 impl DirectoryManager {
@@ -62,14 +72,17 @@ impl DirectoryManager {
         let database_commits_dir = databases_dir.join("commits");
         ensure_dir_exists(&database_commits_dir)?;
 
+        let registries_dir = path.join("registries");
+
         // The directory for registry commits holds files. Each file is named after the commit ID.
-        let registry_commits_dir = path.join("registries").join("commits");
+        let registry_commits_dir = registries_dir.join("commits");
         ensure_dir_exists(&registry_commits_dir)?;
 
         Ok(Self {
             temp_databases_dir,
             database_commits_dir,
             registry_commits_dir,
+            registries_dir,
         })
     }
 
@@ -101,6 +114,45 @@ impl DirectoryManager {
     pub fn registry_commit_file(&self, id: &CommitId) -> PathBuf {
         self.registry_commits_dir.join(id.hex_encode())
     }
+
+    /// The file recording the order in which registry commits were made.
+    pub fn journal_file(&self) -> PathBuf {
+        self.registries_dir.join("journal")
+    }
+
+    /// The most recently recorded journal entry, if the repository has committed anything.
+    ///
+    /// Reads only the tail of the journal, since assigning the next sequence number is on the
+    /// commit path and the journal grows with every commit until collection prunes it.
+    fn last_journal_entry(&self) -> Result<Option<JournalEntry>, OperationalError> {
+        let mut journal = match std::fs::File::open(self.journal_file()) {
+            Ok(journal) => journal,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(OperationalError::FileReadFailed { error }),
+        };
+
+        let len = journal
+            .metadata()
+            .map_err(|error| OperationalError::FileReadFailed { error })?
+            .len();
+
+        // A trailing partial entry is a torn write, so the last whole entry is the one before it.
+        let whole = len / journal::ENTRY_BYTES as u64;
+        let Some(last) = whole.checked_sub(1) else {
+            return Ok(None);
+        };
+
+        journal
+            .seek(SeekFrom::Start(last * journal::ENTRY_BYTES as u64))
+            .map_err(|error| OperationalError::FileReadFailed { error })?;
+
+        let mut bytes = [0u8; journal::ENTRY_BYTES];
+        journal
+            .read_exact(&mut bytes)
+            .map_err(|error| OperationalError::FileReadFailed { error })?;
+
+        Ok(Some(JournalEntry::decode(&bytes)))
+    }
 }
 
 /// Persistence interface for a [`crate::registry::Registry`] repo.
@@ -112,6 +164,16 @@ pub trait RegistryRepo: Clone {
 
     /// Write `bytes` as the registry manifest for `id`.
     fn write_registry_commit(&self, id: &CommitId, bytes: &[u8]) -> Result<(), OperationalError>;
+
+    /// Record `root` as the most recently committed registry root.
+    ///
+    /// Called after the manifest is written, so a crash in between leaves an unrecorded manifest
+    /// rather than a recorded root with nothing behind it. The commit id was never returned to the
+    /// caller in that case, so nothing can reference it and collection is free to reclaim it.
+    fn record_commit(&self, root: &CommitId) -> Result<Seq, OperationalError>;
+
+    /// Every commit recorded by [`RegistryRepo::record_commit`], in the order they were recorded.
+    fn commit_journal(&self) -> Result<Vec<JournalEntry>, OperationalError>;
 }
 
 impl RegistryRepo for DirectoryManager {
@@ -130,5 +192,150 @@ impl RegistryRepo for DirectoryManager {
         let commit_path = self.registry_commit_file(id);
         std::fs::write(&commit_path, bytes)
             .map_err(|error| OperationalError::FileWriteFailed { error })
+    }
+
+    fn record_commit(&self, root: &CommitId) -> Result<Seq, OperationalError> {
+        let seq = match self.last_journal_entry()? {
+            Some(last) => last.seq.next(),
+            None => Seq::FIRST,
+        };
+
+        let entry = JournalEntry { seq, root: *root };
+
+        let mut journal = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.journal_file())
+            .map_err(|error| OperationalError::FileWriteFailed { error })?;
+
+        journal
+            .write_all(&entry.encode())
+            .map_err(|error| OperationalError::FileWriteFailed { error })?;
+
+        Ok(seq)
+    }
+
+    fn commit_journal(&self) -> Result<Vec<JournalEntry>, OperationalError> {
+        match std::fs::read(self.journal_file()) {
+            Ok(bytes) => Ok(journal::decode_entries(&bytes)),
+            // A repository that has never committed has no journal, which reads as no entries
+            // rather than as a failure.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(OperationalError::FileReadFailed { error }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use octez_riscv_data::hash::Hash;
+    use octez_riscv_test_utils::TestableTmpdir;
+
+    use super::*;
+
+    fn root(byte: u8) -> CommitId {
+        CommitId::from(Hash::from([byte; Hash::DIGEST_SIZE]))
+    }
+
+    fn manager(tmp: &TestableTmpdir) -> DirectoryManager {
+        DirectoryManager::new(tmp.path()).expect("creating the directory manager should succeed")
+    }
+
+    // A repository that has never committed reads as an empty journal rather than failing on the
+    // missing file.
+    #[test]
+    fn a_fresh_repository_has_an_empty_journal() {
+        let tmp = TestableTmpdir::new();
+
+        assert!(
+            manager(&tmp)
+                .commit_journal()
+                .expect("reading an absent journal should succeed")
+                .is_empty()
+        );
+    }
+
+    // Recorded commits are numbered from zero, in order, and read back in the order they were
+    // recorded.
+    #[test]
+    fn commits_are_recorded_in_order() {
+        let tmp = TestableTmpdir::new();
+        let repo = manager(&tmp);
+
+        let seqs: Vec<Seq> = (1..=3)
+            .map(|byte| {
+                repo.record_commit(&root(byte))
+                    .expect("recording should succeed")
+            })
+            .collect();
+
+        assert_eq!(
+            seqs,
+            vec![Seq::FIRST, Seq::FIRST.next(), Seq::FIRST.next().next()]
+        );
+        assert_eq!(
+            repo.commit_journal().expect("reading should succeed"),
+            seqs.into_iter()
+                .zip(1..=3)
+                .map(|(seq, byte)| JournalEntry {
+                    seq,
+                    root: root(byte),
+                })
+                .collect::<Vec<_>>()
+        );
+    }
+
+    // The journal is on disk, so a repository reopened at the same path continues numbering where
+    // it left off instead of restarting and colliding with recorded positions.
+    #[test]
+    fn numbering_continues_across_reopening() {
+        let tmp = TestableTmpdir::new();
+
+        manager(&tmp)
+            .record_commit(&root(1))
+            .expect("recording should succeed");
+        let seq = manager(&tmp)
+            .record_commit(&root(2))
+            .expect("recording should succeed");
+
+        assert_eq!(seq, Seq::FIRST.next());
+        assert_eq!(
+            manager(&tmp)
+                .commit_journal()
+                .expect("reading should succeed")
+                .len(),
+            2
+        );
+    }
+
+    // A crash part-way through appending an entry leaves a partial record. Reading skips it, and
+    // the next commit is numbered from the last whole entry, overwriting nothing.
+    #[test]
+    fn a_torn_final_entry_is_ignored_and_renumbered_over() {
+        let tmp = TestableTmpdir::new();
+        let repo = manager(&tmp);
+
+        repo.record_commit(&root(1))
+            .expect("recording should succeed");
+
+        // Simulate the interrupted append of a second entry.
+        let mut torn = std::fs::read(repo.journal_file()).expect("the journal should exist");
+        torn.extend_from_slice(&[0xff; journal::ENTRY_BYTES - 1]);
+        std::fs::write(repo.journal_file(), &torn)
+            .expect("writing the torn journal should succeed");
+
+        assert_eq!(
+            repo.commit_journal().expect("reading should succeed"),
+            vec![JournalEntry {
+                seq: Seq::FIRST,
+                root: root(1)
+            }],
+            "the partial entry should not be reported"
+        );
+
+        let seq = repo
+            .record_commit(&root(2))
+            .expect("recording after a torn write should succeed");
+        assert_eq!(seq, Seq::FIRST.next());
     }
 }
