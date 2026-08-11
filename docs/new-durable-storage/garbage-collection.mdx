@@ -22,21 +22,49 @@ A repository is a directory tree of databases and commits:
     temporary/db_<random>/checkpoint/   working databases
     commits/<commit_id>/                database commits
   registries/commits/<commit_id>        registry manifests
+  registries/journal                    the order commits were made in
+  merkle/                               Merkle node bodies, shared by the repository
 ```
 
-Each database is a RocksDB instance holding two column families:
+Each database is a RocksDB instance holding the values you store, keyed by your key.
+Merkle (AVL) node and tree bodies are keyed by content hash and live in one store shared by the whole repository, not in the databases.
 
-| Column family | Contents | Keyed by |
-|---|---|---|
-| `default` | Values you store | Your key |
-| `blob` | Merkle (AVL) node bodies | Hash of the tree that holds the node |
-
-A database commit is a RocksDB checkpoint, taken with `Checkpoint::create_checkpoint`.
-A checkpoint flushes both column families' memtables and then **hard-links** the SST files, so a commit shares its data with the working database instead of copying it.
+A database commit is a RocksDB checkpoint of that database, taken with `Checkpoint::create_checkpoint`.
+A checkpoint flushes the memtable and then **hard-links** the SST files, so a commit shares its data with the working database instead of copying it.
 That makes committing cheap, and it leaves a directory another process can open read-only without disturbing it: a checkpoint is a complete database in its own right - its own `CURRENT` and `MANIFEST`, alongside hard links to the SST files - and a read-only open writes nothing whatsoever into what it reads, not even a log.
+
+A commit directory therefore holds that database's values, and the nodes indexing them are found through the repository.
+Committing syncs the Merkle store before taking the checkpoint, so a commit never refers to a node that a crash could take with it.
 
 A registry commit is a single file naming the database commits that make up that registry.
 Database commits are content-addressed, so several registry commits can name the same database commit.
+
+### Why nodes are shared
+
+A node reachable from several databases used to be stored once per database, and every commit directory hard-linked the files holding every node its database had ever written.
+Node data is the large majority of what a retained commit pins, so that cost was paid again for each commit kept.
+
+Sharing removes it at a stroke: nodes are content-addressed, so the same node written from anywhere is the same key and is stored once.
+The store sits outside the per-commit checkpoints, so its compaction churn is paid once instead of once per retained commit, and it gives one place from which a node can actually be deleted.
+
+What a retained commit pins is now values alone.
+
+<Note>
+RocksDB allows one writer per directory, so a repository has one instance of this store however many handles are open onto it.
+Constructing a `DirectoryManager` opens it and holds it, and handles for the same path share it.
+</Note>
+
+### Reading a repository someone else is writing
+
+A single writer per directory also means a second process cannot open a repository the ordinary way at all, and reading a running node's storage from outside is something external tooling has to do.
+
+`DirectoryManager::open_read_only` opens the store for reading instead, which any number of processes may do at once.
+Reading a commit through it works as it does anywhere; writing through it is refused rather than failing somewhere further down.
+
+<Warning>
+The view is of the store as it stood when it was opened, and it is not protected from collection: nodes it can reach may be deleted while it holds them.
+Reading one then fails rather than returning something wrong.
+</Warning>
 
 ## What the storage reclaims today
 
@@ -53,16 +81,15 @@ Deleting the commit directories that are no longer reachable from any retained r
 ### Merkle nodes are not
 
 Node bodies are content-addressed.
-Every version of every node is a distinct key, and nothing ever deletes one — `blob_delete` has no callers outside tests.
+Every version of every node is a distinct key, and nothing ever deletes one.
 RocksDB has no way to know that an old node is dead, so compaction preserves all of them.
 
-The consequence is that the newest commit of a database hard-links SSTs that hold **every node ever written to it**.
-Deleting older commit directories frees nothing there, because the newest commit and the working database still reference the same files.
+Removing commit directories cannot reach them at all, and now plainly so: the Merkle store is not a commit directory and no commit directory holds a link to it.
 
 <Warning>
-The `blob` column family grows with the total number of node writes over the lifetime of a database, not with the size of the state.
-No amount of commit deletion reclaims it, because the dead nodes sit in files that live commits still need.
-Reclaiming them requires deleting the node keys themselves and letting compaction rewrite the files.
+The Merkle store grows with the total number of node writes over the lifetime of the repository, not with the size of the state.
+No amount of commit deletion reclaims it.
+Reclaiming it requires deleting the node keys themselves and letting compaction rewrite the files.
 </Warning>
 
 ### Collecting at a root
@@ -144,12 +171,13 @@ The trigger counts files, and a forced flush produces one per commit regardless 
 
 The trigger is therefore set to twenty rather than RocksDB's default of four, which makes that cadence five times coarser and cuts the cost of retaining a commit by most of what compaction was adding to it.
 
-Both column families also carry whole-key bloom filters.
-A lookup is by whole key in both — blobs by content hash, values by their key — so a filter lets a lookup skip a file outright, where otherwise it consults the index of every file whose range covers the key, which for hash-spread keys is most of them.
+Everything here also carries whole-key bloom filters.
+Lookups are by whole key throughout — nodes by content hash, values by their key — so a filter lets a lookup skip a file outright, where otherwise it consults the index of every file whose range covers the key, which for hash-spread keys is most of them.
 Filters matter more as level zero holds more files, but the coarser trigger does not in fact cost reads: compacting often does not keep level zero small, because each compaction rewrites the whole base level, and flushes accumulate behind it while it runs.
 
 What remains of the gap is the flush.
-A commit still forces a level-zero file per column family whatever it holds, so cadence still drives compaction — five times less often, but by the same mechanism.
+A commit still forces a level-zero file for the database it commits, whatever that holds, so cadence still drives compaction — five times less often, but by the same mechanism.
+The Merkle store is not checkpointed per commit, so nothing forces a flush there and its compaction follows how much is written rather than how often.
 
 ## Planned mechanism
 
@@ -159,15 +187,10 @@ Everything above describes how the storage behaves today.
 Sections move out of here as the work lands.
 </Note>
 
-What remains is the Merkle side, which the mechanism above cannot reach.
+What remains is collecting the Merkle side, which the mechanism above cannot reach.
+The store the nodes now live in is the place that becomes possible from.
 
-### Merkle side: one shared store
-
-Node bodies move out of the per-database instances into a single store shared by the whole repository.
-Sharing gives deduplication between commits and between the databases of a registry, and it gives one place from which nodes can actually be deleted.
-
-It also takes node bodies out of the retention problem described above.
-Node data is the large majority of what retained commits pin, so a store outside the per-commit checkpoints pays its own compaction churn once rather than once per retained commit.
+### Deleting nodes: liveness by reverse edges
 
 A commit directory then holds only the values, so it is self-contained in the sense above but no longer holds the nodes those values are indexed by.
 Reading a commit's tree from another process therefore means reading the shared store as well, which is what the slots below are for.

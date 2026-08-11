@@ -1376,16 +1376,16 @@ mod tests {
     use crate::storage::in_memory::InMemoryKeyValueStore;
     use crate::storage::in_memory::InMemoryRepo;
 
-    /// A wrapper around an in-memory key-value store that counts the number of `blob_get` calls.
+    /// A wrapper around an in-memory key-value store that counts node lookups.
     #[derive(Debug, Default)]
     struct CountingKeyValueStore {
         inner: InMemoryKeyValueStore,
-        blob_get_calls: AtomicUsize,
+        node_get_calls: AtomicUsize,
     }
 
     impl CountingKeyValueStore {
-        fn blob_get_calls(&self) -> usize {
-            self.blob_get_calls.load(Ordering::SeqCst)
+        fn node_get_calls(&self) -> usize {
+            self.node_get_calls.load(Ordering::SeqCst)
         }
     }
 
@@ -1398,8 +1398,12 @@ mod tests {
             self.inner.store_id()
         }
 
+        fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+            self.node_get_calls.fetch_add(1, Ordering::SeqCst);
+            self.inner.node_get(key)
+        }
+
         fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
-            self.blob_get_calls.fetch_add(1, Ordering::SeqCst);
             self.inner.blob_get(key)
         }
 
@@ -1416,8 +1420,20 @@ mod tests {
         fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
             Ok(Self {
                 inner: self.inner.try_clone()?,
-                blob_get_calls: AtomicUsize::new(self.blob_get_calls()),
+                node_get_calls: AtomicUsize::new(self.node_get_calls()),
             })
+        }
+
+        fn node_set(
+            &self,
+            key: impl AsRef<[u8]>,
+            data: impl AsRef<[u8]>,
+        ) -> Result<(), OperationalError> {
+            self.inner.node_set(key, data)
+        }
+
+        fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+            self.inner.node_delete(key)
         }
 
         fn blob_set(
@@ -1486,10 +1502,10 @@ mod tests {
         let lazy_resolver = LazyResolver::new(persistence_layer.clone());
         let lazy_tree: LazyTreeId = LazyTreeId::from(tree_hash);
 
-        assert_eq!(persistence_layer.blob_get_calls(), 0);
+        assert_eq!(persistence_layer.node_get_calls(), 0);
         assert_eq!(Hash::from_foldable(&lazy_tree), tree_hash);
         assert_eq!(
-            persistence_layer.blob_get_calls(),
+            persistence_layer.node_get_calls(),
             0,
             "hash-only operations should not trigger loads"
         );
@@ -1498,7 +1514,7 @@ mod tests {
             .resolve(&lazy_tree)
             .expect("resolving tree should succeed");
         assert_eq!(
-            persistence_layer.blob_get_calls(),
+            persistence_layer.node_get_calls(),
             1,
             "resolving the tree reads the root node body (stored under the tree hash) \
              in a single lookup"
@@ -1513,7 +1529,7 @@ mod tests {
         );
         assert_eq!(Hash::from_foldable(&lazy_root), root_hash);
         assert_eq!(
-            persistence_layer.blob_get_calls(),
+            persistence_layer.node_get_calls(),
             1,
             "the root node is already loaded; folding it needs no further lookup"
         );
@@ -1522,7 +1538,7 @@ mod tests {
             .resolve(lazy_root)
             .expect("resolving root node should succeed");
         assert_eq!(
-            persistence_layer.blob_get_calls(),
+            persistence_layer.node_get_calls(),
             1,
             "the node was already materialised when its tree was resolved \
              (this took a second lookup before storing nodes under the tree hash)"
@@ -1606,17 +1622,17 @@ mod tests {
         let _ = lazy_resolver
             .resolve(&node_id)
             .expect("first resolve should succeed");
-        assert_eq!(persistence_layer.blob_get_calls(), 1);
+        assert_eq!(persistence_layer.node_get_calls(), 1);
 
         let _ = lazy_resolver
             .resolve(&node_id)
             .expect("second resolve should use cache");
-        assert_eq!(persistence_layer.blob_get_calls(), 1);
+        assert_eq!(persistence_layer.node_get_calls(), 1);
 
         let _ = lazy_resolver
             .resolve_mut(&mut node_id)
             .expect("resolve_mut should use cached value");
-        assert_eq!(persistence_layer.blob_get_calls(), 1);
+        assert_eq!(persistence_layer.node_get_calls(), 1);
     }
 
     #[test]
@@ -1645,7 +1661,7 @@ mod tests {
             let node = lazy_resolver
                 .resolve_mut(root_id)
                 .expect("resolve_mut should load node");
-            assert_eq!(persistence_layer.blob_get_calls(), 1);
+            assert_eq!(persistence_layer.node_get_calls(), 1);
 
             node.upsert(
                 &root_key,
@@ -1657,7 +1673,7 @@ mod tests {
                 &mut lazy_resolver,
             )
             .expect("mutating the resolved node should succeed");
-            assert_eq!(persistence_layer.blob_get_calls(), 1);
+            assert_eq!(persistence_layer.node_get_calls(), 1);
         }
 
         let root_id = lazy_tree
@@ -1677,7 +1693,7 @@ mod tests {
         let persisted_tree_hash = lazy_tree.hash();
         persist_tree(&lazy_tree, persistence_layer.as_ref());
         assert_eq!(
-            persistence_layer.blob_get_calls(),
+            persistence_layer.node_get_calls(),
             1,
             "Re-persisting the tree should not load empty child subtrees from storage"
         );
@@ -1687,7 +1703,7 @@ mod tests {
         let reloaded_tree = lazy_resolver
             .resolve(&reloaded_tree_id)
             .expect("resolving persisted mutated tree should succeed");
-        assert_eq!(persistence_layer.blob_get_calls(), 2);
+        assert_eq!(persistence_layer.node_get_calls(), 2);
 
         let reloaded_root = reloaded_tree
             .root()
@@ -1698,7 +1714,7 @@ mod tests {
             .expect("resolving persisted mutated root node should succeed");
         // The root node was already materialised when its tree was resolved above, so no
         // further lookup is needed here (this was a third lookup before the refactor).
-        assert_eq!(persistence_layer.blob_get_calls(), 2);
+        assert_eq!(persistence_layer.node_get_calls(), 2);
 
         let reloaded_node_data = reloaded_node
             .resolve_data(&lazy_resolver)
@@ -1889,13 +1905,13 @@ mod tests {
         prove_resolver
             .resolve(&prove_id)
             .expect("first resolve should succeed");
-        let calls_after_first = persistence_layer.blob_get_calls();
+        let calls_after_first = persistence_layer.node_get_calls();
 
         prove_resolver
             .resolve(&prove_id)
             .expect("second resolve should use cache");
         assert_eq!(
-            persistence_layer.blob_get_calls(),
+            persistence_layer.node_get_calls(),
             calls_after_first,
             "second resolve should not trigger additional storage loads"
         );

@@ -128,6 +128,9 @@ pub enum OperationalError {
     #[error("No commit was recorded for the collection target {target}")]
     CollectionTargetNotRecorded { target: String },
 
+    #[error("This repository was opened for reading only")]
+    RepositoryIsReadOnly,
+
     /// The lazy resolver encountered an internally inconsistent identifier state.
     ///
     /// `LazyId` values must always hold either (though can hold both):

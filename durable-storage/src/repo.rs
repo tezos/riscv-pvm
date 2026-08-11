@@ -20,6 +20,8 @@ use crate::errors::OperationalError;
 use crate::journal;
 use crate::journal::JournalEntry;
 use crate::journal::Seq;
+#[cfg(rocksdb)]
+use crate::merkle_store::MerkleStore;
 
 /// The [`DirectoryManager`] represents the root directory where commitments & internal data should
 /// be stored.
@@ -42,6 +44,17 @@ pub struct DirectoryManager {
 
     /// Directory holding registry-wide data, including the commit journal
     registries_dir: PathBuf,
+
+    /// Directory holding the repository-wide Merkle node store
+    merkle_dir: PathBuf,
+
+    /// The repository's Merkle node store, held open for as long as this handle lives.
+    ///
+    /// Held rather than opened per use so that the databases of a repository share one instance
+    /// that stays open, instead of one that closes when the last database drops and is reopened by
+    /// the next. Cloning a handle shares the store, as it shares everything else here.
+    #[cfg(rocksdb)]
+    merkle: std::sync::Arc<MerkleStore>,
 }
 
 impl DirectoryManager {
@@ -80,12 +93,59 @@ impl DirectoryManager {
         let registry_commits_dir = registries_dir.join("commits");
         ensure_dir_exists(&registry_commits_dir)?;
 
+        let merkle_dir = Self::merkle_dir_in(path);
+
         Ok(Self {
             temp_databases_dir,
             database_commits_dir,
             registry_commits_dir,
             registries_dir,
+            #[cfg(rocksdb)]
+            merkle: crate::merkle_store::open_shared(&merkle_dir)?,
+            merkle_dir,
         })
+    }
+
+    /// Open an existing repository for reading, without taking its writer lock.
+    ///
+    /// The live Merkle store admits a single writer, so a process that is not the one writing cannot
+    /// construct an ordinary handle onto a repository at all. This one reads the store instead,
+    /// which any number of processes may do at once, and is how external tooling reaches a running
+    /// node's storage.
+    ///
+    /// Reading a commit through this works as it does anywhere; writing through it does not.
+    /// The view is of the store as it stood when this was opened.
+    #[cfg(rocksdb)]
+    pub fn open_read_only(path: &Path) -> Result<Self, OperationalError> {
+        let databases_dir = path.join("databases");
+        let registries_dir = path.join("registries");
+
+        // Nothing is created: a reader opens a repository that exists, and creating directories in
+        // one it does not own is not its business.
+        Ok(Self {
+            temp_databases_dir: databases_dir.join("temporary"),
+            database_commits_dir: databases_dir.join("commits"),
+            registry_commits_dir: registries_dir.join("commits"),
+            registries_dir,
+            merkle: crate::merkle_store::open_read_only(&Self::merkle_dir_in(path))?,
+            merkle_dir: Self::merkle_dir_in(path),
+        })
+    }
+
+    /// Whether this handle may only read.
+    #[cfg(rocksdb)]
+    pub fn is_read_only(&self) -> bool {
+        self.merkle.is_read_only()
+    }
+
+    /// Fail if this handle may only read.
+    #[cfg(rocksdb)]
+    fn writeable(&self) -> Result<(), OperationalError> {
+        if self.is_read_only() {
+            return Err(OperationalError::RepositoryIsReadOnly);
+        }
+
+        Ok(())
     }
 
     /// Create a temporary directory suitable for a [`crate::database::Database`].
@@ -120,6 +180,28 @@ impl DirectoryManager {
     /// The file recording the order in which registry commits were made.
     pub fn journal_file(&self) -> PathBuf {
         self.registries_dir.join("journal")
+    }
+
+    /// The directory holding the repository's Merkle node store.
+    pub fn merkle_store_dir(&self) -> PathBuf {
+        self.merkle_dir.clone()
+    }
+
+    /// Where a repository rooted at `path` keeps its Merkle node store.
+    ///
+    /// Available without a handle, because the store is opened when one is constructed: anything
+    /// that needs to put node bodies in place has to do it before that.
+    pub fn merkle_dir_in(path: &Path) -> PathBuf {
+        path.join("merkle")
+    }
+
+    /// The repository's Merkle node store.
+    ///
+    /// Every database of the repository reads and writes nodes here, so a node reached from several
+    /// of them is stored once.
+    #[cfg(rocksdb)]
+    pub fn merkle_store(&self) -> &std::sync::Arc<MerkleStore> {
+        &self.merkle
     }
 
     /// The most recently recorded journal entry, if the repository has committed anything.
@@ -221,12 +303,18 @@ impl RegistryRepo for DirectoryManager {
     }
 
     fn write_registry_commit(&self, id: &CommitId, bytes: &[u8]) -> Result<(), OperationalError> {
+        #[cfg(rocksdb)]
+        self.writeable()?;
+
         let commit_path = self.registry_commit_file(id);
         std::fs::write(&commit_path, bytes)
             .map_err(|error| OperationalError::FileWriteFailed { error })
     }
 
     fn record_commit(&self, root: &CommitId) -> Result<Seq, OperationalError> {
+        #[cfg(rocksdb)]
+        self.writeable()?;
+
         let seq = match self.last_journal_entry()? {
             Some(last) => last.seq.next(),
             None => Seq::FIRST,
@@ -258,6 +346,9 @@ impl RegistryRepo for DirectoryManager {
     }
 
     fn prune_journal(&self, retained: &HashSet<CommitId>) -> Result<(), OperationalError> {
+        #[cfg(rocksdb)]
+        self.writeable()?;
+
         let kept: Vec<u8> = self
             .commit_journal()?
             .into_iter()
@@ -283,6 +374,9 @@ impl RegistryRepo for DirectoryManager {
     }
 
     fn remove_registry_commit(&self, id: &CommitId) -> Result<(), OperationalError> {
+        #[cfg(rocksdb)]
+        self.writeable()?;
+
         match std::fs::remove_file(self.registry_commit_file(id)) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -291,6 +385,9 @@ impl RegistryRepo for DirectoryManager {
     }
 
     fn remove_database_commit(&self, id: &CommitId) -> Result<(), OperationalError> {
+        #[cfg(rocksdb)]
+        self.writeable()?;
+
         let dir = self.database_commit_dir(id);
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => Ok(()),
@@ -344,6 +441,33 @@ mod tests {
 
     fn manager(tmp: &TestableTmpdir) -> DirectoryManager {
         DirectoryManager::new(tmp.path()).expect("creating the directory manager should succeed")
+    }
+
+    // A repository being written to can be opened for reading at the same time. The live Merkle
+    // store admits a single writer, so without this a second process could not open a repository at
+    // all - which is how external tooling reaches a running node.
+    #[cfg(rocksdb)]
+    #[test]
+    fn a_reader_opens_alongside_the_writer() {
+        let tmp = TestableTmpdir::new();
+        let writer = manager(&tmp);
+
+        let reader = DirectoryManager::open_read_only(tmp.path())
+            .expect("a reader should open alongside the writer");
+
+        assert!(reader.is_read_only());
+        assert!(!writer.is_read_only());
+
+        // Writing through the reader is refused rather than failing somewhere further down.
+        assert!(matches!(
+            reader.record_commit(&root(1)),
+            Err(OperationalError::RepositoryIsReadOnly)
+        ));
+
+        // The writer carries on.
+        writer
+            .record_commit(&root(1))
+            .expect("the writer should still record");
     }
 
     // A repository that has never committed reads as an empty journal rather than failing on the

@@ -44,6 +44,8 @@ pub mod key;
 #[cfg(rocksdb_test_utils)]
 pub mod long_test;
 mod merkle_layer;
+#[cfg(rocksdb)]
+pub mod merkle_store;
 mod merkle_worker;
 pub mod persistence_layer;
 pub mod registry;

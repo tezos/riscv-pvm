@@ -78,10 +78,13 @@ pub trait ReadableKeyValueStore: Sized {
     /// Type of repository required to initialise a key value store.
     type Repo;
 
-    /// This store's identity, distinct from every other live store including copies of itself.
+    /// The identity of the store that Merkle node bodies are written to.
     ///
-    /// A copy is a distinct store: it holds what the original held when it was copied, but nothing
-    /// written to the original afterwards. See [`StoreId`].
+    /// Recorded on a node so that committing can tell it is already stored and skip writing it
+    /// again. It identifies wherever [`ReadableKeyValueStore::node_get`] reads from, which is not
+    /// necessarily this instance: a backend may keep nodes in a store shared by the whole
+    /// repository, in which case every database of that repository reports the same identity and a
+    /// node written through one is recognised by all of them. See [`StoreId`].
     fn store_id(&self) -> StoreId;
 
     /// How a Normal-mode database over this store tracks its Merkle root.
@@ -90,8 +93,13 @@ pub trait ReadableKeyValueStore: Sized {
     /// [`WriteableKeyValueStore`]; read-only stores are pinned to a [`CommittedRoot`] by
     /// [`ReadOnlyKeyValueStore`], and so have no tree and no worker thread at all.
     type Merkle: MerkleHandle<Self>;
+    /// Retrieves the Merkle node body associated with the given hash.
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
     /// Retrieves the data associated with the given blob key.
+    ///
+    /// Blobs belong to whoever is using this store as one; the Merkle layer does not keep its nodes
+    /// here. See [`ReadableKeyValueStore::node_get`].
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
     /// Retrieves a value associated with the given key.
@@ -110,6 +118,16 @@ pub trait WriteableKeyValueStore: ReadableKeyValueStore<Merkle = MerkleWorker<Se
 
     /// Attempt to make a copy of the key-value store.
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError>;
+
+    /// Register a Merkle node body under its hash.
+    fn node_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError>;
+
+    /// Deletes the Merkle node body associated with the given hash.
+    fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError>;
 
     /// Register data under a blob key.
     fn blob_set(
@@ -148,7 +166,12 @@ pub trait PersistentKeyValueStore: WriteableKeyValueStore + Sized {
 
     /// Checkout the state from `source_path` but leave it untouched. Modifications to the
     /// resulting state will be reflected in `working_path`.
+    ///
+    /// The repository is needed as well as the path because a commit directory need not hold
+    /// everything the state is made of: a backend keeping Merkle node bodies in a store shared by
+    /// the repository reaches them through `repo`, not through `source_path`.
     fn checkout_from_path(
+        repo: &Self::Repo,
         source_path: &Path,
         working_path: TempDir,
     ) -> Result<Self, OperationalError>;
@@ -173,7 +196,12 @@ pub trait ReadOnlyKeyValueStore: ReadableKeyValueStore<Merkle = CommittedRoot> {
     fn checkout_read_only(repo: &Self::Repo, id: &CommitId) -> Result<Self, OperationalError>;
 
     /// Read the state committed at `source_path`, without making a working copy.
-    fn checkout_read_only_from_path(source_path: &Path) -> Result<Self, OperationalError>;
+    ///
+    /// Takes the repository for the same reason as [`PersistentKeyValueStore::checkout_from_path`].
+    fn checkout_read_only_from_path(
+        repo: &Self::Repo,
+        source_path: &Path,
+    ) -> Result<Self, OperationalError>;
 
     /// Copy the committed state into a fresh working state, which can then be modified.
     fn to_writeable(&self, repo: &Self::Repo) -> Result<Self::Writeable, OperationalError>;
