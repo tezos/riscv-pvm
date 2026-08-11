@@ -496,6 +496,9 @@ impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
     }
 }
 
+#[cfg(rocksdb_test_utils)]
+pub mod measurement;
+
 impl WriteableKeyValueStore for PersistenceLayer {
     fn new(repo: &Self::Repo) -> Result<Self, OperationalError> {
         let tempdir = repo.temp_database_dir()?;
