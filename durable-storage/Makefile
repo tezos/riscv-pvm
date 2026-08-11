@@ -84,9 +84,22 @@ space-metrics-reference: build-gc-space
 	@cargo run -p bench-metrics -- --shape $(REFERENCE_SHAPE) $(MARKDOWN) \
 		space $(SPACE_SAMPLES)
 
+# The same measurement over more commits, for the merge queue and the default branch. Ten commits
+# mostly show the base state; by thirty the dead-node share and the cost of retention have moved far
+# enough to be worth comparing between merges. Around ninety seconds, and two gigabytes of scratch.
+#
+# --sample-every 1 is deliberate. Sharing compares consecutive samples, not consecutive commits, so
+# measuring every other commit would report the sharing of two commits at once and make the figure
+# incomparable with the pull request run.
+space-metrics-long: build-gc-space
+	@cargo run --release --features rocksdb,unstable-test-utils --bin gc_space -- \
+		--databases 1 --keys 250000 --commits 30 --modified-keys 2500 \
+		--sample-every 1 --json-out $(SPACE_SAMPLES) --simulate-dir-gc
+	@cargo run -p bench-metrics -- --shape long $(MARKDOWN) space $(SPACE_SAMPLES)
+
 run-registry-long-test-stable:
 	@cargo run --release --features rocksdb,unstable-test-utils \
 		--bin long_test -- registry test --max-minutes 10 --keep-epochs 1 \
 		--keep-stable-size --fail-on-warning
 
-.PHONY: all check test gen-regression-inputs run-database-long-test reset-database-regressions reset-registry-regressions build-long-test run-registry-long-test run-registry-long-test-stable build-gc-space space-metrics space-metrics-reference
+.PHONY: all check test gen-regression-inputs run-database-long-test reset-database-regressions reset-registry-regressions build-long-test run-registry-long-test run-registry-long-test-stable build-gc-space space-metrics space-metrics-reference space-metrics-long

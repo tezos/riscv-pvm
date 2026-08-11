@@ -14,9 +14,11 @@ on:
 
   workflow_dispatch:
 
-# Only one job may reserve the reference machine at a time
+# Only one job may reserve the reference machine at a time. The group is a literal rather than
+# `${{ github.workflow }}` so that it is shared with the Durable Storage Benchmark workflow, which
+# reserves the same machine: a per-workflow group would let the two run concurrently.
 concurrency:
-  group: ${{ github.workflow }}
+  group: reference-machine
   cancel-in-progress: false
 
 jobs:

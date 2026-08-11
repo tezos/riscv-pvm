@@ -1,0 +1,130 @@
+name: Durable Storage Space Metrics
+
+on:
+  # Trigger this workflow on PRs. A pull request touching nothing but prose cannot move the
+  # figures, and this is not a required check, so skipping it there is safe.
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+  # Trigger this workflow for Merge Queue items
+  merge_group:
+
+  # Trigger this workflow on pushes to these branches
+  push:
+    branches: [main]
+
+# Its own workflow rather than a job in Continuous Integration, so that the run list for this
+# file holds metrics runs and nothing else: the comment below links the default branch's figures,
+# and that link is only useful if every run behind it measured something.
+concurrency:
+  # Cancel previous workflow runs for the same ref (e.g. same PR or branch)
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+  # Cancel only if it is not the main branch
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+env:
+  # Make Cargo output pretty
+  CARGO_TERM_COLOR: "always"
+
+  # Enable Sccache
+  RUSTC_WRAPPER: "sccache"
+
+  # Make sure Sccache automatically uses the GitHub Actions cache
+  SCCACHE_GHA_ENABLED: "true"
+
+  # Only write Sccache on the main branch
+  SCCACHE_GHA_RW_MODE: ${{ github.ref_name == 'main' && 'READ_WRITE' || 'READ_ONLY' }}
+
+jobs:
+  # Reports how much of the storage is garbage, what retaining a commit costs, and how much of a
+  # commit's bytes are shared with the previous one. Small scale on a pull request, so it catches a
+  # regression in those before it merges; the reference-scale run tracks the trend.
+  space-metrics:
+    name: Durable Storage Space Metrics
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup
+        with:
+          # This job saves no cache, so there is nothing for a prefetch to fill: the Continuous
+          # Integration matrix populates the same keys from the same environment, and the Actions
+          # cache is shared across workflows.
+          save-nix-cache: "false"
+          prefetch-cargo: "false"
+
+      - name: Run the space metrics
+        run: |
+          # A pull request gets the short scale, to keep the check quick. The merge queue and the
+          # default branch get the longer one, which runs enough commits for the retention and
+          # sharing figures to say something the short run cannot.
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            target=durable/space-metrics
+          else
+            target=durable/space-metrics-long
+          fi
+
+          # The harness reports on stderr and 'bench-metrics --markdown' writes the table on
+          # stdout, so keeping the two apart separates the headline figures from their detail
+          # without parsing either. Cargo says nothing, to keep its progress out of the report,
+          # and make says nothing about the directory it recurses into, which lands on stdout and
+          # would otherwise be quoted into the comment above the table.
+          export CARGO_TERM_QUIET=true
+
+          make --no-print-directory "$target" MARKDOWN=--markdown \
+            > metrics.md 2> report.txt || status=$?
+
+          # The report is the log for this job, whether the run succeeded or not.
+          cat report.txt
+
+          exit "${status:-0}"
+
+      - name: Compose the report
+        run: |
+          {
+            echo "### Durable storage space metrics"
+            echo
+            cat metrics.md
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "Durable storage space metrics for revision ${{ github.sha }}, at pull request"
+            echo "scale. The scale itself lives in durable-storage/Makefile."
+            echo
+            cat metrics.md
+            echo
+            echo "<details>"
+            echo "<summary>Full report</summary>"
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+            echo "</details>"
+            echo
+            echo "These figures are for catching a regression before it merges. Compare them with"
+            echo "the longer run on the [default branch](${{ github.server_url }}/${{ github.repository }}/actions/workflows/durable-space-metrics.yml?query=branch%3Amain), which measures more commits."
+          } > pr-comment.md
+
+      - name: Comment metrics on PR
+        # A pull request from a fork gets a read-only token, so there is no comment to post; the
+        # metrics still run and the check still passes. Nothing in this job needs a secret, or
+        # reaches the reference machine, so a fork runs it in full.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: thollander/actions-comment-pull-request@v3.0.1
+        with:
+          file-path: pr-comment.md
+          comment-tag: space-metrics
