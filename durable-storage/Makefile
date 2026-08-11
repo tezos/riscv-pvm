@@ -70,7 +70,7 @@ build-gc-space:
 space-metrics: build-gc-space
 	@cargo run --release --features rocksdb,unstable-test-utils --bin gc_space -- \
 		--databases 1 --keys 100000 --commits 10 --modified-keys 1000 \
-		--sample-every 1 --json-out $(SPACE_SAMPLES) --simulate-dir-gc
+		--sample-every 1 --json-out $(SPACE_SAMPLES) --collect
 	@cargo run -p bench-metrics -- --shape pr $(MARKDOWN) space $(SPACE_SAMPLES)
 
 # Same, at the scale worth tracking over time. Intended to be driven by
@@ -80,7 +80,7 @@ space-metrics-reference: build-gc-space
 	@cargo run --release --features rocksdb,unstable-test-utils --bin gc_space -- \
 		--databases $(REFERENCE_DATABASES) --keys $(REFERENCE_KEYS) --commits 20 \
 		--modified-keys $(REFERENCE_MODIFIED) --sample-every 2 \
-		--json-out $(SPACE_SAMPLES) --simulate-dir-gc
+		--json-out $(SPACE_SAMPLES) --collect
 	@cargo run -p bench-metrics -- --shape $(REFERENCE_SHAPE) $(MARKDOWN) \
 		space $(SPACE_SAMPLES)
 
