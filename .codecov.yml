@@ -19,3 +19,7 @@ ignore:
   # Ignore test-only modules
   - "**/test.rs"
   - "**/tests.rs"
+  # Argument parsing for the space accounting harness: no logic, and not reachable from the
+  # test suite, so it can only ever report as uncovered. The harness itself is covered by
+  # the restricted tests in `gc_space::scenario`.
+  - "durable-storage/src/bin/gc_space.rs"

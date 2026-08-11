@@ -32,6 +32,10 @@ pub mod avl;
 pub mod commit;
 pub mod database;
 pub mod errors;
+// The space accounting harness scans committed column families directly, so it is only available
+// when `rocksdb` is enabled.
+#[cfg(rocksdb_test_utils)]
+pub mod gc_space;
 pub mod key;
 // The long-running test exercises the persistence backend directly, so it is
 // only available when `rocksdb` is enabled.

@@ -83,6 +83,11 @@ name = "long_test"
 path = "src/bin/long_test.rs"
 required-features = ["rocksdb", "unstable-test-utils"]
 
+[[bin]]
+name = "gc_space"
+path = "src/bin/gc_space.rs"
+required-features = ["rocksdb", "unstable-test-utils"]
+
 [[bench]]
 name = "avl_tree"
 harness = false

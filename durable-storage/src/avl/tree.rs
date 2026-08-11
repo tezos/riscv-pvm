@@ -230,6 +230,15 @@ impl<NodeId> Tree<NodeId> {
         Tree::<Hash>::from(Some(node_hash)).hash()
     }
 
+    /// The hash of the empty [`Tree`].
+    ///
+    /// Empty trees are never stored, so this is the hash that terminates a walk over the stored
+    /// representation of a tree: a child hash equal to it has no body to read.
+    #[cfg(rocksdb_test_utils)]
+    pub(crate) fn empty_hash() -> Hash {
+        *EMPTY_TREE_HASH
+    }
+
     /// Take the root [`Node`] out of this tree, leaving the [`Tree`] empty.
     pub(crate) const fn take(&mut self) -> Option<NodeId> {
         self.0.take()
