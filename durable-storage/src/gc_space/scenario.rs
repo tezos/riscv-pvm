@@ -106,6 +106,12 @@ pub struct SpaceConfig {
     /// Write one JSON object per sample to this path.
     pub json_out: Option<PathBuf>,
 
+    /// How far behind the tip to collect, in commits.
+    ///
+    /// A rollup node collects at the last commit it has cemented rather than at the newest one, and
+    /// the gap matters: it is what keeps a node settled by one round out of the next round's range.
+    pub collect_window: usize,
+
     /// After the last commit, collect at it and measure again.
     ///
     /// This is what collecting at directory granularity reclaims, so running with it splits the
@@ -209,7 +215,7 @@ impl SpaceConfig {
 
         let mut rng = StdRng::seed_from_u64(self.seed);
 
-        let mut last_commit = base_commit;
+        let mut commits: Vec<CommitId> = Vec::new();
 
         for commit_index in 1..=self.commits {
             modify(&mut registry, &self, &mut rng, commit_index)
@@ -220,7 +226,7 @@ impl SpaceConfig {
                 .commit()
                 .with_context(|| format!("committing at commit {commit_index}"))?;
             let commit_time = started.elapsed();
-            last_commit = commit;
+            commits.push(commit);
 
             if commit_index % self.sample_every != 0 && commit_index != self.commits {
                 continue;
@@ -259,9 +265,47 @@ impl SpaceConfig {
             repo.record_commit(&base_commit)
                 .context("pinning the base state before collecting")?;
 
-            let outcome = prune_unreachable(&repo, &repo_path, &last_commit)
+            // A rollup node collects behind its tip, at the last commit it has cemented, not at the
+            // newest one. That gap is what lets a node settled by one round stay settled: it is relisted
+            // under the newest retained root, which is above the floor of every round until the floor
+            // passes it. Collecting exactly at the tip leaves no such gap.
+            let window = self.collect_window.min(commits.len().saturating_sub(1));
+            let target = commits[commits.len() - 1 - window];
+
+            writeln!(
+                out,
+                "\ncatching up: collecting {window} commit(s) behind the tip, over a store nothing has \
+                 collected before"
+            )?;
+            let outcome = prune_unreachable(&repo, &repo_path, &target)
                 .context("collecting at directory level")?;
             report_prune(&mut out, &outcome, samples.last())?;
+
+            // A settled store, then the churn of one more window, then a round over that churn. This is
+            // the steady state - what a repository that is collected regularly actually pays.
+            if window > 0 {
+                let settled_tip = commits.len();
+
+                for extra in 1..=window {
+                    modify(&mut registry, &self, &mut rng, self.commits + extra)
+                        .context("applying steady-state modifications")?;
+                    commits.push(
+                        registry
+                            .commit()
+                            .context("committing during the steady-state phase")?,
+                    );
+                }
+
+                let target = commits[settled_tip - 1];
+
+                writeln!(
+                    out,
+                    "\nsteady state: {window} commit(s) of churn over a settled store"
+                )?;
+                let outcome = prune_unreachable(&repo, &repo_path, &target)
+                    .context("collecting in the steady state")?;
+                report_prune(&mut out, &outcome, None)?;
+            }
         }
 
         Ok(())
@@ -673,6 +717,9 @@ mod tests {
             seed: 0,
             repo_dir: Some(repo_dir.to_path_buf()),
             json_out: None,
+            // Collect at the tip: the restricted runs are too short for a window to leave
+            // anything behind it.
+            collect_window: 0,
             collect,
         }
     }

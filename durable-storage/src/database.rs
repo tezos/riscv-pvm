@@ -154,7 +154,11 @@ impl<KV: TreeBackedKeyValueStore> Database<KV, Normal> {
     where
         KV: PersistentKeyValueStore,
     {
-        let commit_options = StoreOptions::default().without_node_data();
+        // Read before the nodes are written, so each is recorded as belonging to the commit being
+        // made rather than to whatever came before it.
+        let commit_options = StoreOptions::default()
+            .without_node_data()
+            .written_at(self.inner.persistent.next_commit_seq(repo)?);
         let commit_id = self.inner.merkle.commit(commit_options)?;
         self.inner.persistent.commit(repo, &commit_id)?;
 
