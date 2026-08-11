@@ -8,7 +8,6 @@ use comfy_table::CellAlignment;
 use comfy_table::Color;
 use comfy_table::ContentArrangement;
 use comfy_table::Table;
-use comfy_table::modifiers::UTF8_ROUND_CORNERS;
 use comfy_table::presets::UTF8_FULL;
 use itertools::Itertools;
 
@@ -196,8 +195,7 @@ pub fn table_from_stats(sort_opts: &TableSortArgs, data: &[(&BenchStats, &String
 
     let mut table = Table::new();
     table
-        .load_preset(UTF8_FULL)
-        .apply_modifier(UTF8_ROUND_CORNERS)
+        .load_style(UTF8_FULL.with_rounded_corners())
         .set_content_arrangement(ContentArrangement::Dynamic);
 
     section_summary(&mut table, data);

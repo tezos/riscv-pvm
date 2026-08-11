@@ -40,7 +40,7 @@ pub fn handle_results(
     let all_metrics = [check_transfer_metrics(transfers)?];
 
     let mut all_results = comfy_table::Table::new();
-    all_results.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+    all_results.load_style(comfy_table::presets::ASCII_MARKDOWN);
     all_results.set_header(["Run", "Transfers", "Duration", "TPS"]);
     all_results
         .column_mut(2)

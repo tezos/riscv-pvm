@@ -73,7 +73,7 @@ pub fn handle_results(
         .collect::<Result<Vec<_>>>()?;
 
     let mut all_results = comfy_table::Table::new();
-    all_results.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+    all_results.load_style(comfy_table::presets::ASCII_MARKDOWN);
     all_results.set_header(["Run", "Transfers", "Duration", "TPS"]);
     all_results
         .column_mut(2)
@@ -95,7 +95,7 @@ pub fn handle_results(
 
     if all_metrics.len() > 1 {
         let mut aggregate_result = comfy_table::Table::new();
-        aggregate_result.load_preset(comfy_table::presets::ASCII_MARKDOWN);
+        aggregate_result.load_style(comfy_table::presets::ASCII_MARKDOWN);
         aggregate_result.set_header(["Metric", "Duration", "TPS"]);
         aggregate_result
             .column_mut(1)
