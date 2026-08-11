@@ -997,7 +997,7 @@ where
         // unchanged, so commitments and proofs are unaffected.
         let tree_hash = Tree::<Hash>::present_hash(*self.hash());
         let bytes = serialise(repr)?;
-        store.blob_set(tree_hash, bytes)?;
+        store.node_set(tree_hash, bytes)?;
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {
@@ -1040,7 +1040,7 @@ pub(crate) fn walk_stored_tree(
         }
 
         let bytes = store
-            .blob_get(hash)
+            .node_get(hash)
             .map_err(|error| OperationalError::CommitDataMissing {
                 root: hash,
                 source: Box::new(error),
@@ -1068,7 +1068,7 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
         } = {
             let bytes =
                 store
-                    .blob_get(id)
+                    .node_get(id)
                     .map_err(|error| OperationalError::CommitDataMissing {
                         root: id,
                         source: Box::new(error),

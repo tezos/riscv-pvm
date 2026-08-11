@@ -1229,15 +1229,10 @@ pub(crate) mod tests {
     #[cfg(rocksdb)]
     #[test]
     fn test_database_checkout_missing_root_blob_fails_operationally() {
-        use rocksdb::ColumnFamilyDescriptor;
-
         use super::Database;
         use crate::errors::Error;
         use crate::errors::OperationalError;
-        use crate::persistence_layer::BLOB_CF;
-        use crate::persistence_layer::KV_CF;
         use crate::persistence_layer::PersistenceLayer;
-        use crate::persistence_layer::rocksdb_checkpoint_options;
 
         let (runtime, _keepalive, repo, mut database) =
             new_persistent_database::<PersistenceLayer>();
@@ -1249,28 +1244,12 @@ pub(crate) mod tests {
             .expect("Writing should succeed");
 
         let commit_id = database.commit(&repo).expect("Commit should succeed");
-        let commit_path = repo.database_commit_dir(&commit_id);
 
-        let commit_db = rocksdb::DB::open_cf_descriptors(
-            &rocksdb_checkpoint_options(),
-            &commit_path,
-            [
-                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
-                ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
-            ],
-        )
-        .expect("Opening committed RocksDB should succeed");
-
-        let blob_cf = commit_db
-            .cf_handle(BLOB_CF)
-            .expect("Committed RocksDB should contain the blob column family");
-        commit_db
-            .delete_cf(blob_cf, commit_id.as_hash().as_ref())
-            .expect("Deleting the root blob should succeed");
-        commit_db
-            .flush_cf(blob_cf)
-            .expect("Flushing the blob column family should succeed");
-        drop(commit_db);
+        // Node bodies live in the repository's Merkle store rather than in the commit directory,
+        // so that is where the root has to be removed from to make the commit unreadable.
+        repo.merkle_store()
+            .delete(commit_id.as_hash().as_ref())
+            .expect("Deleting the root node should succeed");
 
         assert!(matches!(
             Database::<PersistenceLayer, _>::checkout(handle, &repo, commit_id),
@@ -1286,15 +1265,10 @@ pub(crate) mod tests {
     #[cfg(rocksdb)]
     #[test]
     fn test_read_only_checkout_of_missing_root_blob_defers_the_failure() {
-        use rocksdb::ColumnFamilyDescriptor;
-
         use super::Database;
         use crate::errors::OperationalError;
-        use crate::persistence_layer::BLOB_CF;
-        use crate::persistence_layer::KV_CF;
         use crate::persistence_layer::PersistenceLayer;
         use crate::persistence_layer::ReadOnlyPersistenceLayer;
-        use crate::persistence_layer::rocksdb_checkpoint_options;
 
         let (runtime, _keepalive, repo, mut database) =
             new_persistent_database::<PersistenceLayer>();
@@ -1306,28 +1280,12 @@ pub(crate) mod tests {
             .expect("Writing should succeed");
 
         let commit_id = database.commit(&repo).expect("Commit should succeed");
-        let commit_path = repo.database_commit_dir(&commit_id);
 
-        let commit_db = rocksdb::DB::open_cf_descriptors(
-            &rocksdb_checkpoint_options(),
-            &commit_path,
-            [
-                ColumnFamilyDescriptor::new(BLOB_CF, rocksdb_checkpoint_options()),
-                ColumnFamilyDescriptor::new(KV_CF, rocksdb_checkpoint_options()),
-            ],
-        )
-        .expect("Opening committed RocksDB should succeed");
-
-        let blob_cf = commit_db
-            .cf_handle(BLOB_CF)
-            .expect("Committed RocksDB should contain the blob column family");
-        commit_db
-            .delete_cf(blob_cf, commit_id.as_hash().as_ref())
-            .expect("Deleting the root blob should succeed");
-        commit_db
-            .flush_cf(blob_cf)
-            .expect("Flushing the blob column family should succeed");
-        drop(commit_db);
+        // Node bodies live in the repository's Merkle store rather than in the commit directory,
+        // so that is where the root has to be removed from to make the commit unreadable.
+        repo.merkle_store()
+            .delete(commit_id.as_hash().as_ref())
+            .expect("Deleting the root node should succeed");
 
         let read_only =
             Database::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(&repo, commit_id)
