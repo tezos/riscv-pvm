@@ -338,6 +338,23 @@ fn pinned_by_cf(repo: &DirectoryManager, repo_path: &Path) -> Result<PinnedBytes
     Ok(pinned)
 }
 
+/// This process's high-water resident set size, in bytes.
+///
+/// Read from the kernel's own accounting rather than an allocator's idea of it.
+pub(super) fn peak_rss_bytes() -> u64 {
+    let Ok(status) = fs::read_to_string("/proc/self/status") else {
+        return 0;
+    };
+
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("VmHWM:"))
+        .and_then(|value| value.split_whitespace().next())
+        .and_then(|kib| kib.parse::<u64>().ok())
+        .map(|kib| kib * 1024)
+        .unwrap_or(0)
+}
+
 /// Count the database commit directories in the repository.
 fn count_commit_dirs(repo_path: &Path) -> Result<u64> {
     let path = repo_path.join("databases").join("commits");
