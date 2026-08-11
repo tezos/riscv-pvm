@@ -30,7 +30,6 @@ use std::path::Path;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
-use octez_riscv_data::mode::Normal;
 use proptest::strategy::Strategy;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestError;
@@ -51,7 +50,6 @@ use super::harness::read_failure_file;
 use super::harness::write_failure_file;
 use crate::commit::CommitId;
 use crate::persistence_layer::PersistenceLayer;
-use crate::registry::Registry;
 use crate::repo::DirectoryManager;
 use crate::repo::RegistryRepo;
 use crate::storage::PersistentKeyValueStore;
@@ -285,9 +283,8 @@ fn save_base(
     fs::write(failure_dir.join(MANIFEST_FILE), &manifest)
         .context("writing the registry manifest")?;
 
-    let db_commits =
-        Registry::<PersistenceLayer, Normal>::database_commits(persistent_repo, base_commit)
-            .context("reading the base's database commits")?;
+    let db_commits = crate::registry::database_commits(persistent_repo, base_commit)
+        .context("reading the base's database commits")?;
 
     let persistent_dir = failure_dir.join(PERSISTENT_DBS);
     let in_memory_dir = failure_dir.join(IN_MEMORY_DBS);
@@ -326,9 +323,8 @@ fn restore_base(
         .context("registering the in-memory manifest")?;
 
     // The manifest is now readable from either repo.
-    let db_commits =
-        Registry::<PersistenceLayer, Normal>::database_commits(persistent_repo, base_commit)
-            .context("reading the base's database commits")?;
+    let db_commits = crate::registry::database_commits(persistent_repo, base_commit)
+        .context("reading the base's database commits")?;
 
     let persistent_dir = failure_dir.join(PERSISTENT_DBS);
     let in_memory_dir = failure_dir.join(IN_MEMORY_DBS);

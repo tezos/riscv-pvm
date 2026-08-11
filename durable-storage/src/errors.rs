@@ -44,6 +44,12 @@ pub enum OperationalError {
         error: std::io::Error,
     },
 
+    #[error("Failed to remove directory {path}: {error}")]
+    DirRemovalFailed {
+        path: PathBuf,
+        error: std::io::Error,
+    },
+
     #[error("Failed to publish the commit staged at {staged} as {commit}: {error}")]
     CommitPublishFailed {
         staged: PathBuf,
