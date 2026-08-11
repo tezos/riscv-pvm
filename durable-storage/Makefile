@@ -9,6 +9,7 @@ check:
 	@cargo clippy --all-targets --no-default-features -- --deny warnings
 	@cargo clippy -p xtask --all-targets -- --deny warnings
 	@cargo clippy --features unstable-test-utils --bin long_test -- --deny warnings
+	@cargo clippy --features unstable-test-utils --bin gc_space -- --deny warnings
 
 # distinct from the workspace-level test in that it actually turns off
 # rocksdb: using the in-memory implementation instead
