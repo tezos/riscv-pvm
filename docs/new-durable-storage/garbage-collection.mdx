@@ -21,6 +21,7 @@ A repository is a directory tree of databases and commits:
   registries/commits/<commit_id>        registry manifests
   registries/journal                    the order commits were made in
   merkle/                               Merkle node bodies, shared by the repository
+  merkle-commits/<n>/                   recoverable images of that store
 ```
 
 Each database is a RocksDB instance holding the values you store, keyed by your key.
@@ -221,6 +222,28 @@ What remains of the gap is the flush.
 A commit still forces a level-zero file for the database it commits, whatever that holds, so cadence still drives compaction — five times less often, but by the same mechanism.
 The Merkle store is not checkpointed per commit, so nothing forces a flush there and its compaction follows how much is written rather than how often.
 
+## Durability and recovery
+
+### Full commits
+
+Committing puts a database's values in a commit directory and syncs the nodes they refer to, so a commit never outlives its nodes.
+It leaves the Merkle store as the only copy of them.
+
+A **full commit** takes another: a checkpoint of the store into a numbered slot under `merkle-commits/`.
+Recovery opens the most recent slot.
+Because a slot is made by a checkpoint it is self-contained and needs no write-ahead log, and because a checkpoint hard-links rather than copies, taking one costs almost nothing.
+The live store carries on unchanged; whether to check anything out again afterwards is the caller's decision.
+
+Slots are numbered so that each name is fresh, and a slot is created by renaming a finished directory to a name that does not exist yet, which is atomic and cannot half-happen.
+A fixed name plus a `CURRENT` pointer would need the pointer swapped separately, and renaming over an existing directory is not available anyway: `rename(2)` fails with `ENOTEMPTY` on a non-empty target.
+A directory left behind by an interrupted full commit is not a slot, and the next attempt replaces it.
+
+<Warning>
+A slot's hard links hold the files that were live when it was taken, so compaction rewriting those files does not free them until the slot is reaped.
+The high-water mark is the live set plus roughly one full-commit period of garbage, which makes the full-commit cadence the reclamation cadence.
+Reaping never removes the last slot, so a repository always has something to recover from.
+</Warning>
+
 ## Planned mechanism
 
 <Note>
@@ -229,28 +252,17 @@ Everything above describes how the storage behaves today.
 Sections move out of here as the work lands.
 </Note>
 
+### Leases for other processes
 
-### Durability and recovery
+Slots are what other processes read, since the live store cannot be opened by a second writer.
+A reader takes a lease on the slot it opens, and reaping respects leases.
+Leases use `flock`, so the kernel releases one held by a process that dies.
 
-Committing separates into two operations.
+### Where the flush belongs
 
-A **partial commit** writes the value checkpoint, the registry manifest and the journal entry, which is what committing does today.
-A **full commit** additionally checkpoints the shared Merkle store into a numbered slot.
-The rollup node chooses when to take a full commit, and distinguishes the two.
-
-Slots are named by an increasing counter, so a new slot is created by renaming a completed directory to a name that does not exist yet, which is atomic.
-Recovery opens the highest slot present.
-Because a slot is created by a checkpoint, it is self-contained and needs no write-ahead log.
-
-Slots are also what other processes read, since the live store cannot be opened by a second writer.
-A reader takes a lease on the slot it opens, and slot reaping respects leases.
-Leases use `flock`, so the kernel releases a lease held by a process that dies.
-
-Space is reclaimed at full-commit granularity: the previous slot hard-links the files that compaction has since rewritten, so those files are freed when that slot is reaped.
-
-The split also gives the Merkle store's flush a natural home.
-A partial commit still checkpoints the value database, so that database's memtable is still flushed and still produces a level-zero file per commit; compacting values is work worth doing anyway, since that is what discards the obsolete versions overwriting leaves behind.
-What the split removes is the Merkle store's flush from every commit: the store is checkpointed only at a full commit, so how often its files are rewritten stops being set by how often you commit and starts being set by how much has been written to it.
+A partial commit does not need the Merkle store's memtable on disk, so it does not need the flush that forces a level-zero file there; a full commit does.
+The value database is still checkpointed by a partial commit and so still flushed, and its own level-zero file per commit remains - compacting values is what discards the obsolete versions that overwriting leaves behind, so that work is worth doing.
+Putting the durability boundary and the flush boundary in the same place is what stops the store's compaction from being driven by commit cadence.
 
 ### Interface
 

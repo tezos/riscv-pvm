@@ -204,6 +204,49 @@ impl DirectoryManager {
         &self.merkle
     }
 
+    /// Where recoverable images of the Merkle store are kept.
+    pub fn merkle_slots_dir(&self) -> PathBuf {
+        Self::merkle_slots_dir_in(&self.merkle_dir)
+    }
+
+    /// Where a repository whose store is at `merkle_dir` keeps its slots.
+    ///
+    /// Beside the store rather than inside it, so that a slot is never mistaken for part of the
+    /// RocksDB directory it was taken from.
+    pub fn merkle_slots_dir_in(merkle_dir: &Path) -> PathBuf {
+        let mut path = merkle_dir.as_os_str().to_owned();
+        path.push("-commits");
+        PathBuf::from(path)
+    }
+
+    /// Take a full commit: a recoverable image of the Merkle store, in a new slot.
+    ///
+    /// Ordinary committing puts a database's values in a commit directory and syncs the nodes they
+    /// refer to, which is enough that a commit never outlives its nodes, but it leaves the store as
+    /// the only copy of them. This is the operation that takes another, and it is deliberately the
+    /// caller's to schedule: taking one bounds how much a crash costs, and reaping the one before
+    /// it is what returns the disk that compaction has since made redundant.
+    ///
+    /// The live store carries on unchanged.
+    #[cfg(rocksdb)]
+    pub fn full_commit(&self) -> Result<crate::merkle_store::slots::SlotId, OperationalError> {
+        self.merkle.take_slot(&self.merkle_slots_dir())
+    }
+
+    /// The most recent full commit, which is the image recovery would open.
+    #[cfg(rocksdb)]
+    pub fn latest_full_commit(
+        &self,
+    ) -> Result<Option<crate::merkle_store::slots::SlotId>, OperationalError> {
+        crate::merkle_store::slots::latest_slot(&self.merkle_slots_dir())
+    }
+
+    /// Drop all but the `keep` most recent full commits, returning how many went.
+    #[cfg(rocksdb)]
+    pub fn reap_full_commits(&self, keep: usize) -> Result<usize, OperationalError> {
+        crate::merkle_store::slots::reap_slots(&self.merkle_slots_dir(), keep)
+    }
+
     /// The most recently recorded journal entry, if the repository has committed anything.
     ///
     /// Reads only the tail of the journal, since assigning the next sequence number is on the

@@ -608,3 +608,103 @@ mod node_tests {
         }
     }
 }
+
+#[cfg(all(test, rocksdb_test_utils))]
+mod full_commit_tests {
+    use bytes::Bytes;
+    use octez_riscv_data::mode::Normal;
+    use octez_riscv_test_utils::TestableTmpdir;
+
+    use super::*;
+    use crate::key::Key;
+    use crate::merkle_store::slots;
+    use crate::persistence_layer::PersistenceLayer;
+    use crate::registry::Registry;
+
+    // A repository whose Merkle store is lost comes back from its last full commit, with the
+    // committed state still checkoutable and readable.
+    #[test]
+    fn a_lost_store_recovers_from_its_last_full_commit() {
+        let tmp = TestableTmpdir::new();
+        let key = Key::new(b"a").expect("the key should be valid");
+
+        let (commit, slot) = {
+            let repo = DirectoryManager::new(tmp.path())
+                .expect("creating the directory manager should succeed");
+
+            let mut registry = Registry::<PersistenceLayer, Normal>::new(repo.clone());
+            registry.resize_tick(1).expect("resizing should succeed");
+            registry
+                .database_mut(0)
+                .expect("the database should exist")
+                .set(key.clone(), Bytes::from_static(b"value"))
+                .expect("setting should succeed");
+
+            let commit = registry.commit().expect("committing should succeed");
+
+            // The full commit has to come after the nodes are written, since it images them.
+            let slot = repo.full_commit().expect("the full commit should succeed");
+            assert_eq!(
+                repo.latest_full_commit().expect("reading should succeed"),
+                Some(slot)
+            );
+
+            (commit, slot)
+        };
+
+        // Lose the store, keeping the commit directories and the slot.
+        let store_dir = DirectoryManager::merkle_dir_in(tmp.path());
+        std::fs::remove_dir_all(&store_dir).expect("removing the store should succeed");
+
+        let slots_dir = DirectoryManager::merkle_slots_dir_in(&store_dir);
+        slots::restore_from_slot(&slots::slot_path(&slots_dir, slot), &store_dir)
+            .expect("restoring should succeed");
+
+        let repo =
+            DirectoryManager::new(tmp.path()).expect("reopening the repository should succeed");
+        let restored = Registry::<PersistenceLayer, Normal>::checkout(repo, commit)
+            .expect("the commit should check out against the recovered store");
+
+        assert_eq!(
+            restored
+                .database(0)
+                .expect("the database should exist")
+                .read_bytes(&key, 0, 32)
+                .expect("the value should be readable")
+                .as_ref(),
+            b"value"
+        );
+    }
+
+    // Reaping frees what an older slot was holding, while the newest still recovers.
+    #[test]
+    fn reaping_leaves_the_newest_recoverable() {
+        let tmp = TestableTmpdir::new();
+        let repo = DirectoryManager::new(tmp.path())
+            .expect("creating the directory manager should succeed");
+
+        let mut registry = Registry::<PersistenceLayer, Normal>::new(repo.clone());
+        registry.resize_tick(1).expect("resizing should succeed");
+
+        for value in [b"1", b"2", b"3"] {
+            let key = Key::new(b"a").expect("the key should be valid");
+            registry
+                .database_mut(0)
+                .expect("the database should exist")
+                .set(key, Bytes::copy_from_slice(value))
+                .expect("setting should succeed");
+            registry.commit().expect("committing should succeed");
+            repo.full_commit().expect("the full commit should succeed");
+        }
+
+        assert_eq!(
+            repo.reap_full_commits(1).expect("reaping should succeed"),
+            2
+        );
+        assert_eq!(
+            repo.latest_full_commit().expect("reading should succeed"),
+            Some(3),
+            "the newest full commit should be the one left"
+        );
+    }
+}

@@ -25,6 +25,8 @@
 //!
 //! [`DirectoryManager`]: crate::repo::DirectoryManager
 
+pub mod slots;
+
 use std::collections::HashMap;
 use std::mem::ManuallyDrop;
 use std::path::Path;
