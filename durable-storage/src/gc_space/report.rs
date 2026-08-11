@@ -295,6 +295,25 @@ pub(super) fn report_prune(
     )?;
     writeln!(
         out,
+        "  examined {} node(s) to find them",
+        outcome.nodes_examined,
+    )?;
+    writeln!(
+        out,
+        "  took {} ms: {} ms over the commits, {} ms sweeping nodes, {} ms compacting",
+        outcome.commits_ms + outcome.sweep_ms + outcome.compact_ms,
+        outcome.commits_ms,
+        outcome.sweep_ms,
+        outcome.compact_ms,
+    )?;
+    writeln!(
+        out,
+        "  peak memory {:.0} MiB, up {:.0} MiB over the sweep",
+        mib(outcome.peak_rss),
+        mib(outcome.peak_rss.saturating_sub(outcome.rss_before_sweep)),
+    )?;
+    writeln!(
+        out,
         "  repository went from {:.1} MiB to {:.1} MiB, freeing {:.1} MiB",
         mib(outcome.before.unique_bytes),
         mib(outcome.after.unique_bytes),
