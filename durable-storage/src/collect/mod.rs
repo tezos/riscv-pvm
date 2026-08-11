@@ -37,12 +37,22 @@
 //! Collection must not run while the repository is being committed to, and two collections must
 //! not overlap. Neither is enforced here.
 
+// The sweep works on the repository-wide Merkle store, which only exists with a rocksdb backend.
+#[cfg(rocksdb)]
+pub mod sweep;
+
 use std::collections::HashSet;
 
+#[cfg(rocksdb)]
+pub use self::sweep::SweptNodes;
 use crate::commit::CommitId;
 use crate::errors::OperationalError;
 use crate::journal;
+#[cfg(rocksdb)]
+use crate::journal::Seq;
 use crate::registry;
+#[cfg(rocksdb)]
+use crate::repo::DirectoryManager;
 use crate::repo::RegistryRepo;
 
 /// What a collection round reclaimed.
@@ -95,6 +105,70 @@ pub fn collect<Repo: RegistryRepo>(
     }
 
     Ok(collected)
+}
+
+/// Collect both halves of a repository at `target`.
+///
+/// The commits, as [`collect`] does, and then the Merkle nodes none of the surviving commits still
+/// reaches - which removing commit directories can never do, because node bodies are
+/// content-addressed and live in a store shared by the repository rather than in any commit.
+///
+/// The node sweep runs second because it decides liveness from what the commits still hold, so it
+/// must see the set of commits the round settled on rather than the one it started from.
+#[cfg(rocksdb)]
+pub fn collect_all(
+    repo: &DirectoryManager,
+    target: &CommitId,
+) -> Result<(Collected, SweptNodes), OperationalError> {
+    let collected = collect(repo, target)?;
+    let swept = collect_nodes(repo, target)?;
+
+    Ok((collected, swept))
+}
+
+/// Delete the Merkle nodes no retained commit of `repo` still reaches.
+///
+/// Reads the retained roots from the journal, so a round that has already pruned it sees exactly
+/// the commits that survived.
+#[cfg(rocksdb)]
+pub fn collect_nodes(
+    repo: &DirectoryManager,
+    target: &CommitId,
+) -> Result<SweptNodes, OperationalError> {
+    let entries = repo.commit_journal()?;
+    let positions = journal::latest_positions(&entries);
+
+    let floor =
+        *positions
+            .get(target)
+            .ok_or_else(|| OperationalError::CollectionTargetNotRecorded {
+                target: target.hex_encode(),
+            })?;
+
+    // A database commit is reached by every registry commit naming it, so it is held until the most
+    // recent of them goes. Taking the highest is what stops an older reference from deciding it.
+    let mut roots = sweep::RetainedRoots::new();
+
+    for (root, seq) in positions {
+        if seq < floor {
+            continue;
+        }
+
+        let databases = match registry::database_commits(repo, &root) {
+            Ok(databases) => databases,
+            Err(OperationalError::CommitNotFound) => continue,
+            Err(error) => return Err(error),
+        };
+
+        for database in databases {
+            roots
+                .entry(*database.as_hash())
+                .and_modify(|held: &mut Seq| *held = (*held).max(seq))
+                .or_insert(seq);
+        }
+    }
+
+    sweep::sweep(repo.merkle_store(), &roots, floor)
 }
 
 /// The database commits referenced by any of `roots`.
@@ -330,5 +404,207 @@ mod tests {
             .expect("the new root should check out");
         Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), second)
             .expect("the root collected at should still check out");
+    }
+}
+
+#[cfg(all(test, rocksdb_test_utils))]
+mod node_tests {
+    use bytes::Bytes;
+    use octez_riscv_data::mode::Normal;
+    use octez_riscv_test_utils::TestableTmpdir;
+
+    use super::*;
+    use crate::key::Key;
+    use crate::persistence_layer::PersistenceLayer;
+    use crate::registry::Registry;
+
+    /// A registry of one database over several commits, with the nodes each commit left behind.
+    struct Fixture {
+        _tmp: TestableTmpdir,
+        repo: DirectoryManager,
+        registry: Registry<PersistenceLayer, Normal>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let tmp = TestableTmpdir::new();
+            let repo = DirectoryManager::new(tmp.path())
+                .expect("creating the directory manager should succeed");
+
+            let mut registry = Registry::<PersistenceLayer, Normal>::new(repo.clone());
+            registry
+                .resize_tick(1)
+                .expect("resizing the registry should succeed");
+
+            Self {
+                _tmp: tmp,
+                repo,
+                registry,
+            }
+        }
+
+        /// Write several keys and commit, returning the registry root.
+        fn commit(&mut self, keys: &[&[u8]], value: &[u8]) -> CommitId {
+            for key in keys {
+                let key = Key::new(key).expect("the key should be valid");
+                self.registry
+                    .database_mut(0)
+                    .expect("the database should exist")
+                    .set(key, Bytes::copy_from_slice(value))
+                    .expect("setting should succeed");
+            }
+
+            self.registry.commit().expect("committing should succeed")
+        }
+
+        /// How many node bodies the repository's Merkle store holds.
+        fn nodes(&self) -> usize {
+            let mut nodes = 0;
+            self.repo
+                .merkle_store()
+                .for_each_node(|_, _| nodes += 1)
+                .expect("counting nodes should succeed");
+            nodes
+        }
+
+        /// How many reverse edges it holds.
+        fn edges(&self) -> u64 {
+            self.repo
+                .merkle_store()
+                .edge_totals()
+                .expect("counting edges should succeed")
+                .entries
+        }
+    }
+
+    // The nodes of dropped commits go, the retained root still checks out with every key readable,
+    // and the edges of the deleted nodes go with them.
+    #[test]
+    fn collects_the_nodes_of_dropped_commits() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(&[b"a", b"b", b"c"], b"1");
+        fixture.commit(&[b"a", b"b", b"c"], b"2");
+        let third = fixture.commit(&[b"a", b"b", b"c"], b"3");
+
+        let before = fixture.nodes();
+
+        let (_, swept) = collect_all(&fixture.repo, &third).expect("collection should succeed");
+
+        assert!(swept.nodes > 0, "the earlier commits left nodes behind");
+        assert!(swept.edges > 0, "their edges should go with them");
+        assert_eq!(
+            fixture.nodes(),
+            before - swept.nodes,
+            "exactly the swept nodes should be gone"
+        );
+
+        // The retained root has to be readable in full: every node it reaches must have survived.
+        let restored = Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), third)
+            .expect("the retained root should check out");
+        for key in [b"a", b"b", b"c"] {
+            let key = Key::new(key).expect("the key should be valid");
+            assert_eq!(
+                restored
+                    .database(0)
+                    .expect("the database should exist")
+                    .read_bytes(&key, 0, 32)
+                    .expect("the key should still be readable")
+                    .as_ref(),
+                b"3"
+            );
+        }
+    }
+
+    // Collecting at the oldest root keeps every node, since every commit is retained.
+    #[test]
+    fn collecting_at_the_oldest_root_keeps_every_node() {
+        let mut fixture = Fixture::new();
+
+        let first = fixture.commit(&[b"a"], b"1");
+        fixture.commit(&[b"a"], b"2");
+
+        let before = (fixture.nodes(), fixture.edges());
+        let (_, swept) = collect_all(&fixture.repo, &first).expect("collection should succeed");
+
+        assert_eq!(swept, SweptNodes::default());
+        assert_eq!((fixture.nodes(), fixture.edges()), before);
+    }
+
+    // A second round finds nothing left to do, and leaves the store as the first did.
+    #[test]
+    fn a_second_sweep_finds_nothing() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(&[b"a", b"b"], b"1");
+        let second = fixture.commit(&[b"a", b"b"], b"2");
+
+        collect_all(&fixture.repo, &second).expect("the first round should succeed");
+        let after_first = (fixture.nodes(), fixture.edges());
+
+        let swept = collect_nodes(&fixture.repo, &second).expect("the second round should succeed");
+
+        assert_eq!(swept, SweptNodes::default());
+        assert_eq!((fixture.nodes(), fixture.edges()), after_first);
+    }
+
+    // Committing after a collection still works, and collecting again keeps the newer root whole.
+    #[test]
+    fn committing_after_a_sweep_still_works() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(&[b"a"], b"1");
+        let second = fixture.commit(&[b"a"], b"2");
+
+        collect_all(&fixture.repo, &second).expect("collection should succeed");
+
+        let third = fixture.commit(&[b"a"], b"3");
+        collect_all(&fixture.repo, &third).expect("the second collection should succeed");
+
+        let restored = Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), third)
+            .expect("the newest root should check out");
+        let key = Key::new(b"a").expect("the key should be valid");
+        assert_eq!(
+            restored
+                .database(0)
+                .expect("the database should exist")
+                .read_bytes(&key, 0, 32)
+                .expect("the key should be readable")
+                .as_ref(),
+            b"3"
+        );
+    }
+
+    // Nodes shared between a dropped and a retained commit survive: an unchanged subtree keeps the
+    // same hash, so the retained root still reaches it.
+    #[test]
+    fn nodes_shared_with_a_retained_commit_survive() {
+        let mut fixture = Fixture::new();
+
+        // The second commit touches only one of the three keys, so most of the tree is shared.
+        fixture.commit(&[b"a", b"b", b"c"], b"1");
+        let second = fixture.commit(&[b"a"], b"2");
+
+        collect_all(&fixture.repo, &second).expect("collection should succeed");
+
+        let restored = Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), second)
+            .expect("the retained root should check out");
+
+        for (key, expected) in [
+            (b"a".as_slice(), b"2".as_slice()),
+            (b"b", b"1"),
+            (b"c", b"1"),
+        ] {
+            let key = Key::new(key).expect("the key should be valid");
+            assert_eq!(
+                restored
+                    .database(0)
+                    .expect("the database should exist")
+                    .read_bytes(&key, 0, 32)
+                    .expect("the shared subtree should have survived")
+                    .as_ref(),
+                expected
+            );
+        }
     }
 }

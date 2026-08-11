@@ -282,8 +282,16 @@ pub(super) fn report_prune(
     writeln!(out)?;
     writeln!(
         out,
-        "directory-level collection: removed {} database commit(s) and {} manifest(s)",
-        outcome.databases_removed, outcome.registries_removed,
+        "collection: removed {} database commit(s), {} manifest(s), and {} Merkle node(s) with {} edge(s)",
+        outcome.databases_removed,
+        outcome.registries_removed,
+        outcome.nodes_removed,
+        outcome.edges_removed,
+    )?;
+    writeln!(
+        out,
+        "  {:.1} MiB of node data deleted",
+        mib(outcome.node_bytes_removed),
     )?;
     writeln!(
         out,
@@ -302,12 +310,16 @@ pub(super) fn report_prune(
         return Ok(());
     };
 
+    // Against what the store held before, not against a live figure: the base state is pinned as
+    // well as the last commit, so nodes only the base reaches are retained on purpose and counting
+    // them as dead - which the per-sample figure does, measuring against the sampled commit alone -
+    // would report them as a leak.
     writeln!(
         out,
-        "  still dead and now unreachable by any directory deletion: {:.1} MiB of node data \
-         ({:.1}% of the surviving Merkle store)",
-        mib(last.blob.dead_bytes()),
-        last.blob.dead_fraction() * 100.0,
+        "  Merkle store held {:.1} MiB before collecting, of which {:.1} MiB was reachable from \
+         the last commit",
+        mib(last.blob.stored_bytes),
+        mib(last.blob.live_bytes),
     )?;
 
     Ok(())

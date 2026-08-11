@@ -1025,6 +1025,23 @@ where
     }
 }
 
+/// The tree hashes of the children recorded in a stored node body.
+///
+/// Empty children are left out: an empty tree is never stored, so nothing refers to one and no edge
+/// is recorded to one.
+///
+/// Used by the sweep, which only exists where the repository-wide Merkle store does.
+#[cfg(rocksdb)]
+pub(crate) fn stored_children(bytes: &[u8]) -> Result<Vec<Hash>, OperationalError> {
+    let StoredNode { left, right, .. } = deserialise(bytes)?;
+    let empty = Tree::<Hash>::empty_hash();
+
+    Ok([left, right]
+        .into_iter()
+        .filter(|child| *child != empty)
+        .collect())
+}
+
 /// Visit every node body reachable from the tree stored under `tree_hash`.
 ///
 /// `visit` receives the blob key each body is stored under and the length of the stored bytes,

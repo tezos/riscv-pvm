@@ -3,14 +3,11 @@ title: "Garbage collection"
 description: "What the durable storage reclaims, what it does not, and why values and Merkle nodes need different mechanisms"
 ---
 
-The durable storage reclaims the values a commit holds once no retained commit needs them, and none of what its Merkle nodes hold.
-Disk use therefore still grows without bound, but only in one of the two halves of a commit.
+The durable storage drops states older than a chosen one, reclaiming both halves of the commits it drops.
+That is what `octez-smart-rollup-node` expects of its context: keep only the history it still needs.
 
-`octez-smart-rollup-node` expects its context to drop states older than a chosen one, so that a node keeps only the history it still needs.
-That is the operation this page describes, and the half of it that is missing.
-
-This page describes how commits occupy disk, which parts of them the storage reclaims, and which parts it cannot reclaim at all.
-The two halves of a commit behave completely differently, and the difference is what the garbage collection design follows from.
+This page describes how commits occupy disk and how each half of one is reclaimed.
+The two halves behave completely differently, and that difference is why they need two mechanisms rather than one.
 
 ## How commits occupy disk
 
@@ -68,43 +65,6 @@ Reading one then fails rather than returning something wrong.
 
 ## What the storage reclaims today
 
-### Values are reclaimed
-
-Values are keyed by your key, so a new write to a key makes the previous value an obsolete version of a live key, and compaction discards it.
-Deleting a key writes a tombstone, which compaction also discards.
-The storage holds no RocksDB snapshots, so nothing delays either.
-A working database therefore stays proportional in size to the key space that is actually live in it.
-
-Commit directories hold the same data through hard links, so the blocks behind an SST are freed once no directory references it any more.
-Deleting the commit directories that are no longer reachable from any retained registry manifest is therefore enough to reclaim the value data those commits were pinning.
-
-### Merkle nodes are not
-
-Node bodies are content-addressed.
-Every version of every node is a distinct key, and nothing ever deletes one.
-RocksDB has no way to know that an old node is dead, so compaction preserves all of them.
-
-Removing commit directories cannot reach them at all, and now plainly so: the Merkle store is not a commit directory and no commit directory holds a link to it.
-
-<Warning>
-The Merkle store grows with the total number of node writes over the lifetime of the repository, not with the size of the state.
-No amount of commit deletion reclaims it.
-Reclaiming it requires deleting the node keys themselves and letting compaction rewrite the files.
-</Warning>
-
-### What refers to what is recorded
-
-As a node is stored, an edge is recorded from each of its children to it, in a `refs` column family of the Merkle store keyed by `child_hash || parent_hash`.
-Empty trees are never stored, so no edge points at one.
-
-Explicit reverse edges rather than reference counts, because they are idempotent: writing an edge twice, or removing it twice, leaves the same state, so a collection interrupted part-way can simply be run again.
-A count that is incremented twice after a crash is silently wrong for good.
-
-Recording them from the child's side is what will let a node's liveness be decided from the node upwards, rather than by traversing every retained root downwards.
-Each edge has room for a stamp saying how recently its child was known to be held; edges are written without one, since the sequence number of the commit being made is not settled while its nodes are being written.
-
-Nothing reads the edges yet.
-They cost a 64-byte key and an 8-byte stamp apiece, at a little under two edges per node.
 
 ### Collecting at a root
 
@@ -141,8 +101,76 @@ Collection must not run while the repository is being committed to, and two coll
 Neither is enforced.
 </Warning>
 
-This reclaims the value side of a commit only.
-The Merkle nodes it held stay where they are, for the reason above: they sit in files that the retained commits still need.
+The two sections below are what that removal means for each half of a commit.
+
+### Values are reclaimed
+
+Values are keyed by your key, so a new write to a key makes the previous value an obsolete version of a live key, and compaction discards it.
+Deleting a key writes a tombstone, which compaction also discards.
+The storage holds no RocksDB snapshots, so nothing delays either.
+A working database therefore stays proportional in size to the key space that is actually live in it.
+
+Commit directories hold the same data through hard links, so the blocks behind an SST are freed once no directory references it any more.
+Deleting the commit directories that are no longer reachable from any retained registry manifest is therefore enough to reclaim the value data those commits were pinning.
+
+### Merkle nodes need deleting outright
+
+Node bodies are content-addressed, so every version of every node is a distinct *live* key.
+RocksDB has no way to know that an old node is dead, and compaction preserves all of them.
+
+Removing commit directories cannot reach them at all, plainly so now: the Merkle store is not a commit directory and no commit directory holds a link to it.
+Left alone the store would grow with the total number of node writes over a repository's lifetime rather than with the size of the state.
+
+So this half is reclaimed by deleting the node keys themselves, which needs a way to know which nodes are still held.
+That is what the next two sections are.
+
+### What refers to what is recorded
+
+As a node is stored, an edge is recorded from each of its children to it, in a `refs` column family of the Merkle store keyed by `child_hash || parent_hash`.
+Empty trees are never stored, so no edge points at one.
+
+Explicit reverse edges rather than reference counts, because they are idempotent: writing an edge twice, or removing it twice, leaves the same state, so a collection interrupted part-way can simply be run again.
+A count that is incremented twice after a crash is silently wrong for good.
+
+Recording them from the child's side is what will let a node's liveness be decided from the node upwards, rather than by traversing every retained root downwards.
+Each edge has room for a stamp saying how recently its child was known to be held; edges are written without one, since the sequence number of the commit being made is not settled while its nodes are being written.
+
+They cost a 64-byte key and an 8-byte stamp apiece, at a little under two edges per node.
+
+### Merkle nodes are collected too
+
+Collecting at a root deletes the node bodies that no retained root still reaches, and the edges that mentioned them.
+
+Whether a node is still held is asked from the node upwards, by walking its reverse edges, rather than by traversing every retained root downwards.
+A stamp at or above the collection floor ends the walk immediately: a retained root already holds the child.
+Otherwise the walk climbs, and what it learns is written back onto the edges that led to a live root, so the next collection reads the answer instead of walking for it.
+
+With a floor of 10, node `X` is settled without walking to a root at all: the edge to `B` is stamped at or above it, so `X` is still held.
+
+```mermaid
+flowchart BT
+    X["node X<br/>collection candidate"]
+    A["parent A"]
+    B["parent B"]
+    RA["root, position 7<br/>dropped"]
+    RB["root, position 12<br/>retained"]
+
+    X -->|"stamp 7: stale, walk up"| A
+    X -->|"stamp 12: at or above the floor, stop"| B
+    A --> RA
+    B --> RB
+```
+
+A stamp is only ever written where the node is provably reachable from the stamped root.
+Nodes are content-addressed and therefore immutable, so if a parent is reachable from a root and that parent refers to a child, the child is reachable from that root too, permanently.
+A stale stamp costs a walk and an over-generous one retains garbage; neither can drop something still live.
+
+The graph has no cycles to guard against: a node's hash is derived from its children's, so a node can never be its own ancestor.
+
+<Warning>
+Deleting a node writes a tombstone; the bytes come back when compaction rewrites the files without it.
+Collection asks for that compaction, so what it reports as freed is freed.
+</Warning>
 
 ## Why retaining a commit costs more than its changes
 
@@ -201,42 +229,6 @@ Everything above describes how the storage behaves today.
 Sections move out of here as the work lands.
 </Note>
 
-What remains is collecting the Merkle side, which the mechanism above cannot reach.
-The store the nodes now live in is the place that becomes possible from.
-
-### Deleting nodes: the sweep
-
-The edges above are what the sweep walks; what it does with them is what is missing.
-
-A stamp on an edge is the sequence number of the most recent root the child was proven reachable from.
-Collection reads that first: a stamp at or above the collection floor means the child is still held by a retained root, so the sweep stops there instead of walking up to a root.
-A stamp below the floor is stale, so the sweep walks up, then rewrites the stamp with what it learned.
-
-With a floor of 10, node `X` is settled without walking to a root at all: the edge to `B` is stamped at or above it, so `X` is still held.
-
-```mermaid
-flowchart BT
-    X["node X<br/>collection candidate"]
-    A["parent A"]
-    B["parent B"]
-    RA["root, sequence 7<br/>dropped"]
-    RB["root, sequence 12<br/>retained"]
-
-    X -->|"stamp 7: stale, walk up"| A
-    X -->|"stamp 12: at or above the floor, stop"| B
-    A --> RA
-    B --> RB
-```
-
-A stamp is only ever written where the node is provably reachable from the stamped root.
-At commit time that holds by construction.
-During a sweep it holds because nodes are content-addressed and therefore immutable: if a parent is reachable from a root, and that parent references a child, then the child is reachable from that root too, permanently.
-A stale stamp only costs a walk, and an over-generous stamp only retains garbage, so neither can delete something that is still live.
-
-<Warning>
-The stamp rule depends on a root being dropped only when its sequence number falls below the floor.
-A future mode that drops individual newer roots, such as collecting abandoned branches, would break the inference that a stamp at or above the floor implies a surviving root, and would need per-root liveness instead.
-</Warning>
 
 ### Durability and recovery
 

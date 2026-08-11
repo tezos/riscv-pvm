@@ -15,7 +15,7 @@ use anyhow::Result;
 use super::measure::commits_disk_usage;
 use super::measure::disk_usage;
 use super::sample::DiskUsage;
-use crate::collect::collect;
+use crate::collect::collect_all;
 use crate::commit::CommitId;
 use crate::repo::DirectoryManager;
 
@@ -35,9 +35,16 @@ pub(super) fn prune_unreachable(
         ..PruneOutcome::default()
     };
 
-    let collected = collect(repo, target).context("collecting")?;
+    let (collected, swept) = collect_all(repo, target).context("collecting")?;
     outcome.databases_removed = collected.database_commits as u64;
     outcome.registries_removed = collected.registry_commits as u64;
+    outcome.nodes_removed = swept.nodes as u64;
+    outcome.node_bytes_removed = swept.bytes;
+    outcome.edges_removed = swept.edges as u64;
+
+    // A delete only marks the key; the space comes back when compaction rewrites the files without
+    // it. Forcing that here is what makes the freed figure below the real one rather than a promise.
+    repo.merkle_store().compact();
 
     outcome.after = disk_usage(repo_path).context("measuring usage after pruning")?;
     outcome.after_commits =
@@ -63,6 +70,15 @@ pub struct PruneOutcome {
 
     /// Registry manifests removed.
     pub registries_removed: u64,
+
+    /// Merkle node bodies removed.
+    pub nodes_removed: u64,
+
+    /// Bytes those bodies occupied.
+    pub node_bytes_removed: u64,
+
+    /// Reverse edges removed with them.
+    pub edges_removed: u64,
 }
 
 impl PruneOutcome {

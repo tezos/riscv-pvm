@@ -348,6 +348,38 @@ impl MerkleStore {
         Ok(totals)
     }
 
+    /// Visit the key and stored size of every node in the store.
+    ///
+    /// A collection has to consider every node, including ones no retained root reaches, so there
+    /// is nothing to descend from - the store itself is the list.
+    pub fn for_each_node(
+        &self,
+        mut visit: impl FnMut(&[u8], usize),
+    ) -> Result<(), OperationalError> {
+        for entry in self.db.iterator(rocksdb::IteratorMode::Start) {
+            let (key, value) = entry.map_err(|error| OperationalError::GetFailed {
+                column: "merkle".to_owned(),
+                key: Vec::new(),
+                error,
+            })?;
+
+            visit(&key, value.len());
+        }
+
+        Ok(())
+    }
+
+    /// Remove every edge whose child is `child`.
+    pub fn delete_edges_from(&self, child: &[u8]) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        for (parent, _) in self.parents_of(child)? {
+            self.delete_edge(child, &parent)?;
+        }
+
+        Ok(())
+    }
+
     /// Count every reverse edge, and the bytes they occupy.
     #[cfg(rocksdb_test_utils)]
     pub fn edge_totals(
@@ -410,6 +442,22 @@ impl MerkleStore {
             .map_err(|error| OperationalError::CheckpointCreationFailed { error })?
             .create_checkpoint(path)
             .map_err(|error| OperationalError::CheckpointCreationFailed { error })
+    }
+
+    /// Rewrite the store's files without the keys that have been deleted from it.
+    ///
+    /// Deleting a node only writes a tombstone; the space comes back when compaction rewrites the
+    /// files without it. Collection therefore has to ask for that explicitly, or what it reclaimed
+    /// stays on disk until RocksDB happens to compact for its own reasons.
+    pub fn compact(&self) {
+        if self.read_only {
+            return;
+        }
+
+        let unbounded: Option<&[u8]> = None;
+        self.db.compact_range(unbounded, unbounded);
+        self.db
+            .compact_range_cf(self.refs_cf(), unbounded, unbounded);
     }
 
     /// Put everything written so far beyond reach of a crash.
