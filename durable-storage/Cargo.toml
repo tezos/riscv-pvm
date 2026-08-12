@@ -26,6 +26,7 @@ bytes.workspace = true
 cfg-if.workspace = true
 derive_more.workspace = true
 goldenfile.workspace = true
+libc.workspace = true
 log.workspace = true
 hex.workspace = true
 perfect-derive.workspace = true

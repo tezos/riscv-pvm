@@ -25,6 +25,8 @@
 //!
 //! [`DirectoryManager`]: crate::repo::DirectoryManager
 
+pub mod slots;
+
 use std::collections::HashMap;
 use std::mem::ManuallyDrop;
 use std::path::Path;
@@ -175,12 +177,31 @@ pub struct MerkleStore {
     /// to a node that was collected out from under it.
     store_id: std::sync::atomic::AtomicU64,
 
+    /// Whether a background compaction is running.
+    ///
+    /// Keeps a second request from starting another rather than queueing a rewrite behind the one
+    /// already under way.
+    compacting: std::sync::atomic::AtomicBool,
+
     /// Whether anything has ever been collected from this store.
     ///
     /// Changes what an absent node means. Before a collection it can only be a bug; after one it is
     /// most likely a state being read while its nodes were reclaimed, which is worth telling apart.
     /// Persisted, since the distinction outlives the process that collected.
     collected: std::sync::atomic::AtomicBool,
+}
+
+/// Holds a store for as long as a reclaim is running, and lowers its flag when that ends.
+///
+/// However it ends: returning normally, or unwinding out of RocksDB.
+struct Reclaiming(Arc<MerkleStore>);
+
+impl Drop for Reclaiming {
+    fn drop(&mut self) {
+        self.0
+            .compacting
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl Drop for MerkleStore {
@@ -684,13 +705,71 @@ impl MerkleStore {
         }
 
         let unbounded: Option<&[u8]> = None;
-        self.db.compact_range(unbounded, unbounded);
+
+        let mut options = rocksdb::CompactOptions::default();
+        // Set explicitly because it is load-bearing here rather than incidental: this rewrites the
+        // whole store, and excluding RocksDB's own compaction for that long would stall writes
+        // behind it for no reason - the point is to reclaim disk, not to be the only thing doing
+        // so. It matches the current RocksDB default, so it changes nothing today; it is here so
+        // that a default flipping back does not silently make a reclaim exclusive.
+        options.set_exclusive_manual_compaction(false);
+
+        self.db.compact_range_opt(unbounded, unbounded, &options);
         self.db
-            .compact_range_cf(self.refs_cf(), unbounded, unbounded);
+            .compact_range_cf_opt(self.refs_cf(), unbounded, unbounded, &options);
         // Relisting a live node writes a new entry and a tombstone for the old one, so a round
         // leaves as much behind here as it does among the nodes themselves.
         self.db
-            .compact_range_cf(self.written_cf(), unbounded, unbounded);
+            .compact_range_cf_opt(self.written_cf(), unbounded, unbounded, &options);
+    }
+
+    /// Start reclaiming in the background, and return without waiting for it.
+    ///
+    /// Reclaiming rewrites the store, so it costs the store rather than the garbage and takes far
+    /// longer than anything that would want to trigger it. A full commit in particular must not wait
+    /// for one: taking a slot is a flush and a rename, and pairing it with a rewrite of the whole
+    /// store would make the cheap operation as slow as the expensive one.
+    ///
+    /// Returns whether this call started one. A second call while one is running is a no-op rather
+    /// than a queued rewrite, since two of these achieve nothing one does not.
+    ///
+    /// Reads and writes continue throughout. The store stays open until the work finishes, because
+    /// the thread holds a reference to it.
+    pub fn start_compaction(self: &Arc<Self>) -> bool {
+        if self.read_only
+            || self
+                .compacting
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return false;
+        }
+
+        let store = Arc::clone(self);
+
+        match std::thread::Builder::new()
+            .name("merkle-compaction".to_owned())
+            .spawn(move || {
+                // Lowered by the guard rather than after the call, so that it comes down on an
+                // unwind too. Left raised, it would refuse every later reclaim for the life of the
+                // process, and anything waiting on `is_compacting` would wait for a rewrite that
+                // is no longer running.
+                let store = Reclaiming(store);
+                store.0.compact();
+            }) {
+            Ok(_) => true,
+            Err(error) => {
+                // Nothing is running, so the flag has to come back down or nothing ever reclaims.
+                self.compacting
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                log::warn!("could not start Merkle store compaction: {error}");
+                false
+            }
+        }
+    }
+
+    /// Whether a background compaction started by [`MerkleStore::start_compaction`] is running.
+    pub fn is_compacting(&self) -> bool {
+        self.compacting.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Put everything written so far beyond reach of a crash.
@@ -766,6 +845,7 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
     let store = Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
         collected: std::sync::atomic::AtomicBool::new(collected_marker(&key).exists()),
+        compacting: std::sync::atomic::AtomicBool::new(false),
         path: key.clone(),
         read_only: false,
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
@@ -824,6 +904,7 @@ pub fn open_read_only(path: &Path) -> Result<Arc<MerkleStore>, OperationalError>
         db: ManuallyDrop::new(db),
         read_only: true,
         collected: std::sync::atomic::AtomicBool::new(collected_marker(path).exists()),
+        compacting: std::sync::atomic::AtomicBool::new(false),
         // Never registered, so nothing looks this up and Drop finds no entry of its own to remove.
         path: path.to_path_buf(),
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
