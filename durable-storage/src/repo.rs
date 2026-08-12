@@ -227,10 +227,32 @@ impl DirectoryManager {
     /// caller's to schedule: taking one bounds how much a crash costs, and reaping the one before
     /// it is what returns the disk that compaction has since made redundant.
     ///
-    /// The live store carries on unchanged.
+    /// The live store carries on unchanged, and so does whatever else is using the repository: a
+    /// full commit is a flush and a rename, and does not wait on the compaction that returns the
+    /// disk a collection freed. That is [`DirectoryManager::start_reclaim`], separately.
     #[cfg(rocksdb)]
     pub fn full_commit(&self) -> Result<crate::merkle_store::slots::SlotId, OperationalError> {
         self.merkle.take_slot(&self.merkle_slots_dir())
+    }
+
+    /// Start reclaiming the disk that collection freed, in the background.
+    ///
+    /// Deleting a node writes a tombstone; the bytes come back when compaction rewrites the files
+    /// without it. That rewrite costs the whole store rather than the garbage, so it is deliberately
+    /// neither part of collecting nor part of taking a full commit - both would then be as slow as
+    /// the most expensive thing they could trigger.
+    ///
+    /// Returns immediately, and returns whether this call started one. Reads, writes and commits
+    /// carry on throughout.
+    #[cfg(rocksdb)]
+    pub fn start_reclaim(&self) -> bool {
+        self.merkle.start_compaction()
+    }
+
+    /// Whether a reclaim started by [`DirectoryManager::start_reclaim`] is still running.
+    #[cfg(rocksdb)]
+    pub fn is_reclaiming(&self) -> bool {
+        self.merkle.is_compacting()
     }
 
     /// The most recent full commit, which is the image recovery would open.

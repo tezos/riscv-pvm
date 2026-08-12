@@ -718,6 +718,45 @@ mod node_tests {
         assert_eq!(fixture.repo.merkle_store().store_id(), before);
     }
 
+    // A full commit does not wait on reclaiming, and reclaiming runs alongside ordinary use: the
+    // registry stays committable while the store is being rewritten underneath it.
+    #[test]
+    fn reclaiming_does_not_hold_up_the_registry() {
+        let mut fixture = Fixture::new();
+
+        let base: Vec<Vec<u8>> = (0..200u32).map(|i| i.to_be_bytes().to_vec()).collect();
+        let base_refs: Vec<&[u8]> = base.iter().map(|k| k.as_slice()).collect();
+        fixture.commit(&base_refs, b"0");
+        let second = fixture.commit(&[b"\x00\x00\x00\x01"], b"1");
+
+        collect_all(&fixture.repo, &second, &Suspend::new()).expect("collection should succeed");
+
+        assert!(
+            fixture.repo.start_reclaim(),
+            "a reclaim should have started"
+        );
+        assert!(
+            !fixture.repo.start_reclaim(),
+            "a second request should not queue another rewrite"
+        );
+
+        // Taking a full commit and committing again both proceed while it runs.
+        fixture
+            .repo
+            .full_commit()
+            .expect("a full commit should not wait on reclaiming");
+
+        let third = fixture.commit(&[b"\x00\x00\x00\x02"], b"2");
+
+        // Wait for it, so the test does not leave a thread writing into a temporary directory.
+        while fixture.repo.is_reclaiming() {
+            std::thread::yield_now();
+        }
+
+        Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), third)
+            .expect("the commit made during the reclaim should check out");
+    }
+
     // A store that has never collected reports an absent node as simply absent, so the distinction
     // means something.
     #[test]

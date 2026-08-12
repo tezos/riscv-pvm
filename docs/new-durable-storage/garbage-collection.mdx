@@ -179,10 +179,17 @@ A stale stamp costs a walk and an over-generous one retains garbage; neither can
 
 The graph has no cycles to guard against: a node's hash is derived from its children's, so a node can never be its own ancestor.
 
-<Note>
+### Reclaiming the disk
+
 Deleting a node writes a tombstone; the bytes come back when compaction rewrites the files without it.
-Collection does not force that — reclamation follows the full-commit cadence rather than every round, because compacting the store costs the store rather than the garbage.
-</Note>
+That rewrite costs the whole store rather than the garbage, and takes far longer than anything that would want to trigger it.
+
+So it is a background task of its own, started explicitly and neither part of collecting nor part of taking a full commit.
+A full commit is a flush and a rename; pairing it with a rewrite of the store would make the cheap operation as slow as the expensive one.
+Starting a reclaim returns at once, and a second request while one is running is a no-op rather than a queued rewrite.
+
+Reads, writes and commits carry on throughout.
+The rewrite does not exclude RocksDB's own compaction either, which it would by default — holding everything else off for the length of a full-store rewrite would stall writes behind it to no purpose.
 
 ### Committing after a collection
 
