@@ -29,6 +29,7 @@
 
 use std::borrow::Borrow;
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::ops::Deref;
@@ -97,9 +98,18 @@ pub trait DataResolver<Id, M: Mode> {
     ) -> Result<&'a mut Bytes<M>, OperationalError>;
 }
 
+/// Trait for resolving keys, without necessarily reading the underlying key.
+///
+/// This allows for keys to be compared against nodes with possibly more optimal methods
+/// depending on the resolver.
+pub trait KeyResolver<TreeId, DataId, M: Mode> {
+    /// Compare a key against a given node.
+    fn compare_key(&self, node: &Node<TreeId, DataId, M>, key: &Key) -> Ordering;
+}
+
 trait_set! {
     /// Specialised [`Resolver`] for MAVL nodes
-    pub trait NodeResolver<NodeId, DataId, TreeId, M: Mode> = Resolver<NodeId, Node<TreeId, DataId, M>> + DataResolver<DataId, M>;
+    pub trait NodeResolver<NodeId, DataId, TreeId, M: Mode> = Resolver<NodeId, Node<TreeId, DataId, M>> + DataResolver<DataId, M> + KeyResolver<TreeId, DataId, M>;
 
     /// Specialised [`Resolver`] for MAVL trees
     pub trait TreeResolver<NodeId, TreeId> = Resolver<TreeId, Tree<NodeId>>;
@@ -215,6 +225,12 @@ impl DataResolver<Bytes<Normal>, Normal> for ArcResolver {
         _key: &Key,
     ) -> Result<&'a mut Bytes<Normal>, OperationalError> {
         Ok(id)
+    }
+}
+
+impl KeyResolver<ArcTreeId, Bytes<Normal>, Normal> for ArcResolver {
+    fn compare_key(&self, node: &Node<ArcTreeId, Bytes<Normal>, Normal>, key: &Key) -> Ordering {
+        node.key().cmp(key)
     }
 }
 
@@ -649,6 +665,12 @@ impl<KV: ReadableKeyValueStore> DataResolver<LazyDataId, Normal> for LazyResolve
     }
 }
 
+impl<KV: ReadableKeyValueStore> KeyResolver<LazyTreeId, LazyDataId, Normal> for LazyResolver<KV> {
+    fn compare_key(&self, node: &Node<LazyTreeId, LazyDataId, Normal>, key: &Key) -> Ordering {
+        node.key().cmp(key)
+    }
+}
+
 /// Resolver that only accesses already-cached prove-mode values.
 ///
 /// Returns [`OperationalError::ResolverInvariantViolated`] if a node or tree has not been
@@ -698,6 +720,16 @@ impl<'inner> DataResolver<Bytes<Prove<'inner>>, Prove<'inner>> for CachedOnlyRes
         _key: &Key,
     ) -> Result<&'a mut Bytes<Prove<'inner>>, OperationalError> {
         Ok(id)
+    }
+}
+
+impl<'inner> KeyResolver<ProveTreeId, Bytes<Prove<'inner>>, Prove<'inner>> for CachedOnlyResolver {
+    fn compare_key(
+        &self,
+        node: &Node<ProveTreeId, Bytes<Prove<'inner>>, Prove<'inner>>,
+        key: &Key,
+    ) -> Ordering {
+        node.key().cmp(key)
     }
 }
 
@@ -1072,6 +1104,16 @@ impl<'inner, R> DataResolver<Bytes<Prove<'inner>>, Prove<'inner>> for ProveResol
     }
 }
 
+impl<'inner, R> KeyResolver<ProveTreeId, Bytes<Prove<'inner>>, Prove<'inner>> for ProveResolver<R> {
+    fn compare_key(
+        &self,
+        node: &Node<ProveTreeId, Bytes<Prove<'inner>>, Prove<'inner>>,
+        key: &Key,
+    ) -> Ordering {
+        node.key().cmp(key)
+    }
+}
+
 /// Identifier for a node resolved in [`Verify`] mode.
 ///
 /// Absent nodes are not a valid variant as they indicate a bad proof: any node accessed during
@@ -1250,6 +1292,12 @@ impl DataResolver<Bytes<Verify>, Verify> for VerifyResolver {
         _key: &Key,
     ) -> Result<&'a mut Bytes<Verify>, OperationalError> {
         Ok(id)
+    }
+}
+
+impl KeyResolver<VerifyTreeId, Bytes<Verify>, Verify> for VerifyResolver {
+    fn compare_key(&self, node: &Node<VerifyTreeId, Bytes<Verify>, Verify>, key: &Key) -> Ordering {
+        node.key().cmp(key)
     }
 }
 
