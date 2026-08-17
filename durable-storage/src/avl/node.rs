@@ -189,7 +189,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     {
         loop {
             let resolved_node = resolver.resolve(node)?;
-            match resolved_node.key().cmp(key) {
+            match resolver.compare_key(resolved_node, key) {
                 Ordering::Equal => return Ok(Some(node)),
                 Ordering::Greater => {
                     let Some(left) = resolved_node.left_ref(resolver)?.root() else {

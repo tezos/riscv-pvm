@@ -502,6 +502,7 @@ mod tests {
     use crate::avl::resolver::ArcResolver;
     use crate::avl::resolver::ArcTreeId;
     use crate::avl::resolver::DataResolver;
+    use crate::avl::resolver::KeyResolver;
     use crate::avl::resolver::Resolver;
     use crate::key::KEY_MAX_SIZE;
     use crate::key::Key;
@@ -870,6 +871,16 @@ mod tests {
         ) -> Result<&'a mut Bytes<Normal>, OperationalError> {
             // resolution would fail on the node by the key first
             Ok(id)
+        }
+    }
+
+    impl KeyResolver<ArcTreeId, Bytes<Normal>, Normal> for FailOnKeyResolver {
+        fn compare_key(
+            &self,
+            node: &Node<ArcTreeId, Bytes<Normal>, Normal>,
+            key: &Key,
+        ) -> Ordering {
+            node.key().cmp(key)
         }
     }
 
