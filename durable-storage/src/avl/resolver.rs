@@ -729,7 +729,9 @@ impl<'inner> KeyResolver<ProveTreeId, Bytes<Prove<'inner>>, Prove<'inner>> for C
         node: &Node<ProveTreeId, Bytes<Prove<'inner>>, Prove<'inner>>,
         key: &Key,
     ) -> Ordering {
-        node.key().cmp(key)
+        // this is safe w.r.t. proof-generation: Self is a resolver only used during
+        // the MerkleProofFold.
+        node.key_atom().unrecorded_deref().cmp(key)
     }
 }
 
