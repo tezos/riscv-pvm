@@ -123,6 +123,17 @@ impl<T: 'static> Atom<T, Prove<'_>> {
     pub fn was_accessed(&self) -> bool {
         self.atom.read.get() || self.atom.current.is_some()
     }
+
+    /// Access the underlying value - without recording the deref.
+    ///
+    /// Must only be used _during_ proof generation/folding - never
+    /// during operations that must record accesses.
+    pub fn unrecorded_deref(&self) -> &T {
+        self.atom
+            .current
+            .as_deref()
+            .unwrap_or_else(|| self.atom.previous.deref())
+    }
 }
 
 impl<'normal, T: 'static> Provable<'normal> for Atom<T, Normal> {

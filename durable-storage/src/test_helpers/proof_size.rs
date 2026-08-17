@@ -80,8 +80,10 @@ fn avl_path_node(key_len: usize) -> usize {
 
 /// An accessed node off the search path (touched by a rebalancing rotation):
 /// like [`avl_path_node`], but both children may be blinded.
+///
+/// However, `key` is additionally blinded, alongside the data and the two children.
 fn avl_extra_node() -> usize {
-    avl_path_node(KEY_MAX_SIZE) + BLIND_LEAF
+    TREE_WRAP + TAG_BYTES + BALANCE_FACTOR_LEAF + 4 * BLIND_LEAF
 }
 
 /// The blinded second child of the last node on a path.
