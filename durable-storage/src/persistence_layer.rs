@@ -206,6 +206,50 @@ pub(crate) fn rocksdb_checkpoint_options() -> rocksdb::Options {
     options
 }
 
+/// Whether `commit_path` holds a published commit.
+///
+/// A commit is published by renaming a complete checkpoint into place, so the `CURRENT` file that
+/// every RocksDB directory holds is enough to tell a published commit from a directory left behind
+/// by an interrupted removal.
+fn is_published_commit(commit_path: &Path) -> bool {
+    commit_path.join("CURRENT").exists()
+}
+
+/// The outcome of an attempt to publish a staged checkpoint under a commit path.
+enum Publish {
+    /// The commit is published - either by this attempt, or by a concurrent one, which published
+    /// the same state.
+    Done,
+    /// Something that is not a published commit occupies the commit path, holding the error the
+    /// attempt failed with.
+    Occupied(std::io::Error),
+}
+
+/// Move the checkpoint staged at `staged` into place under `commit_path`.
+///
+/// The rename is the only authority on whether the commit is published: it is a single step, so a
+/// concurrent publisher of the same commit either lost to it or won it outright. Nothing observed
+/// beforehand can be relied on to still hold by the time it runs.
+fn publish_staged_commit(staged: &Path, commit_path: &Path) -> Result<Publish, OperationalError> {
+    match std::fs::rename(staged, commit_path) {
+        Ok(()) => Ok(Publish::Done),
+
+        // Lost a race to publish this commit. The winner published the state staged here - the
+        // commit id is a hash of it - so the commit is made either way, and the staged copy is
+        // discarded along with its staging directory.
+        Err(_) if is_published_commit(commit_path) => Ok(Publish::Done),
+
+        // A directory in the way is the one failure the caller can repair.
+        Err(error) if commit_path.is_dir() => Ok(Publish::Occupied(error)),
+
+        Err(error) => Err(OperationalError::CommitPublishFailed {
+            staged: staged.to_owned(),
+            commit: commit_path.to_owned(),
+            error,
+        }),
+    }
+}
+
 /// Persistence layer for durable solution used by the RISC-V PVM.
 ///
 /// Invariants:
@@ -428,29 +472,94 @@ impl PersistentKeyValueStore for PersistenceLayer {
     }
 
     fn commit(&self, repo: &DirectoryManager, id: &CommitId) -> Result<(), OperationalError> {
-        let checkpoint_path = repo.database_commit_dir(id);
+        let commit_path = repo.database_commit_dir(id);
 
-        // If the path already exists, we overwrite the existing commit. This is highly unlikely to
-        // happen anyway if the commits are a hash of the content.
-        if Path::exists(&checkpoint_path) {
-            std::fs::remove_dir_all(&checkpoint_path).map_err(|error| {
-                OperationalError::DirRemovalFailed {
-                    path: checkpoint_path.clone(),
-                    error,
-                }
-            })?;
-
-            log::warn!("Overwriting existing commit: {}", id.hex_encode());
+        // A commit id is a hash of the state committed under it, so a commit already published
+        // under `id` holds the state being committed here and there is nothing left to do.
+        // Republishing it would unlink the files a concurrent read-only checkout of the commit is
+        // reading, only to replace them with the same state. This only skips the work below - it
+        // is the publishing rename that settles whether this call has anything to do.
+        if is_published_commit(&commit_path) {
+            return Ok(());
         }
 
-        self.commit_to_path(&checkpoint_path)
+        // Stage the checkpoint in a directory of its own and move it into place, rather than
+        // checkpointing straight into `commit_path`: RocksDB stages a checkpoint at
+        // `<destination>.tmp`, so two commits of one id would otherwise share - and clobber - a
+        // staging directory. Staging among the repository's temporary databases keeps the staged
+        // copy on the same filesystem as the commit, which both the rename below and the hard links
+        // a checkpoint is made of require.
+        let staging = repo.temp_database_dir()?;
+        let staged_commit = staging.path().join("commit");
+
+        self.commit_to_path(&staged_commit)?;
+
+        let Publish::Occupied(_) = publish_staged_commit(&staged_commit, &commit_path)? else {
+            return Ok(());
+        };
+
+        // A directory in the way holding no `CURRENT` file is not a published commit. A checkpoint
+        // is built under a temporary name and renamed into place, so an interrupted commit cannot
+        // leave one behind - only an interrupted removal by an older version of this function can,
+        // and replacing it is the repair.
+        //
+        // It is moved aside rather than removed where it lies. Testing a directory for `CURRENT`
+        // and removing it cannot be one step, so a commit published between the two would be
+        // removed as though it were incomplete, unlinking the files a concurrent read-only
+        // checkout is reading. A rename is one step, and nothing else can reach what it moves out
+        // of the way, so what was moved can be examined once it is out of the way.
+        log::warn!("Replacing incomplete commit: {}", id.hex_encode());
+
+        let displaced = staging.path().join("displaced");
+
+        std::fs::rename(&commit_path, &displaced).map_err(|error| {
+            OperationalError::IncompleteCommitDisplacementFailed {
+                commit: commit_path.clone(),
+                displaced: displaced.clone(),
+                error,
+            }
+        })?;
+
+        // A commit published in that window is put back rather than replaced by the copy staged
+        // here. The two hold the same state - the commit id is a hash of it - but not the same
+        // files: a checkpoint is made of hard links to the database it was taken from, so the copy
+        // staged here has file names and inodes of its own, and a read-only checkout part-way
+        // through opening the commit is reading the published copy's. Putting it back also keeps
+        // it out of the staging directory, which is removed when this call returns.
+        if is_published_commit(&displaced) {
+            return match std::fs::rename(&displaced, &commit_path) {
+                Ok(()) => Ok(()),
+
+                // Yet another publisher reached the commit path first, with the same state again.
+                Err(_) if is_published_commit(&commit_path) => Ok(()),
+
+                Err(error) => Err(OperationalError::CommitPublishFailed {
+                    staged: displaced,
+                    commit: commit_path,
+                    error,
+                }),
+            };
+        }
+
+        match publish_staged_commit(&staged_commit, &commit_path)? {
+            Publish::Done => Ok(()),
+
+            Publish::Occupied(error) => Err(OperationalError::CommitPublishFailed {
+                staged: staged_commit,
+                commit: commit_path,
+                error,
+            }),
+        }
     }
 
     fn checkout_from_path(
         commit_path: &Path,
         working_path: TempDir,
     ) -> Result<Self, OperationalError> {
-        if !Path::exists(commit_path) {
+        // A directory that is not a published commit is no commit at all - an interrupted removal
+        // by an older version of `commit` can leave one behind, and opening it would fail further
+        // in, with an error about the database rather than about the commit.
+        if !is_published_commit(commit_path) {
             return Err(OperationalError::CommitNotFound);
         };
 
@@ -560,6 +669,50 @@ mod tests {
             db.blob_get(hash),
             Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound))
         ));
+    }
+
+    /// A file in a commit directory, identified precisely enough to tell one left untouched from
+    /// one that was removed and written again with the same contents: the same inode, modified at
+    /// the same time, holding the same bytes.
+    #[derive(Debug, PartialEq, Eq)]
+    struct CommitFile {
+        name: std::ffi::OsString,
+        inode: u64,
+        modified: std::time::SystemTime,
+        contents: Hash,
+    }
+
+    /// The files in `path`, ignoring RocksDB's info log - which even a read-only open appends to.
+    fn commit_dir_contents(path: &Path) -> Vec<CommitFile> {
+        use std::os::unix::fs::MetadataExt;
+
+        let mut contents: Vec<_> = std::fs::read_dir(path)
+            .expect("Commit directory should be readable")
+            .map(|entry| {
+                let entry = entry.expect("Directory entry should be readable");
+                let metadata = entry.metadata().expect("Metadata should be readable");
+
+                assert!(
+                    metadata.is_file(),
+                    "A commit directory should hold only files"
+                );
+
+                CommitFile {
+                    name: entry.file_name(),
+                    inode: metadata.ino(),
+                    modified: metadata
+                        .modified()
+                        .expect("Modification time should be readable"),
+                    contents: Hash::hash_bytes(
+                        &std::fs::read(entry.path()).expect("File should be readable"),
+                    ),
+                }
+            })
+            .filter(|file| !file.name.to_string_lossy().starts_with("LOG"))
+            .collect();
+
+        contents.sort_by(|left, right| left.name.cmp(&right.name));
+        contents
     }
 
     fn assert_key_missing(db: &PersistenceLayer, key: impl AsRef<[u8]>) {
@@ -793,6 +946,24 @@ mod tests {
     }
 
     #[test]
+    fn test_checkout_of_incomplete_commit_is_not_found() {
+        let (_keepalive, repo) = setup_repo();
+
+        // A directory holding no `CURRENT` file, of the kind an interrupted removal by an older
+        // version of `commit` leaves behind, is not a commit - and is reported as one that cannot
+        // be found, rather than as a failure to open the database it does not hold.
+        let commit_id = CommitId::from(Hash::hash_bytes(b"incomplete_commit"));
+        let commit_path = repo.database_commit_dir(&commit_id);
+
+        std::fs::create_dir_all(&commit_path).expect("Failed to create the incomplete commit");
+        std::fs::write(commit_path.join("000123.sst"), b"leftover")
+            .expect("Failed to write into the incomplete commit");
+
+        let db_result = PersistenceLayer::checkout(&repo, &commit_id);
+        assert!(matches!(db_result, Err(OperationalError::CommitNotFound)));
+    }
+
+    #[test]
     fn test_clone_commit_and_checkout() {
         // A -> (mutate A) -> B (clone) -> (mutate B) -> B (commit: "commit_1") -> (mutate B)
         // D (checkout: "commit_1")
@@ -879,8 +1050,81 @@ mod tests {
         assert_blob_value(&db_check_2, &blob_b);
     }
 
+    /// Two databases publish one commit id at the same moment while a third reads it.
+    ///
+    /// Which of the two wins the publishing rename is not determined, and the loser may well take
+    /// the shortcut at the top of `commit` rather than the lost-race branch below it - what the
+    /// test pins down is what a reader sees: once the commit is there, it stays there, holding the
+    /// state both writers published. Republishing it, as `commit` used to, would have unlinked it
+    /// under the reader.
     #[test]
-    fn test_duplicate_commit() {
+    fn test_concurrent_commits_of_one_id_leave_a_reader_undisturbed() {
+        let tempdir = TestableTmpdir::new();
+
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+
+        let blob = HashedData::from_data(b"contended_value");
+        let commit_id = CommitId::from(Hash::hash_bytes(b"contended_commit"));
+
+        let start = std::sync::Barrier::new(3);
+
+        std::thread::scope(|scope| {
+            let (repo, blob, commit_id, start) = (&repo, &blob, &commit_id, &start);
+
+            for writer in 0..2 {
+                scope.spawn(move || {
+                    let db = PersistenceLayer::new(repo).expect("Failed to create the database");
+                    db.blob_set(blob.hash(), blob.data())
+                        .expect("Failed to set the blob");
+
+                    start.wait();
+                    db.commit(repo, commit_id).unwrap_or_else(|error| {
+                        panic!("Writer {writer} failed to commit: {error}")
+                    });
+                });
+            }
+
+            scope.spawn(move || {
+                start.wait();
+
+                // Read until the commit has been seen a good number of times, rather than for a
+                // fixed number of attempts: a checkout of a commit that is not there yet returns
+                // at once, so a fixed count would race past the writers and read nothing at all.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                let mut reads = 0;
+
+                while reads < 16 && std::time::Instant::now() < deadline {
+                    match PersistenceLayer::checkout(repo, commit_id) {
+                        Ok(db) => {
+                            assert_blob_value(&db, blob);
+                            reads += 1;
+                        }
+
+                        // Only ever before the first writer has published.
+                        Err(OperationalError::CommitNotFound) => assert_eq!(
+                            reads, 0,
+                            "A published commit should not go missing while it is being read"
+                        ),
+
+                        Err(error) => panic!("Checking the commit out failed: {error}"),
+                    }
+                }
+
+                assert!(
+                    reads > 0,
+                    "The reader should have seen the commit published"
+                );
+            });
+        });
+
+        let db = PersistenceLayer::checkout(&repo, &commit_id)
+            .expect("The commit should be readable once both writers are done");
+        assert_blob_value(&db, &blob);
+    }
+
+    #[test]
+    fn test_recommitting_a_published_id_leaves_its_files_untouched() {
         let tempdir = TestableTmpdir::new();
 
         let repo =
@@ -895,29 +1139,90 @@ mod tests {
         db_a.commit(&repo, &commit_id)
             .expect("Failed to commit DB A");
 
+        let commit_path = repo.database_commit_dir(&commit_id);
+        let commit_contents = commit_dir_contents(&commit_path);
+
         let blob_2 = HashedData::from_data(b"another_value");
         db_a.blob_set(blob_2.hash(), blob_2.data())
             .expect("Failed to set blob 2 in A");
 
-        // Committing again with the same id should work
-        let result = db_a.commit(&repo, &commit_id);
-        assert!(result.is_ok());
+        // A commit id is a hash of the state committed under it, so committing the same id a second
+        // time is a no-op: the published commit already holds that state, and is left exactly as it
+        // was found rather than being removed and written again. Every file is still the same
+        // inode, modified when it always was, holding the bytes it always held - so a read-only
+        // checkout of this commit, which reads these very files, is undisturbed by the second
+        // commit.
+        db_a.commit(&repo, &commit_id)
+            .expect("Committing the same id a second time should succeed");
+        assert_eq!(
+            commit_dir_contents(&commit_path),
+            commit_contents,
+            "The published commit should be untouched, down to the files on disk"
+        );
 
         drop(db_a);
 
-        // Loading after the second commit should contain both blobs
+        // The commit holds the state it was published with. The writes made afterwards are not part
+        // of it - they were never committed under an id of their own.
         let db_a = PersistenceLayer::checkout(&repo, &commit_id)
             .expect("Failed to checkout commit into DB A");
 
-        let retrieved = db_a
-            .blob_get(blob.hash())
-            .expect("Failed to get blob from A");
-        assert_eq!(retrieved.as_ref(), blob.data());
+        assert_blob_value(&db_a, &blob);
+        assert_blob_missing(&db_a, blob_2.hash());
+    }
 
-        let retrieved_2 = db_a
-            .blob_get(blob_2.hash())
-            .expect("Failed to get blob 2 from A");
-        assert_eq!(retrieved_2.as_ref(), blob_2.data());
+    #[test]
+    fn test_commit_replaces_incomplete_commit_dir() {
+        let tempdir = TestableTmpdir::new();
+
+        let repo =
+            DirectoryManager::new(tempdir.path()).expect("Failed to create directory manager");
+        let db = PersistenceLayer::new(&repo).expect("Failed to create DB");
+
+        let blob = HashedData::from_data(b"some_value");
+        db.blob_set(blob.hash(), blob.data())
+            .expect("Failed to set blob");
+
+        // A directory holding no `CURRENT` file, of the kind an interrupted removal by an older
+        // version of `commit` leaves behind. It is in the way of the publishing rename, and
+        // replacing it is the repair.
+        let commit_id = CommitId::from(Hash::hash_bytes(b"incomplete"));
+        let commit_path = repo.database_commit_dir(&commit_id);
+
+        std::fs::create_dir_all(&commit_path).expect("Failed to create the incomplete commit");
+        std::fs::write(commit_path.join("000123.sst"), b"leftover")
+            .expect("Failed to write into the incomplete commit");
+
+        db.commit(&repo, &commit_id)
+            .expect("Committing over an incomplete commit should succeed");
+
+        assert!(
+            is_published_commit(&commit_path),
+            "The incomplete commit should have been replaced by a published one"
+        );
+        assert!(
+            !commit_path.join("000123.sst").exists(),
+            "The incomplete commit should not have been published in part"
+        );
+
+        // An empty directory is renamed over rather than repaired, so it takes the same path
+        // through `commit` that an unoccupied commit path does.
+        let empty_id = CommitId::from(Hash::hash_bytes(b"empty"));
+        let empty_path = repo.database_commit_dir(&empty_id);
+
+        std::fs::create_dir_all(&empty_path).expect("Failed to create the empty commit dir");
+
+        db.commit(&repo, &empty_id)
+            .expect("Committing over an empty directory should succeed");
+
+        assert!(is_published_commit(&empty_path));
+
+        drop(db);
+
+        for id in [commit_id, empty_id] {
+            let db = PersistenceLayer::checkout(&repo, &id).expect("Failed to checkout commit");
+            assert_blob_value(&db, &blob);
+        }
     }
 
     #[test]
