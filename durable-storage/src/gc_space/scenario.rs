@@ -30,8 +30,10 @@ use serde::Serialize;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 use super::measure::measure;
+use super::prune::prune_unreachable;
 use super::report::report;
 use super::report::report_header;
+use super::report::report_prune;
 use super::report::summarise;
 use crate::commit::CommitId;
 use crate::database::Database;
@@ -96,6 +98,14 @@ pub struct SpaceConfig {
     /// Where the repository lives. A fresh temporary directory when absent, in which case nothing
     /// survives the run.
     pub repo_dir: Option<PathBuf>,
+
+    /// After the last commit, delete every commit not reachable from it and measure again.
+    ///
+    /// This is what collecting at directory granularity would reclaim, so running with it splits
+    /// the storage into three parts: what a directory-level collection frees, what remains and is
+    /// still needed, and what remains but is dead. The last part is the dead node data, which sits
+    /// in files the surviving commit still references and which no directory deletion can reach.
+    pub simulate_dir_gc: bool,
 }
 
 impl SpaceConfig {
@@ -181,6 +191,8 @@ impl SpaceConfig {
 
         let mut rng = StdRng::seed_from_u64(self.seed);
 
+        let mut last_commit = base_commit;
+
         for commit_index in 1..=self.commits {
             modify(&mut registry, &self, &mut rng, commit_index)
                 .with_context(|| format!("applying modifications for commit {commit_index}"))?;
@@ -190,6 +202,7 @@ impl SpaceConfig {
                 .commit()
                 .with_context(|| format!("committing at commit {commit_index}"))?;
             let commit_time = started.elapsed();
+            last_commit = commit;
 
             if commit_index % self.sample_every != 0 && commit_index != self.commits {
                 continue;
@@ -210,6 +223,17 @@ impl SpaceConfig {
         }
 
         summarise(&mut out, &samples)?;
+
+        if self.simulate_dir_gc {
+            // The base state is retained alongside the last commit, not because a collection would
+            // keep it, but because a persistent `--repo-dir` records it for later runs to check out.
+            // Pruning it would leave `gc_space_base.json` naming a commit whose directory is gone, and
+            // the next run of the same shape would fail instead of reusing the base.
+            let retained = [last_commit, base_commit];
+            let outcome = prune_unreachable(&repo, &repo_path, &retained)
+                .context("simulating a directory-level collection")?;
+            report_prune(&mut out, &outcome, samples.last())?;
+        }
 
         Ok(())
     }

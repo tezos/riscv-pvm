@@ -68,6 +68,12 @@ struct Cli {
     /// exit along with the base state.
     #[arg(long)]
     repo_dir: Option<PathBuf>,
+
+    /// After the last commit, delete every commit not reachable from it and measure again.
+    ///
+    /// Shows what collecting at directory granularity reclaims, and what dead node data survives it.
+    #[arg(long)]
+    simulate_dir_gc: bool,
 }
 
 fn main() -> Result<()> {
@@ -101,6 +107,7 @@ fn main() -> Result<()> {
         sample_every: cli.sample_every,
         seed: cli.seed,
         repo_dir: cli.repo_dir,
+        simulate_dir_gc: cli.simulate_dir_gc,
     }
     .run()
 }

@@ -29,10 +29,12 @@
 //! a volume with room to spare and successive runs skip straight to the commit sequence.
 
 mod measure;
+mod prune;
 mod report;
 mod sample;
 mod scenario;
 
+pub use prune::PruneOutcome;
 pub use sample::BlobBreakdown;
 pub use sample::DiskUsage;
 pub use sample::LevelSummary;
