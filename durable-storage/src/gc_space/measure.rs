@@ -176,10 +176,31 @@ fn measure_blob(
 }
 
 /// Occupancy of a directory tree, counting each inode's blocks once.
-fn disk_usage(root: &Path) -> Result<DiskUsage> {
+pub(super) fn disk_usage(root: &Path) -> Result<DiskUsage> {
     let mut usage = DiskUsage::default();
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
     accumulate_disk_usage(root, &mut usage, &mut seen)?;
+
+    Ok(usage)
+}
+
+/// Occupancy of the committed history: the database commit directories and the registry manifests,
+/// leaving out the working databases.
+///
+/// Note this is what the history *references*, not what deleting it would free: commits hard-link
+/// the working database's files, so blocks counted here can be held by the working database too.
+/// Use [`SpaceConfig::simulate_dir_gc`] for what deletion actually reclaims.
+pub(super) fn commits_disk_usage(repo_path: &Path) -> Result<DiskUsage> {
+    let mut usage = DiskUsage::default();
+    let mut seen: HashSet<(u64, u64)> = HashSet::new();
+
+    // One `seen` set across both roots, so an inode linked from each is still counted once.
+    for root in [
+        repo_path.join("databases").join("commits"),
+        repo_path.join("registries"),
+    ] {
+        accumulate_disk_usage(&root, &mut usage, &mut seen)?;
+    }
 
     Ok(usage)
 }

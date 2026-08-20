@@ -30,8 +30,10 @@ use serde::Serialize;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 use super::measure::measure;
+use super::prune::prune_unreachable;
 use super::report::report;
 use super::report::report_header;
+use super::report::report_prune;
 use super::report::summarise;
 use crate::commit::CommitId;
 use crate::database::Database;
@@ -96,6 +98,14 @@ pub struct SpaceConfig {
     /// Where the repository lives. A fresh temporary directory when absent, in which case nothing
     /// survives the run.
     pub repo_dir: Option<PathBuf>,
+
+    /// After the last commit, delete every commit not reachable from it and measure again.
+    ///
+    /// This is what collecting at directory granularity would reclaim, so running with it splits
+    /// the storage into three parts: what a directory-level collection frees, what remains and is
+    /// still needed, and what remains but is dead. The last part is the dead node data, which sits
+    /// in files the surviving commit still references and which no directory deletion can reach.
+    pub simulate_dir_gc: bool,
 }
 
 impl SpaceConfig {
@@ -185,6 +195,8 @@ impl SpaceConfig {
 
         let mut rng = StdRng::seed_from_u64(self.seed);
 
+        let mut last_commit = base_commit;
+
         for commit_index in 1..=self.commits {
             modify(&mut registry, &self, &mut rng, commit_index)
                 .with_context(|| format!("applying modifications for commit {commit_index}"))?;
@@ -194,6 +206,7 @@ impl SpaceConfig {
                 .commit()
                 .with_context(|| format!("committing at commit {commit_index}"))?;
             let commit_time = started.elapsed();
+            last_commit = commit;
 
             if commit_index % self.sample_every != 0 && commit_index != self.commits {
                 continue;
@@ -214,6 +227,17 @@ impl SpaceConfig {
         }
 
         summarise(&mut out, &samples)?;
+
+        if self.simulate_dir_gc {
+            // The base state is retained alongside the last commit, not because a collection would
+            // keep it, but because a persistent `--repo-dir` records it for later runs to check out.
+            // Pruning it would leave `gc_space_base.json` naming a commit whose directory is gone, and
+            // the next run of the same shape would fail instead of reusing the base.
+            let retained = [last_commit, base_commit];
+            let outcome = prune_unreachable(&repo, &repo_path, &retained)
+                .context("simulating a directory-level collection")?;
+            report_prune(&mut out, &outcome, samples.last())?;
+        }
 
         Ok(())
     }
@@ -576,7 +600,7 @@ mod tests {
     /// A run small enough for the test suite, still covering every measurement the harness makes:
     /// more than one database, a large-value tail, and enough commits for a sample to be a delta of
     /// the one before it.
-    fn restricted_config(repo_dir: &Path) -> SpaceConfig {
+    fn restricted_config(repo_dir: &Path, simulate_dir_gc: bool) -> SpaceConfig {
         SpaceConfig {
             databases: 2,
             keys_per_database: 100,
@@ -591,6 +615,7 @@ mod tests {
             sample_every: 1,
             seed: 0,
             repo_dir: Some(repo_dir.to_path_buf()),
+            simulate_dir_gc,
         }
     }
 
@@ -599,8 +624,45 @@ mod tests {
     fn space_harness_restricted() {
         let tmp = TestableTmpdir::new();
 
-        restricted_config(tmp.path())
+        restricted_config(tmp.path(), false)
             .run()
             .expect("the short space harness run should succeed");
+    }
+
+    /// A recorded base state built for a different shape has to be ignored and rebuilt, and the
+    /// commits it left behind cleared. Also samples every other commit rather than all of them.
+    #[test]
+    fn space_harness_restricted_rebuilds_mismatched_base() {
+        let tmp = TestableTmpdir::new();
+
+        restricted_config(tmp.path(), false)
+            .run()
+            .expect("the run that records the base state should succeed");
+
+        let mut config = restricted_config(tmp.path(), false);
+        // Part of the base shape, so the recorded state no longer matches.
+        config.keys_per_database += 1;
+        config.commits = 3;
+        config.sample_every = 2;
+
+        config
+            .run()
+            .expect("the run that rebuilds a mismatched base state should succeed");
+    }
+
+    /// The same shape run twice over one directory, the second time collecting. Covers the paths a
+    /// single run cannot reach: reading back a recorded base state, resetting the repository to it,
+    /// and pruning the commits the retained roots no longer hold.
+    #[test]
+    fn space_harness_restricted_reuses_base_and_collects() {
+        let tmp = TestableTmpdir::new();
+
+        restricted_config(tmp.path(), false)
+            .run()
+            .expect("the run that records the base state should succeed");
+
+        restricted_config(tmp.path(), true)
+            .run()
+            .expect("the run that reuses the base state and collects should succeed");
     }
 }

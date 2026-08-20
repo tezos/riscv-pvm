@@ -9,6 +9,7 @@
 use std::io;
 use std::io::Write;
 
+use super::prune::PruneOutcome;
 use super::sample::Sample;
 use super::sample::Sharing;
 
@@ -185,6 +186,50 @@ pub(super) fn summarise(out: &mut impl Write, samples: &[Sample]) -> io::Result<
         last.commit_dirs,
         mib(last.disk.apparent_bytes),
         mib(last.disk.shared_bytes()),
+    )?;
+
+    Ok(())
+}
+
+/// Report what a directory-level collection reclaimed, and what it could not.
+///
+/// The second figure is the one that matters: whatever dead node data remains after this is data no
+/// directory deletion can ever reach, because the retained commit still references the files it
+/// sits in.
+pub(super) fn report_prune(
+    out: &mut impl Write,
+    outcome: &PruneOutcome,
+    last: Option<&Sample>,
+) -> io::Result<()> {
+    writeln!(out)?;
+    writeln!(
+        out,
+        "simulated directory-level collection: removed {} database commit(s) and {} manifest(s)",
+        outcome.databases_removed, outcome.registries_removed,
+    )?;
+    writeln!(
+        out,
+        "  repository went from {:.1} MiB to {:.1} MiB, freeing {:.1} MiB",
+        mib(outcome.before.unique_bytes),
+        mib(outcome.after.unique_bytes),
+        mib(outcome.freed_bytes()),
+    )?;
+    writeln!(
+        out,
+        "  retained history now occupies {:.1} MiB",
+        mib(outcome.after_commits.unique_bytes),
+    )?;
+
+    let Some(last) = last else {
+        return Ok(());
+    };
+
+    writeln!(
+        out,
+        "  still dead and now unreachable by any directory deletion: {:.1} MiB of node data \
+         ({:.1}% of the surviving blob column family)",
+        mib(last.blob.dead_bytes()),
+        last.blob.dead_fraction() * 100.0,
     )?;
 
     Ok(())

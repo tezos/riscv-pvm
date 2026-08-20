@@ -31,6 +31,7 @@
 //! earlier runs' commits into the figures.
 
 mod measure;
+mod prune;
 mod report;
 mod sample;
 mod scenario;
