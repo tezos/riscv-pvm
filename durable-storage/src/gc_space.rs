@@ -36,4 +36,7 @@ mod report;
 mod sample;
 mod scenario;
 
+// Only the long-test binaries report sizes, so nothing needs this in a test build.
+#[cfg(not(test))]
+pub(crate) use measure::disk_usage;
 pub use scenario::SpaceConfig;
