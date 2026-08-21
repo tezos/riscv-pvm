@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
 //! Tests for [`Bytes`]
+
+use std::panic::AssertUnwindSafe;
 
 use proptest::collection::vec;
 use proptest::prop_assert;
@@ -19,6 +22,7 @@ use crate::components::bytes::NODE_ARITY;
 use crate::components::bytes::PAGE_SIZE;
 use crate::components::bytes::test_utils::BytesMutOp;
 use crate::components::bytes::test_utils::MAX_PROOF_LENGTH;
+use crate::components::bytes::test_utils::MAX_WRITE_PROOF_LENGTH;
 use crate::components::bytes::test_utils::NDS_BYTES_LENGTH;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
@@ -34,6 +38,7 @@ use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::assert_eq_found;
 use crate::mode::utils::assert_not_found;
+use crate::mode::utils::catch_not_found;
 use crate::mode_test;
 use crate::serialisation::serialise;
 
@@ -588,22 +593,29 @@ fn fold_unfold() {
     });
 }
 
-/// At each of the `MAX_PROOF_OFFSETS` a read or write of `MAX_FILE_CHUNK_SIZE`
-/// results in a maximally long proof. This returns a vector of all six such operations.
-fn max_proof_ops() -> Vec<BytesMutOp> {
+/// At each of the `MAX_PROOF_OFFSETS` a read or write of `MAX_FILE_CHUNK_SIZE` results in a
+/// maximally long proof for its kind. This returns all four such operations, each paired with the
+/// length its proof is expected to have.
+fn max_proof_ops() -> Vec<(BytesMutOp, usize)> {
     let mut v = vec![];
 
     for offset in MAX_PROOF_OFFSETS {
-        v.push(BytesMutOp::Immutable {
-            op: BytesOp::Read {
-                offset,
-                size: MAX_FILE_CHUNK_SIZE,
+        v.push((
+            BytesMutOp::Immutable {
+                op: BytesOp::Read {
+                    offset,
+                    size: MAX_FILE_CHUNK_SIZE,
+                },
             },
-        });
-        v.push(BytesMutOp::Write {
-            offset,
-            data: vec![0; MAX_FILE_CHUNK_SIZE],
-        });
+            MAX_PROOF_LENGTH,
+        ));
+        v.push((
+            BytesMutOp::Write {
+                offset,
+                data: vec![0; MAX_FILE_CHUNK_SIZE],
+            },
+            MAX_WRITE_PROOF_LENGTH,
+        ));
     }
 
     v
@@ -614,7 +626,7 @@ fn test_bytes_largest_valid_proof_nds() {
     let v = vec![0; 1024 * 1024 * 64];
     let bytes: Bytes<Normal> = Bytes::from(&v[..]);
 
-    for op in max_proof_ops() {
+    for (op, expected) in max_proof_ops() {
         let mut bytes_prove = bytes.start_proof();
         let _result = op.run(&mut bytes_prove);
         let proof_tree = MerkleProof::from_foldable(&bytes_prove);
@@ -622,8 +634,8 @@ fn test_bytes_largest_valid_proof_nds() {
 
         assert_eq!(
             proof.len(),
-            MAX_PROOF_LENGTH,
-            "expect maximum proof size to be {MAX_PROOF_LENGTH}, but got {}",
+            expected,
+            "expect maximum proof size to be {expected} for {op:?}, but got {}",
             proof.len()
         );
     }
@@ -636,6 +648,131 @@ fn test_bytes_largest_valid_proof_nds() {
 
         assert!(proof.len() <= MAX_PROOF_LENGTH);
     });
+}
+
+/// Run `ops` in `Prove` mode against `normal`, round trip the proof through its binary form, replay
+/// the same operations in `Verify` mode and check that the state hash they arrive at is the one
+/// `Prove` mode arrived at. Returns the serialised proof, so callers can assert on its size.
+fn proof_for(normal: &Bytes<Normal>, ops: &[BytesMutOp]) -> Vec<u8> {
+    let mut prove = normal.start_proof();
+    for op in ops {
+        op.run(&mut prove);
+    }
+    let after_prove = Hash::from_foldable(&prove);
+
+    let proof_tree = MerkleProof::from_foldable(&prove);
+    assert_eq!(
+        Hash::from_foldable(normal),
+        proof_tree.root_hash(),
+        "the proof must describe the state before the operations"
+    );
+
+    let proof = serialise(proof_tree).unwrap();
+    let (verify, parsed_proof_tree): (Bytes<Verify>, _) =
+        proof_binary::deserialise(&proof).unwrap();
+    let parsed_proof_tree = parsed_proof_tree.into_present();
+
+    let verify = catch_not_found(AssertUnwindSafe(|| {
+        let mut verify = verify;
+        for op in ops {
+            op.run(&mut verify);
+        }
+        verify
+    }))
+    .expect("the proof must hold everything the operations access");
+
+    let after_verify = PartialHash::from_foldable(parsed_proof_tree, &verify)
+        .to_hash()
+        .expect("Verify mode must be able to recompute the state hash");
+    assert_eq!(
+        after_prove, after_verify,
+        "Prove and Verify mode must agree on the state after the operations"
+    );
+
+    proof
+}
+
+// A `set` replaces every page, so the proof holds none of the previous value: its size does not
+// depend on how large that value was.
+#[test]
+fn set_proof_omits_previous_pages() {
+    let set = [BytesMutOp::Set {
+        data: (0..PAGE_SIZE + 7).map(|i| i as u8).collect(),
+    }];
+
+    let small = Bytes::<Normal>::from(&vec![0xffu8; 4 * PAGE_SIZE][..]);
+    let large = Bytes::<Normal>::from(&vec![0xffu8; NDS_BYTES_LENGTH][..]);
+
+    let small_proof = proof_for(&small, &set);
+    let large_proof = proof_for(&large, &set);
+
+    assert_eq!(
+        small_proof.len(),
+        large_proof.len(),
+        "a set proof must not depend on the size of the value it replaces"
+    );
+    assert!(
+        small_proof.len() < 100,
+        "a set proof holds the length leaf and one blinded page tree, but was {} bytes",
+        small_proof.len()
+    );
+}
+
+// A page read before a `set` is still needed in full: `Verify` mode replays that read and has no
+// other source for the bytes it returns.
+#[test]
+fn set_proof_keeps_read_pages() {
+    let normal = Bytes::<Normal>::from(&vec![0xffu8; 4 * PAGE_SIZE][..]);
+    let set = BytesMutOp::Set {
+        data: vec![7u8; PAGE_SIZE + 7],
+    };
+    let read = BytesMutOp::Immutable {
+        op: BytesOp::Read {
+            offset: 3 * PAGE_SIZE,
+            size: 8,
+        },
+    };
+
+    // `proof_for` replays the read in Verify mode, so it fails if the page was dropped.
+    let with_read = proof_for(&normal, &[read, set.clone()]);
+    let without_read = proof_for(&normal, &[set]);
+
+    assert!(
+        with_read.len() > without_read.len() + PAGE_SIZE,
+        "the page that was read must still be in the proof in full"
+    );
+}
+
+// A page a write covers in full is blinded rather than carried; a partially written page is not.
+#[test]
+fn write_covering_page_is_blinded() {
+    let normal = Bytes::<Normal>::from(&vec![0xffu8; 4 * PAGE_SIZE][..]);
+
+    let whole_page = proof_for(
+        &normal,
+        &[BytesMutOp::Write {
+            offset: PAGE_SIZE,
+            data: vec![1u8; PAGE_SIZE],
+        }],
+    );
+    let half_page = proof_for(
+        &normal,
+        &[BytesMutOp::Write {
+            offset: PAGE_SIZE,
+            data: vec![1u8; PAGE_SIZE / 2],
+        }],
+    );
+
+    assert!(
+        whole_page.len() < PAGE_SIZE,
+        "a fully covered page must be blinded, but the proof was {} bytes",
+        whole_page.len()
+    );
+    assert!(
+        half_page.len() > PAGE_SIZE,
+        "a partially written page must be carried in full, but the proof was {} bytes",
+        half_page.len()
+    );
 }
 
 /// Folding a verify-mode value must cost what the proof contains, not what it claims to describe.

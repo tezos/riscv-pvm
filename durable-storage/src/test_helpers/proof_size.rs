@@ -27,6 +27,11 @@
 //! (an empty AVL child) is emitted as a present node rather than being blinded.
 //! Both encodings are shorter than a tag plus a digest, so the model stays
 //! conservative when it charges [`BLIND_LEAF`] for them.
+//!
+//! A page a `Write` covers in full is likewise blinded by the prover, but is
+//! still charged its content here. Tightening that would make the `Write` bound
+//! depend on how the write aligns with page boundaries; the looser charge is
+//! still an upper bound.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -189,10 +194,10 @@ fn value_byte_ranges(op: &DatabaseOperation, value_len: usize) -> [Range<usize>;
             let end = offset.saturating_add(data.len());
             [*offset..end, resize_boundary(value_len, end.max(value_len))]
         }
-        // TODO TZX-197: once the prover stops including pages fully covered by
-        // writes, `Set` needs no pre-value content (the resize boundary byte is
-        // always inside the overwritten prefix); drop both ranges here.
-        DatabaseOperation::Set(_, data) => [0..data.len(), resize_boundary(value_len, data.len())],
+        // A `Set` replaces the value in full, so the prover omits every page of
+        // the previous one and the proof holds the length leaf and a single
+        // blinded page tree. `value_open` charges that through its lower bound.
+        DatabaseOperation::Set(..) => [0..0, 0..0],
         _ => [0..0, 0..0],
     }
 }
@@ -452,8 +457,7 @@ mod tests {
     // hold whatever values those parameters take: a `Write`'s data range may
     // span `ceil(MAX_FILE_CHUNK_SIZE / PAGE_SIZE) + 1` pages when unaligned
     // (its resize boundary byte never adds a page beyond the last old byte's),
-    // while a `Set` starts at offset zero and so always touches one page
-    // fewer.
+    // while a `Set` touches none at all - it replaces every page it covers.
     #[test]
     fn operation_page_counts_respect_chunk_and_page_parameters() {
         let key = Key::new(b"key").expect("valid key");
@@ -501,7 +505,7 @@ mod tests {
             .expect("the length list is not empty");
 
         assert_eq!(max_write, chunk_pages + 1);
-        assert_eq!(max_set, chunk_pages);
+        assert_eq!(max_set, 0);
     }
 
     #[test]

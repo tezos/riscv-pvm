@@ -134,8 +134,8 @@ pub const BIFURCATED_ASYMMETRIC_LAYER: usize =
 pub const MONOFURCATED_LAYER: usize = (NODE_ARITY - 2) * Hash::DIGEST_SIZE + NODE_ARITY;
 
 /// The calculated theoretical maximum length of a proof for a single operation on a leaf in the
-/// durable storage. It is caused by a read or write that crosses the worst possible boundaries of
-/// three pages.
+/// durable storage. It is caused by a read that crosses the worst possible boundaries of three
+/// pages. A write across the same boundaries is shorter - see [`MAX_WRITE_PROOF_LENGTH`].
 ///
 /// Page size is 1024 bytes, plus 8 for a `u64` representing the length of the page; there are at
 /// most three such pages in any proof, because the maximum read/write is twice the size of a page.
@@ -160,6 +160,14 @@ pub const MAX_PROOF_LENGTH: usize = (PAGE_SIZE + 8) * 3
     + 8
     + 2
     + 1;
+
+/// The maximum length of a proof for a single write, which is shorter than [`MAX_PROOF_LENGTH`].
+///
+/// A write of twice the page size spanning three pages covers the middle one in full, and a page the
+/// write covers in full is blinded instead of carried: the verifier recomputes its hash from the
+/// written data. So that page contributes a hash rather than its content plus the `u64` page length.
+/// The tree layers are unchanged - a blinded leaf sits in the same position as the leaf it replaces.
+pub const MAX_WRITE_PROOF_LENGTH: usize = MAX_PROOF_LENGTH - (PAGE_SIZE + 8) + Hash::DIGEST_SIZE;
 
 /// There is one 'area' at which the worst possible boundary between two pages occurs---at the
 /// halway point in the `Bytes` component.
@@ -209,5 +217,6 @@ mod tests {
         )
         .unwrap();
         writeln!(file, "MAX_PROOF_LENGTH = {MAX_PROOF_LENGTH}").unwrap();
+        writeln!(file, "MAX_WRITE_PROOF_LENGTH = {MAX_WRITE_PROOF_LENGTH}").unwrap();
     }
 }
