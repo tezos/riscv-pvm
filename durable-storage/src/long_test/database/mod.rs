@@ -156,12 +156,12 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
                 #[cfg(not(test))]
                 {
                     let snapshot_dir = persistent_repo.database_commit_dir(&base.commit);
-                    let snapshot_size = super::harness::dir_size(&snapshot_dir)
+                    let snapshot_size = crate::gc_space::disk_usage(&snapshot_dir)
                         .context("measuring the size of the latest snapshot")?;
                     eprintln!(
                         "epoch {epoch} ok (db contains {} entries, latest snapshot: {:.2} MiB)",
                         base.model.data.len(),
-                        snapshot_size as f64 / (1024.0 * 1024.0),
+                        snapshot_size.unique_bytes as f64 / (1024.0 * 1024.0),
                     );
                 }
                 #[cfg(test)]
@@ -230,10 +230,10 @@ pub fn run_long_test(config: LongTestConfig) -> Result<()> {
         drop(runtime);
 
         let repo_size =
-            super::harness::dir_size(&repo_dir).context("measuring the size of the repo")?;
+            crate::gc_space::disk_usage(&repo_dir).context("measuring the size of the repo")?;
         eprintln!(
             "total repo size: {:.2} MiB",
-            repo_size as f64 / (1024.0 * 1024.0)
+            repo_size.unique_bytes as f64 / (1024.0 * 1024.0)
         );
     }
 
