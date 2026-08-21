@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2025 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -114,8 +115,7 @@ impl<M: BytesMode> Bytes<M> {
 
     /// Overwrite the entire contents of the byte array with the given data.
     pub fn set(&mut self, buffer: &[u8]) {
-        self.resize(buffer.len());
-        self.write(0, buffer);
+        M::set(self, buffer);
     }
 
     /// Is the length of the byte array zero?
@@ -377,12 +377,7 @@ where
         let length_node = MerkleProofFold::new_leaf(length_constraint, length_data);
 
         let get_item = |range: Range<usize>| {
-            let accessed = self.bytes.was_accessed(range.clone());
-            let constraint = if accessed {
-                MinimumPresence::Present
-            } else {
-                MinimumPresence::MayOmit
-            };
+            let constraint = self.bytes.page_presence(range.clone());
 
             let data = &self.bytes.previous[range];
             let page = ChunkedPage { chunks: &[data] };
@@ -682,6 +677,9 @@ pub trait BytesMode: Mode {
     /// See [`Bytes::write`].
     fn write(this: &mut Bytes<Self>, start: usize, buffer: &[u8]) -> usize;
 
+    /// See [`Bytes::set`].
+    fn set(this: &mut Bytes<Self>, buffer: &[u8]);
+
     /// See [`Bytes::len`].
     fn len(this: &Bytes<Self>) -> usize;
 
@@ -722,6 +720,11 @@ impl BytesMode for Normal {
         this.bytes[range].copy_from_slice(&buffer[..len]);
 
         len
+    }
+
+    fn set(this: &mut Bytes<Self>, buffer: &[u8]) {
+        this.bytes.clear();
+        this.bytes.extend_from_slice(buffer);
     }
 
     fn len(this: &Bytes<Self>) -> usize {
@@ -890,6 +893,18 @@ impl BytesMode for Prove<'_> {
         len
     }
 
+    fn set(this: &mut Bytes<Self>, buffer: &[u8]) {
+        // Verification needs the length leaf in the proof: it derives the depth of the original
+        // page tree from it, in order to relate the tree it recomputes to the one the proof holds.
+        // TODO TZX-213 `Set` proofs should not need to contain the previous value's length
+        this.bytes.did_access_length.set(true);
+        this.bytes.length = buffer.len();
+
+        // Every byte is redefined, so the previously recorded writes can be discarded.
+        this.bytes.writes = PartialVec::default();
+        this.bytes.writes.define(0, buffer.to_vec());
+    }
+
     fn len(this: &Bytes<Self>) -> usize {
         this.bytes.did_access_length.set(true);
         this.bytes.length
@@ -969,6 +984,11 @@ impl BytesMode for Verify {
         len
     }
 
+    fn set(this: &mut Bytes<Self>, buffer: &[u8]) {
+        this.bytes.data = PartialVec::from(buffer.to_vec());
+        this.bytes.length = Partial::Present(buffer.len());
+    }
+
     fn len(this: &Bytes<Self>) -> usize {
         match this.bytes.length {
             Partial::Present(len) => len,
@@ -1043,14 +1063,45 @@ impl<'normal> ProveImpl<'normal> {
             || !self.writes.is_all_undefined()
     }
 
-    /// Check if any byte in the given address range was accessed (read or written).
-    fn was_accessed(&self, addr_range: Range<usize>) -> bool {
-        let query_range = RangeSet2::from(addr_range.clone());
+    /// Computes the minimum presence requirement for a page given the operations run over it
+    fn page_presence(&self, previous_range: Range<usize>) -> MinimumPresence {
+        // A read must be able to return the same bytes in Verify mode. For single step
+        // proofs this is the only operation. For multi-step proofs, we don't record operation
+        // order so we must assume a read could have happened before an overwrite.
+        let query_range = RangeSet2::from(previous_range.clone());
         if self.reads.borrow().intersects(&query_range) {
-            return true;
+            return MinimumPresence::Present;
         }
 
-        self.writes.is_any_defined(addr_range)
+        // The page's address range in the end state
+        let current_range = previous_range.start
+            ..previous_range
+                .start
+                .saturating_add(PAGE_SIZE)
+                .min(self.length);
+
+        if current_range.is_empty() {
+            // The page was shrunk away
+            return MinimumPresence::MayOmit;
+        }
+
+        if self.writes.is_all_defined(current_range.clone()) {
+            // All data in this page is written during verification. Normally it must stay
+            // in the proof as a blinded leaf unless every other page can also be omitted.
+            return if self.writes.is_all_defined(0..self.length) {
+                MinimumPresence::MayOmit
+            } else {
+                MinimumPresence::MayBlind
+            };
+        }
+
+        if current_range != previous_range || self.writes.is_any_defined(current_range) {
+            // Only part of the page changed so some of the previous value needs to be present
+            return MinimumPresence::Present;
+        }
+
+        // This page has not been touched in any way so it can be omitted
+        MinimumPresence::MayOmit
     }
 }
 
