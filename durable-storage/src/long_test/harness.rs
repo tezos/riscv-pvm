@@ -145,19 +145,3 @@ pub(crate) fn read_failure_file<T: serde::de::DeserializeOwned>(
         fs::File::open(failure_dir.join(name)).context(format!("opening failure file {name}"))?;
     serde_json::from_reader(file).context(format!("decoding {name}"))
 }
-
-/// Total size in bytes of all files under `dir`, recursively.
-#[cfg(not(test))]
-pub(crate) fn dir_size(dir: &Path) -> std::io::Result<u64> {
-    let mut size = 0;
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let metadata = entry.metadata()?;
-        if metadata.is_dir() {
-            size += dir_size(&entry.path())?;
-        } else {
-            size += metadata.len();
-        }
-    }
-    Ok(size)
-}

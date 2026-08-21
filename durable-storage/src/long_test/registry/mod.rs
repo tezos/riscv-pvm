@@ -171,13 +171,13 @@ pub fn run_long_test(
                 // Size reporting only via the binary, not the crate test.
                 #[cfg(not(test))]
                 {
-                    let repo_size = super::harness::dir_size(&repo_dir)
+                    let repo_size = crate::gc_space::disk_usage(&repo_dir)
                         .context("measuring the size of the repo")?;
                     eprintln!(
                         "epoch {epoch} ok ({} databases, {} entries, repo: {:.2} MiB)",
                         base.model.len(),
                         base.model.total_entries(),
-                        repo_size as f64 / (1024.0 * 1024.0),
+                        repo_size.unique_bytes as f64 / (1024.0 * 1024.0),
                     );
                 }
                 #[cfg(test)]
