@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: 2026 TriliTech <contact@trili.tech>
+// SPDX-FileCopyrightText: 2026 Nomadic Labs <contact@nomadic-labs.com>
 //
 // SPDX-License-Identifier: MIT
 
@@ -53,6 +54,7 @@ impl BytesOp {
 #[derive(Debug, Clone)]
 pub enum BytesMutOp {
     Write { offset: usize, data: Vec<u8> },
+    Set { data: Vec<u8> },
     Resize { new_size: usize },
     Immutable { op: BytesOp },
 }
@@ -60,9 +62,17 @@ pub enum BytesMutOp {
 impl BytesMutOp {
     /// Strategy for generating operations to be issued against the Bytes state component
     pub fn any(length: usize) -> impl Strategy<Value = Self> + Clone {
+        // Sets of both a handful of bytes and of a size straddling a page boundary, so that the
+        // pages the set covers are sometimes partial and sometimes whole.
+        let set_data = prop_oneof![
+            vec(any::<u8>(), 0..50),
+            vec(any::<u8>(), PAGE_SIZE - 2..2 * PAGE_SIZE + 2),
+        ];
+
         prop_oneof![
             (0..length, vec(any::<u8>(), 0..50))
                 .prop_map(|(offset, data)| Self::Write { offset, data }),
+            set_data.prop_map(|data| Self::Set { data }),
             (0..length).prop_map(|new_size| Self::Resize { new_size }),
             BytesOp::any(length).prop_map(|op| Self::Immutable { op }),
         ]
@@ -74,6 +84,11 @@ impl BytesMutOp {
             Self::Write { offset, data } => {
                 let wrote = bytes.write(*offset, data);
                 BytesOpResult::Wrote { wrote }
+            }
+
+            Self::Set { data } => {
+                bytes.set(data);
+                BytesOpResult::Void
             }
 
             Self::Resize { new_size } => {
@@ -154,7 +169,7 @@ pub const MAX_PROOF_LENGTH: usize = (PAGE_SIZE + 8) * 3
 ///
 /// ```custom,{class=language-markdown}
 ///                   [root_hash]
-///                      __|__   
+///                      __|__
 ///                     /     \
 ///              ______/       \______
 ///     ________/  /               \  \________
@@ -162,7 +177,7 @@ pub const MAX_PROOF_LENGTH: usize = (PAGE_SIZE + 8) * 3
 /// [blind]      /                   \      [blind]
 ///             /\                   /\
 ///         ___/  \                 /  \___
-///        /       \               /       \     
+///        /       \               /       \
 /// [blind/data] [data]         [data] [data/blind]
 /// ```
 pub const MAX_PROOF_OFFSETS: [usize; 2] = [

@@ -848,6 +848,12 @@ pub(crate) fn multi_page_value_operations() -> Vec<DatabaseOperation> {
         DatabaseOperation::Write(big.clone(), len, content(len..len + page / 2)),
         DatabaseOperation::Read(big.clone(), len - 1, 2),
         DatabaseOperation::ValueLength(big.clone()),
+        // Overwriting an existing multi-page value. Every page of the new value is replaced
+        // wholesale, so none of the previous pages is needed to rehash them.
+        DatabaseOperation::Set(big.clone(), content(0..MAX_FILE_CHUNK_SIZE)),
+        // A read across the page boundary of the overwritten value.
+        DatabaseOperation::Read(big.clone(), page - 1, 2),
+        DatabaseOperation::ValueLength(big.clone()),
         // A delete keeps the value's data blinded, so its proof is page-tree independent.
         DatabaseOperation::Delete(big),
         DatabaseOperation::ValueLength(small),
