@@ -13,6 +13,7 @@ use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::ops::Index;
 use std::ops::IndexMut;
+use std::ops::Range;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -37,6 +38,7 @@ use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
+use crate::foldable::seq_tree::PrunedSeqAsTree;
 use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
@@ -261,8 +263,11 @@ where
                 .unwrap_or(Partial::Absent)
         };
 
+        // Items the proof said nothing about are left undefined, which is what lets the fold skip
+        // over them rather than walk an item count the proof chose for us.
+        let has_state = |items: Range<usize>| self.vector.items.is_any_defined(items);
         node.add(&DepthAdjustedSeqAsTree {
-            inner: IndexableSeqAsTree::new(length, NODE_ARITY, &get_item),
+            inner: PrunedSeqAsTree::new(length, NODE_ARITY, &get_item, &has_state),
             original_depth: tree_depth(original_length, NODE_ARITY),
             current_depth: tree_depth(length, NODE_ARITY),
         });

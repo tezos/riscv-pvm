@@ -12,13 +12,17 @@ use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 use super::test_utils::BytesOp;
 use super::test_utils::MAX_PROOF_OFFSETS;
+use crate::codec::Bincode;
+use crate::codec::LeafEncode;
 use crate::components::bytes::Bytes;
+use crate::components::bytes::NODE_ARITY;
 use crate::components::bytes::PAGE_SIZE;
 use crate::components::bytes::test_utils::BytesMutOp;
 use crate::components::bytes::test_utils::MAX_PROOF_LENGTH;
 use crate::components::bytes::test_utils::NDS_BYTES_LENGTH;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
+use crate::foldable::seq_tree::tree_depth;
 use crate::foldable::tests::TestFolder;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
@@ -632,4 +636,210 @@ fn test_bytes_largest_valid_proof_nds() {
 
         assert!(proof.len() <= MAX_PROOF_LENGTH);
     });
+}
+
+/// Folding a verify-mode value must cost what the proof contains, not what it claims to describe.
+///
+/// The length reaching the fold is recovered from the proof, and nothing bounds what it may assert:
+/// a proof describing a value of any size can still hash correctly. Nothing has been read or
+/// written here, so every page below the items node stands unchanged and that node contributes
+/// exactly the hash the proof already carries for it. Walking the pages to discover as much would
+/// take time proportional to the claimed length, which at this size is not a wait anyone will sit
+/// through.
+#[test]
+fn verify_fold_skips_pages_holding_no_state() {
+    // Four tebibytes, or a little over four billion pages.
+    let length = 1usize << 42;
+
+    let length_leaf = MerkleProof::leaf_read(
+        LeafEncode::<Bincode>::leaf_encode(&(length as u64)).expect("Encoding length should work"),
+    );
+    let pages = MerkleProof::leaf_blind(Hash::hash_bytes(b"untouched pages"));
+    let proof = MerkleProof::node_without_data(vec![length_leaf, pages]);
+
+    let bytes = Bytes::<Verify>::absent(length);
+
+    assert_eq!(
+        PartialHash::from_foldable(Some(proof.clone()), &bytes),
+        PartialHash::Present(proof.root_hash()),
+        "An untouched value should re-hash to exactly what the proof committed to"
+    );
+}
+
+/// A page the step wrote to must be descended into and re-hashed, not folded away.
+///
+/// The proof spells out the path down to page 0 and blinds every sibling along the way, which is
+/// what a prover emits for a step touching one page of a large value. The whole page is written,
+/// since leaving it partly defined would be rejected as incoherent before any of this was reached.
+///
+/// Note what this does and does not pin down. Every node on the path is present in the proof, so
+/// `skip_unchanged_subtree` declines on those regardless of what `has_state` reports - the
+/// shortcut could not fire here even if the predicate were wrong. What this covers is the opposite
+/// risk: that an honest proof of a touched page still folds to a hash rather than being rejected.
+/// The predicate itself is pinned by
+/// [`verify_fold_rejects_a_partial_write_into_a_blinded_subtree`].
+#[test]
+fn verify_fold_descends_into_pages_holding_state() {
+    let length = 1usize << 42;
+    let pages = length.div_ceil(PAGE_SIZE);
+
+    // Path to page 0, with the sibling at each level blinded.
+    let mut items = MerkleProof::leaf_read(vec![0u8; 4]);
+    for level in 0..tree_depth(pages, NODE_ARITY) {
+        items = MerkleProof::node_without_data(vec![
+            items,
+            MerkleProof::leaf_blind(Hash::hash_bytes(&[level as u8, 0x5a])),
+        ]);
+    }
+
+    let length_leaf = MerkleProof::leaf_read(
+        LeafEncode::<Bincode>::leaf_encode(&(length as u64)).expect("Encoding length should work"),
+    );
+    let proof = MerkleProof::node_without_data(vec![length_leaf, items]);
+
+    let mut bytes = Bytes::<Verify>::absent(length);
+    bytes.write(0, &[1u8; PAGE_SIZE]);
+
+    let hash = PartialHash::from_foldable(Some(proof.clone()), &bytes);
+
+    let PartialHash::Present(hash) = hash else {
+        panic!("A coherent state over a well-formed proof should hash, got {hash:?}")
+    };
+    assert_ne!(
+        hash,
+        proof.root_hash(),
+        "A written page must not be folded away"
+    );
+}
+
+/// A write covering only part of a blinded subtree must be rejected.
+///
+/// This is the case the `has_state` predicate exists to catch. The proof carries a single blind for
+/// the whole page sequence and one page underneath it is written, so the old contents of the
+/// remaining pages are still needed and are not there: the written page hashes to something, its
+/// neighbours defer to a proof that says nothing about them, and mixing the two is what
+/// `InvalidProof` reports. Were the predicate to under-report, the fold would answer from the blind
+/// and quietly accept a state the proof cannot support.
+///
+/// Note that blinding alone is not what makes this fail - overwriting the region in full succeeds,
+/// per [`verify_fold_accepts_a_full_overwrite_of_a_blinded_subtree`]. It fails because the write is
+/// partial, leaving pages whose previous contents nothing can supply.
+#[test]
+fn verify_fold_rejects_a_partial_write_into_a_blinded_subtree() {
+    let length = 1usize << 42;
+
+    let length_leaf = MerkleProof::leaf_read(
+        LeafEncode::<Bincode>::leaf_encode(&(length as u64)).expect("Encoding length should work"),
+    );
+    let pages = MerkleProof::leaf_blind(Hash::hash_bytes(b"untouched pages"));
+    let proof = MerkleProof::node_without_data(vec![length_leaf, pages]);
+
+    let mut bytes = Bytes::<Verify>::absent(length);
+    bytes.write(0, &[1u8; PAGE_SIZE]);
+
+    assert_eq!(
+        PartialHash::from_foldable(Some(proof), &bytes),
+        PartialHash::InvalidProof,
+        "A page written underneath a blind cannot be re-hashed from that blind"
+    );
+}
+
+/// A write beneath a node the proof says nothing about must be rejected too.
+///
+/// Unlike the blinded case there is no hash to fall back on at all: the written page hashes to
+/// something, the page beside it defers to a proof carrying nothing for it, and `InvalidProof` is
+/// what mixing the two reports.
+///
+/// This pins the rejection rather than the shortcut. The mixture arises among the leaves, beside
+/// the shortcut rather than through it, so the outcome holds however `skip_unchanged_subtree`
+/// answers for an absent subtree - unlike
+/// [`verify_fold_rejects_a_partial_write_into_a_blinded_subtree`], which does discriminate the predicate.
+/// What both guard is the present/absent mixing rule in `PartialHashNodeFold::done`, without which
+/// this write would be quietly accepted.
+#[test]
+fn verify_fold_rejects_a_write_under_an_absent_node() {
+    let length = 1usize << 42;
+
+    // The proof carries the length and nothing else - the page sequence is absent from it entirely.
+    let length_leaf = MerkleProof::leaf_read(
+        LeafEncode::<Bincode>::leaf_encode(&(length as u64)).expect("Encoding length should work"),
+    );
+    let proof = MerkleProof::node_without_data(vec![length_leaf]);
+
+    let mut bytes = Bytes::<Verify>::absent(length);
+    bytes.write(0, &[1u8; PAGE_SIZE]);
+
+    assert_eq!(
+        PartialHash::from_foldable(Some(proof), &bytes),
+        PartialHash::InvalidProof,
+        "A page written where the proof carries nothing cannot be re-hashed"
+    );
+}
+
+/// Overwriting a blinded region in full must succeed: none of the old contents are needed to
+/// re-hash it.
+///
+/// This is the counterpart to [`verify_fold_rejects_a_partial_write_into_a_blinded_subtree`]. Every
+/// page under the blind is defined, so each hashes from what the state now holds and the subtree
+/// re-hashes from those - the blind is never consulted. Asserting against the hash of a concrete
+/// [`Normal`] value of the same contents pins that it reproduces the real hash, rather than merely
+/// avoiding rejection.
+#[test]
+fn verify_fold_accepts_a_full_overwrite_of_a_blinded_subtree() {
+    let contents = [7u8; 4 * PAGE_SIZE];
+
+    let length_leaf = MerkleProof::leaf_read(
+        LeafEncode::<Bincode>::leaf_encode(&(contents.len() as u64))
+            .expect("Encoding length should work"),
+    );
+    let pages = MerkleProof::leaf_blind(Hash::hash_bytes(b"the contents being replaced"));
+    let proof = MerkleProof::node_without_data(vec![length_leaf, pages]);
+
+    let mut bytes = Bytes::<Verify>::absent(contents.len());
+    bytes.write(0, &contents);
+
+    let expected = Hash::from_foldable(&Bytes::<Normal>::from(&contents[..]));
+
+    assert_eq!(
+        PartialHash::from_foldable(Some(proof), &bytes),
+        PartialHash::Present(expected),
+        "A fully overwritten blinded region should re-hash to what its contents actually hash to"
+    );
+}
+
+/// A resize that crosses a power-of-arity boundary changes the page tree's depth, so the reference
+/// proof no longer has the shape the state does and `DepthAdjustedSeqAsTree` re-scopes it. That has
+/// to stay bounded when the claimed length is huge, since the claim is the proof's to make.
+///
+/// Here a value claiming a tebibyte grows by one byte, taking the page count from `2^30` to
+/// `2^30 + 1` and the depth from 30 to 31, so the proof is padded with a dummy layer. Only the page
+/// holding the new byte is descended into; the rest of the tree is skipped from the blind the proof
+/// carries. Walking it instead would mean a billion pages.
+#[test]
+fn verify_fold_stays_bounded_across_a_depth_adjusting_resize() {
+    let original_length = 1usize << 40;
+
+    let length_leaf = MerkleProof::leaf_read(
+        LeafEncode::<Bincode>::leaf_encode(&(original_length as u64))
+            .expect("Encoding length should work"),
+    );
+    let pages = MerkleProof::leaf_blind(Hash::hash_bytes(b"a tebibyte of untouched pages"));
+    let proof = MerkleProof::node_without_data(vec![length_leaf, pages]);
+
+    let mut bytes = Bytes::<Verify>::absent(original_length);
+    bytes.resize(original_length + 1);
+
+    assert_eq!(
+        tree_depth(original_length.div_ceil(PAGE_SIZE), NODE_ARITY) + 1,
+        tree_depth((original_length + 1).div_ceil(PAGE_SIZE), NODE_ARITY),
+        "The resize should be the one that pushes the page tree a level deeper"
+    );
+
+    let hash = PartialHash::from_foldable(Some(proof), &bytes);
+
+    assert!(
+        matches!(hash, PartialHash::Present(_)),
+        "The grown page is defined and every other page is unchanged, so this should hash; got \
+         {hash:?}"
+    );
 }

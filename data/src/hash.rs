@@ -398,6 +398,38 @@ impl<C: LeafCodec> PartialHashFold<C> {
         }
     }
 
+    /// Fold a subtree that holds no state of its own, without descending into it.
+    ///
+    /// Nothing read or written beneath a subtree means every leaf under it would fold to
+    /// [`PartialHash::Previous`], and the node would collapse back to whatever the reference proof
+    /// already says about it. Answering straight away avoids a descent whose cost is set by the
+    /// sequence length rather than by the proof - and in verify mode that length comes from the
+    /// proof itself.
+    ///
+    /// Returns `Err(self)` where the shortcut would not match a full descent, leaving the caller
+    /// to descend as it otherwise would.
+    pub fn skip_unchanged_subtree(self) -> Result<PartialHash, Self> {
+        match self.proof.as_deref() {
+            // Without a reference proof every leaf below folds to `Previous`, and `done` turns an
+            // all-`Previous` node into `Previous` as well.
+            None => Ok(PartialHash::Previous),
+
+            // A blinded subtree stands in for exactly this hash: descending would fold each leaf
+            // to `Previous` and recover it from the node's own `node_hash`.
+            Some(Tree::Leaf(MerkleProofLeaf::Blind(hash))) => Ok(PartialHash::Present(*hash)),
+
+            // A present node has to be descended. Its children carry hashes of their own, and
+            // whether they line up with the shape the state expects is precisely what descending
+            // establishes - a node holding fewer children than the state has to keep reporting
+            // `InvalidProof`, which answering from the root hash here would paper over.
+            Some(Tree::Node(_)) => Err(self),
+
+            // A read leaf where the state expects a subtree is a malformed proof. Let the descent
+            // report it the way it always has.
+            Some(Tree::Leaf(MerkleProofLeaf::Read(_))) => Err(self),
+        }
+    }
+
     /// Replace the reference proof outright.
     ///
     /// Use when a sub-structure carries its own captured proof that should override whatever the
