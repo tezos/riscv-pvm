@@ -12,11 +12,29 @@
 use std::cell::Cell;
 use std::cmp::Ordering;
 use std::convert::Infallible;
+use std::ops::Deref;
 
+use octez_riscv_data::codec::LeafCodec;
+use octez_riscv_data::codec::LeafDecode;
+use octez_riscv_data::codec::LeafEncode;
+use octez_riscv_data::foldable::Fold;
+use octez_riscv_data::foldable::FoldLeaf;
+use octez_riscv_data::foldable::Foldable;
+use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::hash::PartialHashFold;
+use octez_riscv_data::merkle_proof::Deserialiser;
+use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
+use octez_riscv_data::merkle_proof::Suspended;
+use octez_riscv_data::merkle_proof::SuspendedResult;
+use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
+use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
 use octez_riscv_data::mode::Modal;
 use octez_riscv_data::mode::Mode;
 use octez_riscv_data::mode::Normal;
+use octez_riscv_data::mode::Provable;
 use octez_riscv_data::mode::Prove;
 use octez_riscv_data::mode::Verify;
 use octez_riscv_data::mode::utils::Source;
@@ -53,9 +71,137 @@ impl<M: NodeKeyMode> NodeKey<M> {
     }
 }
 
+impl<'normal> NodeKey<Prove<'normal>> {
+    /// Was the value accessed (read or written) during proof generation?
+    fn was_accessed(&self) -> bool {
+        self.key.read.get()
+    }
+
+    /// Compare `Self` against a plain [`Key`] - without recording the access.
+    ///
+    /// Must only be used _during_ proof generation/folding - never
+    /// during operations that must record accesses.
+    ///
+    /// See [`NodeKey::cmp`] for why this does not go through [`PartialOrd`].
+    ///
+    /// [`PartialOrd`]: std::cmp::PartialOrd
+    pub fn unrecorded_cmp(&self, key: &Key) -> Ordering {
+        self.key.inner.cmp(key)
+    }
+}
+
+impl<M: NodeKeyMode> Clone for NodeKey<M> {
+    fn clone(&self) -> Self {
+        M::clone(self)
+    }
+}
+
 impl<M: NodeKeyMode> PartialEq<Key> for NodeKey<M> {
     fn eq(&self, other: &Key) -> bool {
         M::eq(self, other)
+    }
+}
+
+impl NodeKey<Normal> {
+    /// Convert a NodeKey into proof mode.
+    pub fn into_proof(self) -> NodeKey<Prove<'static>> {
+        NodeKey {
+            key: ProveImpl {
+                inner: Source::Owned(Box::new(self.key)),
+                read: Cell::new(false),
+            },
+        }
+    }
+}
+
+impl AsRef<Key> for NodeKey<Normal> {
+    fn as_ref(&self) -> &Key {
+        &self.key
+    }
+}
+
+impl<'normal> Provable<'normal> for NodeKey<Normal> {
+    type Prover = NodeKey<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        NodeKey {
+            key: ProveImpl {
+                inner: Source::Borrowed(&self.key),
+                read: Cell::new(false),
+            },
+        }
+    }
+}
+
+impl<F: FoldLeaf> Foldable<F> for NodeKey<Normal>
+where
+    Key: LeafEncode<F::Codec>,
+{
+    fn fold(&self, builder: F) -> F::Folded {
+        builder
+            .fold_leaf(&self.key)
+            .expect("Should be able to serialise key")
+    }
+}
+
+impl<'normal, C: LeafCodec> Foldable<HashFold<C>> for NodeKey<Prove<'normal>>
+where
+    Key: LeafEncode<C>,
+{
+    fn fold(&self, builder: HashFold<C>) -> <HashFold<C> as Fold>::Folded {
+        builder
+            .fold_leaf(self.key.inner.deref())
+            .expect("Should be able to hash NodeKey")
+    }
+}
+
+impl<'normal, C: LeafCodec> Foldable<MerkleProofFold<C>> for NodeKey<Prove<'normal>>
+where
+    Key: LeafEncode<C>,
+{
+    fn fold(&self, builder: MerkleProofFold<C>) -> <MerkleProofFold<C> as Fold>::Folded {
+        let data = <Key as LeafEncode<C>>::leaf_encode(self.key.inner.deref())
+            .expect("Serialisation should not fail");
+
+        // Determine whether the value has been read or written during proof generation. If so, we
+        // must keep it in the Merkle tree (not blind it).
+        let constraint = if self.was_accessed() {
+            MinimumPresence::Present
+        } else {
+            MinimumPresence::MayOmit
+        };
+
+        builder.into_leaf(constraint, data)
+    }
+}
+
+impl<C: LeafCodec> Foldable<PartialHashFold<C>> for NodeKey<Verify>
+where
+    Key: LeafEncode<C>,
+{
+    fn fold(&self, builder: PartialHashFold<C>) -> <PartialHashFold<C> as Fold>::Folded {
+        let hash = match &self.key.inner {
+            Partial::Absent => return builder.previous(),
+            Partial::Blinded(hash) => *hash,
+            Partial::Present(value) => {
+                Hash::hash_leaf::<C, _>(value).expect("Hashing should not fail")
+            }
+        };
+
+        PartialHash::Present(hash)
+    }
+}
+
+impl<C: LeafCodec> FromProof<C> for NodeKey<Verify>
+where
+    Key: LeafDecode<C>,
+{
+    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let result = proof.into_leaf()?.map(|key| NodeKey {
+            key: VerifyImpl { inner: key },
+        });
+
+        Ok(result)
     }
 }
 
