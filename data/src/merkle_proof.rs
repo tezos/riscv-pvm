@@ -19,7 +19,6 @@ use crate::codec::LeafCodec;
 use crate::codec::LeafDecode;
 use crate::codec::LeafDecodeError;
 use crate::foldable::Foldable;
-use crate::foldable::seq_tree::Many;
 use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
@@ -258,30 +257,6 @@ impl<C: LeafCodec, Item: FromProof<C>, const LEN: usize> FromProof<C> for [Item;
 
         let items = items.map(|opt| opt.expect("All items should have been filled"));
         proof.done(items)
-    }
-}
-
-impl<C: LeafCodec, Item: FromProof<C>, const ARITY: usize, const LEN: usize> FromProof<C>
-    for Many<Item, ARITY, LEN>
-{
-    fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
-        let mut leaves = Vec::with_capacity(LEN);
-
-        let result = descend_tree(proof, ARITY, LEN, &mut |_idx, proof| {
-            let result = Item::from_proof(proof)?;
-            let result = result.map(|leaf| {
-                leaves.push(leaf);
-            });
-            Ok(result)
-        })?;
-
-        let Ok(boxed_array): Result<Box<[Item; LEN]>, _> = leaves.into_boxed_slice().try_into()
-        else {
-            panic!("Unexpected number of leaves collected")
-        };
-
-        let result = result.map(|_| Many::from(boxed_array));
-        Ok(result)
     }
 }
 
