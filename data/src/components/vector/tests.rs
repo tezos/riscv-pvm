@@ -15,6 +15,8 @@ use proptest::proptest;
 use proptest::test_runner::TestCaseResult;
 
 use super::Vector;
+use crate::codec::Bincode;
+use crate::codec::LeafEncode;
 use crate::components::atom::Atom;
 use crate::components::atom::tests::AtomMutOp;
 use crate::components::atom::tests::AtomOp;
@@ -35,6 +37,7 @@ use crate::merkle_proof::FromProof;
 use crate::merkle_proof::proof_binary;
 use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::merkle_proof::proof_tree::MerkleProofFold;
+use crate::merkle_proof::proof_tree::ProofTree;
 use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::ProvableExt;
@@ -570,4 +573,30 @@ fn fold_unfold_bytes() {
 
         prop_assert_eq!(vector, unfolded);
     });
+}
+
+/// A registry proof may claim any number of databases: the count is recovered from the proof, and
+/// nothing bounds it - such a proof can still hash correctly, so no later check would catch it.
+/// Both parsing such a proof and folding the result back into a hash must therefore cost what the
+/// proof contains rather than what it claims to describe.
+#[test]
+fn huge_claimed_length_costs_nothing_to_parse_or_fold() {
+    // Over a quintillion databases.
+    let length = 1u64 << 60;
+
+    let length_leaf = MerkleProof::leaf_read(
+        LeafEncode::<Bincode>::leaf_encode(&length).expect("Encoding length should work"),
+    );
+    let items = MerkleProof::leaf_blind(Hash::hash_bytes(b"untouched databases"));
+    let proof = MerkleProof::node_without_data(vec![length_leaf, items]);
+
+    let vector = Vector::<Atom<u64, Verify>, Verify>::from_proof(ProofTree::present(&proof))
+        .expect("The proof should parse")
+        .into_result();
+
+    assert_eq!(
+        PartialHash::from_foldable(Some(proof.clone()), &vector),
+        PartialHash::Present(proof.root_hash()),
+        "An untouched registry should re-hash to exactly what the proof committed to"
+    );
 }

@@ -42,6 +42,7 @@ use crate::foldable::Unfoldable;
 use crate::foldable::seq_tree;
 use crate::foldable::seq_tree::DepthAdjustedSeqAsTree;
 use crate::foldable::seq_tree::IndexableSeqAsTree;
+use crate::foldable::seq_tree::PrunedSeqAsTree;
 use crate::foldable::seq_tree::tree_depth;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
@@ -459,13 +460,23 @@ where
             }
         };
 
+        // Reports whether a run of pages holds any data. Pages the proof said nothing about are
+        // left undefined, which is what lets the fold skip over them rather than walk a page count
+        // the proof chose for us.
+        let has_state = |pages: Range<usize>| {
+            let start = pages.start.saturating_mul(PAGE_SIZE);
+            let end = pages.end.saturating_mul(PAGE_SIZE).min(length);
+
+            self.bytes.data.is_any_defined(start..end)
+        };
+
         let original_pages = original_length.div_ceil(PAGE_SIZE);
         let pages = length.div_ceil(PAGE_SIZE);
 
         let mut builder = builder.into_node_fold();
         builder.add(&length_node);
         builder.add(&DepthAdjustedSeqAsTree {
-            inner: IndexableSeqAsTree::new(pages, NODE_ARITY, &generator),
+            inner: PrunedSeqAsTree::new(pages, NODE_ARITY, &generator, &has_state),
             original_depth: tree_depth(original_pages, NODE_ARITY),
             current_depth: tree_depth(pages, NODE_ARITY),
         });
