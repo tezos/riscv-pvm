@@ -100,11 +100,32 @@ impl<'de> serde::Deserialize<'de> for Key {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use proptest::collection::vec;
+    use proptest::prelude::Arbitrary;
+    use proptest::prelude::BoxedStrategy;
+    use proptest::prelude::Strategy;
+    use proptest::prelude::any;
     use proptest::proptest;
 
     use super::KEY_MAX_SIZE;
     use super::Key;
+
+    /// Generate Keys of any length up to [`KEY_MAX_SIZE`].
+    impl Arbitrary for Key {
+        type Parameters = ();
+
+        type Strategy = BoxedStrategy<Key>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            vec(any::<u8>(), 0..=KEY_MAX_SIZE)
+                .prop_map(|bytes| {
+                    Key::new(bytes.as_slice())
+                        .expect("All byte sequences of length <= KEY_MAX_SIZE are valid keys")
+                })
+                .boxed()
+        }
+    }
 
     proptest! {
         #[test]
