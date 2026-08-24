@@ -4,6 +4,7 @@
 
 //! Implementation of a Merkleisable AVL tree.
 
+pub mod key;
 pub mod node;
 pub mod resolver;
 pub mod tree;
