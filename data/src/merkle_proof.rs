@@ -276,6 +276,23 @@ where
 {
     let mut ctx = proof.into_node()?;
 
+    // An absent or blinded node carries no information about its descendants, so descending into
+    // one costs time proportional to `total_leaves` - a figure the proof itself supplies - rather
+    // than to the size of the proof. Stop here instead.
+    //
+    // This is a correctness requirement rather than an optimisation. Nothing bounds what a proof
+    // may claim here, and hashing is no help: a proof carrying an astronomically large length can
+    // still hash correctly, so there is no later check that would catch it. The bound has to be
+    // structural.
+    //
+    // Pruning does not change the proof that gets reconstructed. Both deserialisers hand out
+    // absent branches beneath an absent or blinded node without consuming any input, and
+    // `OwnedProofTree::node_from_children` discards the children of such a node outright, so the
+    // recovered tree - and the state hash taken from it - is identical either way.
+    if !matches!(ctx.presence(), Partial::Present(())) {
+        return ctx.done(());
+    }
+
     // Time to add leaves.
     if current_depth <= 1 {
         for idx in current_start..current_start + arity {

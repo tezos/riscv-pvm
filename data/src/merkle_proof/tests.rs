@@ -27,6 +27,7 @@ use crate::merkle_proof::proof_binary::StreamDeserialiser;
 use crate::merkle_proof::proof_binary::StreamInput;
 use crate::merkle_proof::proof_binary::StreamParserComb;
 use crate::merkle_proof::proof_tree::MerkleProof;
+use crate::merkle_proof::proof_tree::OwnedProofTree;
 use crate::merkle_proof::proof_tree::ProofTree;
 use crate::merkle_proof::proof_tree::ProofTreeResult;
 use crate::merkle_proof::tag::InvalidTagError;
@@ -563,4 +564,64 @@ fn round_trip_descend_tree_indexable_seq_as_tree() {
     proptest!(|(data: Vec<usize>, arity in 1..17usize)| {
         test(data, NonZeroUsize::new(arity).unwrap())?;
     });
+}
+
+/// A proof that blinds a subtree must not cost the verifier anything proportional to the number of
+/// leaves that subtree claims to stand in for.
+///
+/// The leaf count handed to [`descend_tree`] comes from a length leaf carried by the proof itself,
+/// and nothing bounds what it may claim - a proof asserting `usize::MAX` items can still hash
+/// correctly, so no later check would catch it. Were the descent to walk the implied tree rather
+/// than the nodes actually present, this test would visit on the order of 2^64 nodes: finite, but
+/// not in any time anyone will wait for.
+#[test]
+fn descend_tree_prunes_blinded_subtrees() {
+    let blinded = MerkleProof::leaf_blind(Hash::hash_bytes(b"blinded subtree"));
+
+    for arity in [2usize, 4, 32] {
+        let mut visited = 0usize;
+
+        let proof_tree: ProofTree<'_> = ProofTree::present(&blinded);
+        descend_tree(proof_tree, arity, usize::MAX, &mut |_idx, proof| {
+            let leaf = proof.into_leaf::<usize>()?;
+            Ok(leaf.map(|_| visited += 1))
+        })
+        .map(ProofTreeResult::into_result)
+        .expect("A blinded subtree should parse");
+
+        assert_eq!(visited, 0, "No leaf sits underneath a blinded node");
+    }
+}
+
+/// As [`descend_tree_prunes_blinded_subtrees`], but over the stream deserialiser - the shape the
+/// verifier actually meets when a proof arrives as bytes.
+///
+/// Also pins the property that makes the pruning safe: the proof recovered from a pruned descent is
+/// the same one a full descent would have recovered, so the state hash derived from it is unchanged.
+#[test]
+fn descend_tree_prunes_blinded_subtrees_in_stream_proofs() {
+    let blinded = MerkleProof::leaf_blind(Hash::hash_bytes(b"blinded subtree"));
+    let bytes = serialise(&blinded).expect("Serialising the proof should not fail");
+
+    let mut visited = 0usize;
+    let deser = StreamDeserialiser::<Bincode>::new_present(StreamInput::new(&bytes));
+
+    let (_, recovered) = descend_tree(deser, 2, usize::MAX, &mut |_idx, proof| {
+        let leaf = proof.into_leaf::<usize>()?;
+        Ok(leaf.map(|_| visited += 1))
+    })
+    .expect("A blinded subtree should parse")
+    .into_result()
+    .expect("The proof should be fully consumed");
+
+    assert_eq!(visited, 0, "No leaf sits underneath a blinded node");
+
+    let OwnedProofTree::Present(recovered) = recovered else {
+        panic!("The recovered proof should be present")
+    };
+    assert_eq!(
+        recovered.root_hash(),
+        blinded.root_hash(),
+        "Pruning must not change the proof that gets reconstructed"
+    );
 }
