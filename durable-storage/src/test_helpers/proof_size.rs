@@ -40,29 +40,29 @@ use crate::test_helpers::registry::RegistryOperation;
 
 /// Serialised size of a proof tree tag. Tags are written as one byte each by the
 /// `Encode` impl of `octez_riscv_data::merkle_proof::proof_tree::MerkleProof`.
-const TAG_BYTES: usize = 1;
+pub(crate) const TAG_BYTES: usize = 1;
 
 /// A `Blind` leaf: tag plus [`Hash::DIGEST_SIZE`] bytes. Also used as the charge
 /// for any subtree the model considers blindable, which the encoder may in fact
 /// emit in a shorter form (see the note in the module documentation).
-const BLIND_LEAF: usize = TAG_BYTES + Hash::DIGEST_SIZE;
+pub(crate) const BLIND_LEAF: usize = TAG_BYTES + Hash::DIGEST_SIZE;
 
 /// An accessed AVL tree wrapper: proof node tag plus a `Read` leaf holding the
 /// one-byte present flag (see `fold_resolved_tree` in `crate::merkle_layer`).
-const TREE_WRAP: usize = TAG_BYTES + TAG_BYTES + size_of::<bool>();
+pub(crate) const TREE_WRAP: usize = TAG_BYTES + TAG_BYTES + size_of::<bool>();
 
 /// A `Read` leaf holding a `u64` length (fixed-int bincode encoding).
-const LEN_LEAF: usize = TAG_BYTES + size_of::<u64>();
+pub(crate) const LEN_LEAF: usize = TAG_BYTES + size_of::<u64>();
 
 /// A `Read` leaf holding a node's `i64` balance factor (fixed-int bincode
 /// encoding).
-const BALANCE_FACTOR_LEAF: usize = TAG_BYTES + size_of::<i64>();
+pub(crate) const BALANCE_FACTOR_LEAF: usize = TAG_BYTES + size_of::<i64>();
 
 /// A `Read` leaf holding a node's [`Key`]: a one-byte length
 /// prefix plus the key bytes (see the `Encode` impl in `crate::key`).
 ///
 /// [`Key`]: crate::key::Key
-fn key_leaf(key_len: usize) -> usize {
+pub(crate) const fn key_leaf(key_len: usize) -> usize {
     assert!(key_len <= KEY_MAX_SIZE);
     TAG_BYTES + 1 + key_len
 }
@@ -74,7 +74,7 @@ fn key_leaf(key_len: usize) -> usize {
 /// every accessed node's key. The subtree the path continues into is charged
 /// by its own level; the terminal node's second child is charged
 /// via [`terminal_blind`].
-fn avl_path_node(key_len: usize) -> usize {
+pub(crate) const fn avl_path_node(key_len: usize) -> usize {
     TREE_WRAP + TAG_BYTES + BALANCE_FACTOR_LEAF + key_leaf(key_len) + 2 * BLIND_LEAF
 }
 
