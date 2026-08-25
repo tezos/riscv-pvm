@@ -4,9 +4,18 @@
 
 //! Collects durable-storage benchmark results and reports them.
 //!
-//! The figures come from the `gc_space` harness: how much of the storage is garbage, how much
-//! retaining a commit costs, and how much of a commit's bytes are shared with the previous one.
-//! They are read from the harness's `--json-out` samples.
+//! Two kinds of result are collected, because the things worth tracking about the durable storage
+//! divide that way:
+//!
+//! - **Latencies**, from the `database_lifecycle` criterion bench: how long it takes to commit,
+//!   check out, copy, move, clear and hash. Criterion writes its estimates as JSON, so they are
+//!   read from its output directory rather than by parsing its console output.
+//! - **Space**, from the `gc_space` harness: how much of the storage is garbage, how much retaining
+//!   a commit costs, and how much of a commit's bytes are shared with the previous one. These are
+//!   read from the harness's `--json-out` samples.
+//!
+//! The two live in one tool so a run submits everything with a single timestamp, which is what makes
+//! the metrics graphable against each other.
 //!
 //! The metrics are printed, one per line by default and as a table with `--markdown`, which is what
 //! a pull request comment carries.
@@ -50,11 +59,34 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Collect latencies from a criterion output directory.
+    Latency {
+        /// Criterion output directory, usually `target/criterion`.
+        dir: PathBuf,
+
+        /// Only collect from this benchmark group.
+        ///
+        /// Worth setting: criterion keeps results from every bench ever run against a target
+        /// directory, so without a filter a stale unrelated group is submitted as if it were fresh.
+        #[arg(long)]
+        group: Option<String>,
+    },
     /// Collect space metrics from the samples written by `gc_space --json-out`.
     Space {
         /// Path to the JSON-lines samples file.
         samples: PathBuf,
     },
+}
+
+/// The parts of criterion's `estimates.json` this tool reads.
+#[derive(Debug, Deserialize)]
+struct Estimates {
+    mean: Estimate,
+}
+
+#[derive(Debug, Deserialize)]
+struct Estimate {
+    point_estimate: f64,
 }
 
 /// The parts of a `gc_space` sample this tool reads.
@@ -90,6 +122,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let gauges = match &cli.command {
+        Command::Latency { dir, group } => latency_gauges(dir, group.as_deref(), &cli.shape)?,
         Command::Space { samples } => space_gauges(samples, &cli.shape)?,
     };
 
@@ -112,6 +145,67 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Read criterion's mean estimates, one metric per benchmark.
+///
+/// Criterion lays its results out as `<dir>/<group>/<benchmark>/new/estimates.json`, with times in
+/// nanoseconds. Only `new` is read: `base` is the previous run, which datadog already has.
+fn latency_gauges(dir: &Path, wanted: Option<&str>, shape: &str) -> Result<Vec<Gauge>> {
+    let mut gauges = Vec::new();
+
+    let groups = fs::read_dir(dir)
+        .with_context(|| format!("reading {} - has the bench run?", dir.display()))?;
+
+    for group in groups {
+        let group = group.context("reading a criterion group directory")?;
+        let group_name = group.file_name().to_string_lossy().into_owned();
+
+        if !group.path().is_dir() || wanted.is_some_and(|wanted| wanted != group_name) {
+            continue;
+        }
+
+        let benches = fs::read_dir(group.path())
+            .with_context(|| format!("reading {}", group.path().display()))?;
+
+        for bench in benches {
+            let bench = bench.context("reading a criterion benchmark directory")?;
+            let estimates = bench.path().join("new").join("estimates.json");
+
+            if !estimates.exists() {
+                continue;
+            }
+
+            let bytes =
+                fs::read(&estimates).with_context(|| format!("reading {}", estimates.display()))?;
+            let estimates: Estimates = serde_json::from_slice(&bytes)
+                .with_context(|| format!("parsing {}", estimates.display()))?;
+
+            gauges.push(Gauge {
+                name: format!("{PREFIX}.latency"),
+                // Nanoseconds are what criterion records; milliseconds are what these operations
+                // are discussed in.
+                value: estimates.mean.point_estimate / 1_000_000.0,
+                tags: vec![
+                    format!("group:{}", metric_tag(&group_name)),
+                    format!(
+                        "operation:{}",
+                        metric_tag(&bench.file_name().to_string_lossy())
+                    ),
+                    format!("shape:{shape}"),
+                ],
+                unit: "milliseconds".to_owned(),
+            });
+        }
+    }
+
+    anyhow::ensure!(
+        !gauges.is_empty(),
+        "no criterion estimates found under {} - did the bench run?",
+        dir.display()
+    );
+
+    Ok(gauges)
 }
 
 /// Derive the space metrics from a run's samples.
@@ -232,4 +326,20 @@ fn space_gauges(path: &Path, shape: &str) -> Result<Vec<Gauge>> {
     }
 
     Ok(gauges)
+}
+
+/// Turn a criterion benchmark directory name into a stable tag value.
+///
+/// Criterion names its directories after the benchmark's description, so they contain spaces and
+/// parentheses. Tags need to stay identical run to run, so the mapping has to be mechanical.
+fn metric_tag(name: &str) -> String {
+    name.chars()
+        .map(|character| match character {
+            'A'..='Z' => character.to_ascii_lowercase(),
+            'a'..='z' | '0'..='9' => character,
+            _ => '_',
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .replace("__", "_")
 }

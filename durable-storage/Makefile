@@ -97,6 +97,15 @@ space-metrics-long: build-gc-space
 		--sample-every 1 --json-out $(SPACE_SAMPLES) --simulate-dir-gc
 	@cargo run -p bench-metrics -- --shape long $(MARKDOWN) space $(SPACE_SAMPLES)
 
+# Registry lifecycle latencies, at the same reference scale.
+lifecycle-metrics-reference:
+	@REGISTRY_DATABASE_COUNT=$(REFERENCE_DATABASES) \
+		PREPOPULATED_NODE_KEYS_COUNT=$(REFERENCE_KEYS) \
+		COMMIT_MODIFIED_KEYS_COUNT=$(REFERENCE_MODIFIED) \
+		cargo bench --features rocksdb --bench database_lifecycle
+	@cargo run -p bench-metrics -- --shape $(REFERENCE_SHAPE) \
+		latency ../target/criterion --group 'Registry lifecycle'
+
 run-registry-long-test-stable:
 	@cargo run --release --features rocksdb,unstable-test-utils \
 		--bin long_test -- registry test --max-minutes 10 --keep-epochs 1 \
