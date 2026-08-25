@@ -249,7 +249,7 @@ impl<NodeId> Tree<NodeId> {
     pub(super) fn balance_factor<TreeId, DataId, M: AtomMode>(
         &self,
         resolver: &impl NodeResolver<NodeId, DataId, TreeId, M>,
-    ) -> Result<i64, OperationalError> {
+    ) -> Result<i8, OperationalError> {
         let Some(node) = self.root() else {
             return Ok(0);
         };
@@ -526,7 +526,7 @@ mod tests {
             NodeId: std::fmt::Debug,
             TreeId: std::fmt::Debug,
             DataId: std::fmt::Debug,
-            Atom<i64, M>: std::fmt::Debug,
+            Atom<i8, M>: std::fmt::Debug,
             Atom<Key, M>: std::fmt::Debug,
         {
             let inorder = self.is_inorder(resolver)?;
@@ -565,7 +565,7 @@ mod tests {
             NodeId: std::fmt::Debug,
             TreeId: std::fmt::Debug,
             DataId: std::fmt::Debug,
-            Atom<i64, M>: std::fmt::Debug,
+            Atom<i8, M>: std::fmt::Debug,
             Atom<Key, M>: std::fmt::Debug,
         {
             match self.root() {
