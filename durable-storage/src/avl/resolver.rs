@@ -822,7 +822,7 @@ impl ProveTreeId {
 /// `MerkleLayer`-level fold; subtree IDs and the hash cache are unnecessary.
 #[derive(Debug)]
 pub(crate) struct DeletedNodeFields {
-    pub(crate) balance_factor: Atom<i64, Prove<'static>>,
+    pub(crate) balance_factor: Atom<i8, Prove<'static>>,
     pub(crate) key: Atom<Key, Prove<'static>>,
     pub(crate) data: Bytes<Prove<'static>>,
 }

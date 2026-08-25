@@ -49,7 +49,7 @@ use crate::storage::WriteableKeyValueStore;
 #[derive(Encode, Decode)]
 struct StoredNode {
     /// The difference in heights between child branches (right - left).
-    balance_factor: i64,
+    balance_factor: i8,
 
     /// The [`Key`] used to locate this [`Node`] within the AVL tree.
     key: Key,
@@ -63,7 +63,7 @@ struct StoredNode {
 #[perfect_derive(Clone, Default, Debug)]
 pub struct Node<TreeId, DataId, M: Mode> {
     /// The difference in heights between child branches (right - left).
-    balance_factor: Atom<i64, M>,
+    balance_factor: Atom<i8, M>,
 
     /// The [`Key`] used to locate this [`Node`] within the AVL tree.
     key: Atom<Key, M>,
@@ -94,7 +94,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
 
     #[cfg(test)]
     pub(crate) fn from_raw(
-        balance_factor: i64,
+        balance_factor: i8,
         key: Key,
         data: LazyDataId,
         left: LazyTreeId,
@@ -227,12 +227,12 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         ctx: D,
     ) -> Result<(D, Self), <D::Parent as Deserialiser>::Error>
     where
-        Atom<i64, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
+        Atom<i8, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
         Atom<Key, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
         DataId: FromProof<<D::Parent as Deserialiser>::Codec>,
         TreeId: FromProof<<D::Parent as Deserialiser>::Codec>,
     {
-        let (ctx, balance_factor) = ctx.next_branch::<Atom<i64, M>>()?;
+        let (ctx, balance_factor) = ctx.next_branch::<Atom<i8, M>>()?;
         let (ctx, key) = ctx.next_branch::<Atom<Key, M>>()?;
         let (ctx, data) = ctx.next_branch::<DataId>()?;
         let (ctx, left) = ctx.next_branch::<TreeId>()?;
@@ -256,7 +256,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     /// cached.
     pub(crate) fn hash(&self) -> &Hash
     where
-        Atom<i64, M>: Foldable<HashFold>,
+        Atom<i8, M>: Foldable<HashFold>,
         Atom<Key, M>: Foldable<HashFold>,
         DataId: Foldable<HashFold>,
         TreeId: Foldable<HashFold>,
@@ -266,7 +266,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
 
     /// The [`Atom`] holding the balance factor of this [`Node`].
     #[inline]
-    pub(crate) fn balance_factor_atom(&self) -> &Atom<i64, M> {
+    pub(crate) fn balance_factor_atom(&self) -> &Atom<i8, M> {
         &self.balance_factor
     }
 
@@ -278,13 +278,13 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
 
     /// The difference in heights between child branches.
     #[inline]
-    pub(crate) fn balance_factor(&self) -> i64 {
+    pub(crate) fn balance_factor(&self) -> i8 {
         self.balance_factor.read()
     }
 
     /// A mutable reference to the difference in heights between child branches.
     #[inline]
-    pub(super) fn balance_factor_mut(&mut self) -> &mut i64 {
+    pub(super) fn balance_factor_mut(&mut self) -> &mut i8 {
         &mut self.balance_factor
     }
 
@@ -803,13 +803,13 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         NodeId: std::fmt::Debug,
         TreeId: std::fmt::Debug,
         DataId: std::fmt::Debug,
-        Atom<i64, M>: std::fmt::Debug,
+        Atom<i8, M>: std::fmt::Debug,
         Atom<Key, M>: std::fmt::Debug,
     {
         let left_height = self.left_ref(resolver)?.height(resolver)?;
         let right_height = self.right_ref(resolver)?.height(resolver)?;
         let calculated_balance_factor = right_height as i64 - left_height as i64;
-        if self.balance_factor() != calculated_balance_factor {
+        if self.balance_factor() as i64 != calculated_balance_factor {
             eprintln!(
                 "Node has balance_factor {:?}, should be {calculated_balance_factor:?}\nnode: {self:?}",
                 self.balance_factor()
@@ -1006,7 +1006,7 @@ impl<F, TreeId, DataId, M> Foldable<F> for Node<TreeId, DataId, M>
 where
     F: Fold,
     M: Mode,
-    Atom<i64, M>: Foldable<F>,
+    Atom<i8, M>: Foldable<F>,
     Atom<Key, M>: Foldable<F>,
     DataId: Foldable<F>,
     TreeId: Foldable<F>,

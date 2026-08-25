@@ -54,9 +54,9 @@ pub(crate) const TREE_WRAP: usize = TAG_BYTES + TAG_BYTES + size_of::<bool>();
 /// A `Read` leaf holding a `u64` length (fixed-int bincode encoding).
 pub(crate) const LEN_LEAF: usize = TAG_BYTES + size_of::<u64>();
 
-/// A `Read` leaf holding a node's `i64` balance factor (fixed-int bincode
+/// A `Read` leaf holding a node's `i8` balance factor (fixed-int bincode
 /// encoding).
-pub(crate) const BALANCE_FACTOR_LEAF: usize = TAG_BYTES + size_of::<i64>();
+pub(crate) const BALANCE_FACTOR_LEAF: usize = TAG_BYTES + size_of::<i8>();
 
 /// A `Read` leaf holding a node's [`Key`]: a one-byte length
 /// prefix plus the key bytes (see the `Encode` impl in `crate::key`).
