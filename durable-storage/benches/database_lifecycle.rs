@@ -17,6 +17,8 @@
 //!
 //! - **Copy** — `copy_database`: clone one large database over another. Times
 //!   the clone plus the drop of the overwritten database.
+//! - **Move** — `move_database`: as copy, but the source is left a fresh empty
+//!   database, so the gap from copy is the clone.
 //! - **Checkout** — `Registry::checkout`: restore the whole registry from a
 //!   committed snapshot.
 //!
@@ -341,6 +343,37 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
                 registry
                     .copy_database(0, 1)
                     .expect("Copying the database should succeed");
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // Move database 0 over database 1. Database 0 is left empty; database 1 is
+    // dropped.
+    group.bench_function("Move database over large database", |b| {
+        b.iter_batched(
+            || {
+                source
+                    .try_clone()
+                    .expect("Cloning the registry should succeed")
+            },
+            |mut registry| {
+                registry
+                    .move_database(0, 1)
+                    .expect("Moving the database should succeed");
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+    group.bench_function("Move modified database over large database", |b| {
+        b.iter_batched(
+            || clone_modified_db(&source, &all_keys, 0, modified_keys_count),
+            |mut registry| {
+                registry
+                    .move_database(0, 1)
+                    .expect("Moving the database should succeed");
                 registry
             },
             BatchSize::PerIteration,
