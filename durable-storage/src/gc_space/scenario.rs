@@ -296,16 +296,25 @@ fn base_registry(
     config: &SpaceConfig,
 ) -> Result<(Reg, CommitId)> {
     if let Some(commit) = recorded_base(out, repo_path, config)? {
-        writeln!(
-            out,
-            "reusing the recorded base state {}",
-            commit.hex_encode()
-        )?;
+        // The shape matched and the recording parsed, but the files still have to open. A format
+        // that has moved since the base was written surfaces here rather than above, and it is the
+        // same answer: rebuild.
+        match Reg::checkout(repo.clone(), commit) {
+            Ok(registry) => {
+                writeln!(
+                    out,
+                    "reusing the recorded base state {}",
+                    commit.hex_encode()
+                )?;
 
-        let registry =
-            Reg::checkout(repo.clone(), commit).context("checking out the base state")?;
-
-        return Ok((registry, commit));
+                return Ok((registry, commit));
+            }
+            Err(error) => writeln!(
+                out,
+                "rebuilding the base state: {} would not check out ({error})",
+                commit.hex_encode()
+            )?,
+        }
     }
 
     let mut registry = Reg::new(repo.clone());
@@ -426,19 +435,42 @@ fn recorded_base(
         return Ok(None);
     }
 
-    let bytes = fs::read(&path)
-        .with_context(|| format!("reading the base state file {}", path.display()))?;
-    let base: BaseState = serde_json::from_slice(&bytes)
-        .with_context(|| format!("parsing the base state file {}", path.display()))?;
+    // A recorded base state that will not load is a base state to rebuild, not a reason to stop.
+    // Anything written by an older on-disk format lands here, and failing would leave a persistent
+    // `--repo-dir` unusable until someone deleted it by hand.
+    let (shape, commit) = match read_base(&path) {
+        Ok(base) => base,
+        Err(error) => {
+            writeln!(
+                out,
+                "ignoring the recorded base state in {}: {error:#}",
+                path.display()
+            )?;
 
-    if base.shape != config.base_shape() {
+            return Ok(None);
+        }
+    };
+
+    if shape != config.base_shape() {
         writeln!(
             out,
-            "ignoring the recorded base state: it was built for a different shape ({:?})",
-            base.shape
+            "ignoring the recorded base state: it was built for a different shape ({shape:?})"
         )?;
+
         return Ok(None);
     }
+
+    Ok(Some(commit))
+}
+
+/// Read the recorded base state's shape and commit.
+///
+/// Every failure here means the same thing to the caller — the recording cannot be used — so they
+/// are not distinguished beyond the message.
+fn read_base(path: &Path) -> Result<(BaseShape, CommitId)> {
+    let bytes = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
+    let base: BaseState =
+        serde_json::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
 
     let bytes = hex::decode(&base.commit).context("decoding the recorded base commit")?;
     let hash: [u8; Hash::DIGEST_SIZE] = bytes
@@ -446,7 +478,7 @@ fn recorded_base(
         .try_into()
         .map_err(|_| anyhow::anyhow!("recorded base commit is not {} bytes", Hash::DIGEST_SIZE))?;
 
-    Ok(Some(CommitId::from(Hash::from(hash))))
+    Ok((base.shape, CommitId::from(Hash::from(hash))))
 }
 
 /// Record a base state so later runs of the same shape can skip prepopulating.
@@ -666,6 +698,52 @@ mod tests {
         config
             .run()
             .expect("the run that rebuilds a mismatched base state should succeed");
+    }
+
+    /// A recorded base state whose shape still matches but which no longer checks out — the case an
+    /// on-disk format change produces — has to be rebuilt rather than fail the run.
+    #[test]
+    fn space_harness_restricted_rebuilds_uncheckoutable_base() {
+        let tmp = TestableTmpdir::new();
+
+        restricted_config(tmp.path(), false)
+            .run()
+            .expect("the run that records the base state should succeed");
+
+        // Point the recording at a commit the repository does not hold. That is what a base written
+        // by an older format looks like from here: the shape agrees, the files do not open.
+        let path = tmp.path().join(BASE_STATE_FILE);
+        let bytes = fs::read(&path).expect("the base state file should be readable");
+        let mut base: BaseState =
+            serde_json::from_slice(&bytes).expect("the base state file should parse");
+        base.commit = "00".repeat(Hash::DIGEST_SIZE);
+        fs::write(
+            &path,
+            serde_json::to_vec(&base).expect("re-encoding the base state should succeed"),
+        )
+        .expect("rewriting the base state file should succeed");
+
+        restricted_config(tmp.path(), false)
+            .run()
+            .expect("the run that rebuilds an unusable base state should succeed");
+    }
+
+    /// The same for a recording that does not parse at all, which is the other shape an older
+    /// format takes on disk.
+    #[test]
+    fn space_harness_restricted_rebuilds_unreadable_base() {
+        let tmp = TestableTmpdir::new();
+
+        restricted_config(tmp.path(), false)
+            .run()
+            .expect("the run that records the base state should succeed");
+
+        fs::write(tmp.path().join(BASE_STATE_FILE), b"not the base state")
+            .expect("overwriting the base state file should succeed");
+
+        restricted_config(tmp.path(), false)
+            .run()
+            .expect("the run that rebuilds an unreadable base state should succeed");
     }
 
     /// The same shape run twice over one directory, the second time collecting. Covers the paths a
