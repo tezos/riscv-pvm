@@ -24,6 +24,9 @@
 //!   commit) and with `COMMIT_MODIFIED_KEYS_COUNT` modifications, which *settle
 //!   the writes* (see below) so that the hashing — but not the execution work —
 //!   falls inside the measurement.
+//! - **Hash** — `Database::hash`: on a clean database, whose root hash the
+//!   checkout cached, and on one with settled modifications, where the dirty
+//!   paths must be rehashed.
 //! - **Checkout** — `Registry::checkout`: restore the whole registry from a
 //!   committed snapshot.
 //!
@@ -570,6 +573,43 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
             |registry| {
                 let commit_id = registry.commit().expect("Committing should succeed");
                 black_box(commit_id);
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // Request a database's root hash — cached from checkout for a clean
+    // database, rehashed along the dirty paths for a modified one.
+    group.bench_function("Hash clean database", |b| {
+        b.iter_batched(
+            || {
+                source
+                    .try_clone()
+                    .expect("Cloning the registry should succeed")
+            },
+            |registry| {
+                let hash = registry
+                    .database(0)
+                    .expect("The database index should be valid")
+                    .hash()
+                    .expect("Hashing should succeed");
+                black_box(hash);
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+    group.bench_function("Hash modified database", |b| {
+        b.iter_batched(
+            || clone_modified_db(&source, &all_keys, 0, modified_keys_count),
+            |registry| {
+                let hash = registry
+                    .database(0)
+                    .expect("The database index should be valid")
+                    .hash()
+                    .expect("Hashing should succeed");
+                black_box(hash);
                 registry
             },
             BatchSize::PerIteration,
