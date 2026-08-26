@@ -15,12 +15,24 @@
 //! prepopulated registry (`REGISTRY_DATABASE_COUNT` databases of
 //! `PREPOPULATED_NODE_KEYS_COUNT` keys each):
 //!
+//! - **Copy** — `copy_database`: clone one large database over another. Times
+//!   the clone plus the drop of the overwritten database.
 //! - **Checkout** — `Registry::checkout`: restore the whole registry from a
 //!   committed snapshot.
 //!
+//! An operation that takes a source database is measured twice: over a clean
+//! one, and over one carrying uncommitted modifications.
+//!
 //! All scenarios use [`BatchSize::PerIteration`], so only one large registry is
 //! live at a time and the teardown drop of the value *returned* from the routine
-//! is untimed.
+//! is untimed — only drops *inside* the routine are measured.
+//!
+//! **Settling the writes.** `Database::set` enqueues asynchronous Merkle-worker
+//! commands, and the only worker sync points are `hash`, `commit` and `clone`.
+//! An operation timed straight after un-settled writes would absorb the
+//! *application* of those writes — execution work, not the operation's own. A
+//! clone drains the worker without hashing, so every setup that modifies clones
+//! once afterwards, leaving the tree dirty and unhashed.
 //!
 //! The sample size and measurement time default to small, stable values;
 //! `--sample-size` and `--measurement-time` override them.
@@ -51,6 +63,7 @@ use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use octez_riscv_durable_storage::registry::Registry;
 use octez_riscv_test_utils::TestableTmpdir;
+use rand::prelude::*;
 use rand::rng;
 use serde::Deserialize;
 use serde::Serialize;
@@ -69,6 +82,10 @@ const PREPOPULATED_NODE_KEYS_COUNT: usize = 10_000_000;
 /// Number of databases held in the registry. Override with the
 /// `REGISTRY_DATABASE_COUNT` environment variable.
 const REGISTRY_DATABASE_COUNT: usize = 4;
+
+/// Number of randomly-chosen keys the commit benchmark modifies (across all
+/// databases) before committing. Override with `COMMIT_MODIFIED_KEYS_COUNT`.
+const COMMIT_MODIFIED_KEYS_COUNT: usize = 10_000;
 
 /// Number of keys retained per database for the modification scenarios. Keeping
 /// *every* key (up to `PREPOPULATED_NODE_KEYS_COUNT` per database, each up to
@@ -221,9 +238,41 @@ fn populate_registry(repo: &DirectoryManager) -> (Reg, Vec<Vec<Key>>, CommitId) 
     (source, all_keys, commit_id)
 }
 
+/// Clone `source`, apply `count` random modifications to a single database
+/// (`db_index`), then settle the writes (see the module docs). Used by the
+/// modified copy/move/clear scenarios, where the database being operated on has
+/// uncommitted changes.
+fn clone_modified_db(source: &Reg, all_keys: &[Vec<Key>], db_index: usize, count: usize) -> Reg {
+    let mut working = source
+        .try_clone()
+        .expect("Cloning the registry should succeed");
+    {
+        let keys = &all_keys[db_index];
+        let mut rng = rng();
+        let database = working
+            .database_mut(db_index)
+            .expect("The database index should be valid");
+        for _ in 0..count {
+            let key = keys[rng.random_range(0..keys.len())].clone();
+            let value = Bytes::from(generate_random_bytes_in_range(&mut rng, 1..32));
+            database
+                .set(key, value)
+                .expect("Modifying a key should succeed");
+        }
+    }
+    working
+        .try_clone()
+        .expect("Settling the modifications should succeed")
+}
+
 fn database_lifecycle_benchmark(c: &mut Criterion) {
     let database_count = env_usize("REGISTRY_DATABASE_COUNT", REGISTRY_DATABASE_COUNT);
     let node_keys_count = env_usize("PREPOPULATED_NODE_KEYS_COUNT", PREPOPULATED_NODE_KEYS_COUNT);
+    let modified_keys_count = env_usize("COMMIT_MODIFIED_KEYS_COUNT", COMMIT_MODIFIED_KEYS_COUNT);
+    assert!(
+        database_count >= 2,
+        "The copy/move scenarios need at least two databases"
+    );
 
     // `LIFECYCLE_REGISTRY_DIR` must live on a large filesystem — a
     // multi-database 10M-key registry is several GB. Unset → ephemeral temp dir.
@@ -244,7 +293,7 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
     // (cached-hash) trees and only the modified paths are dirty. A configured
     // persistent dir is reused if its manifest matches, and saved if not.
     let manifest_path = repo_path.join(PREPOPULATED_MANIFEST_FILE);
-    let (_source, _all_keys, snapshot_commit) = match registry_dir
+    let (source, all_keys, snapshot_commit) = match registry_dir
         .as_ref()
         .and_then(|_| try_load_prepopulated(&repo, &manifest_path, database_count, node_keys_count))
     {
@@ -265,6 +314,38 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
     };
 
     let mut group = c.benchmark_group("Registry lifecycle");
+
+    // Copy database 0 over database 1: the clone, plus the drop of the
+    // overwritten database. The setup's whole-registry clone and the returned
+    // registry's teardown drop are both untimed.
+    group.bench_function("Copy database over large database", |b| {
+        b.iter_batched(
+            || {
+                source
+                    .try_clone()
+                    .expect("Cloning the registry should succeed")
+            },
+            |mut registry| {
+                registry
+                    .copy_database(0, 1)
+                    .expect("Copying the database should succeed");
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+    group.bench_function("Copy modified database over large database", |b| {
+        b.iter_batched(
+            || clone_modified_db(&source, &all_keys, 0, modified_keys_count),
+            |mut registry| {
+                registry
+                    .copy_database(0, 1)
+                    .expect("Copying the database should succeed");
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
 
     // Check out the whole registry from the committed snapshot. It is returned
     // so its teardown drop is not timed.
