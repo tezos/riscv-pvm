@@ -20,6 +20,10 @@
 //! - **Move** — `move_database`: as copy, but the source is left a fresh empty
 //!   database, so the gap from copy is the clone.
 //! - **Clear** — `clear_database`: replace a large database with an empty one.
+//! - **Commit** — `Registry::commit`: with nothing dirty (the floor cost of a
+//!   commit) and with `COMMIT_MODIFIED_KEYS_COUNT` modifications, which *settle
+//!   the writes* (see below) so that the hashing — but not the execution work —
+//!   falls inside the measurement.
 //! - **Checkout** — `Registry::checkout`: restore the whole registry from a
 //!   committed snapshot.
 //!
@@ -50,6 +54,7 @@
 
 mod random;
 
+use std::hint::black_box;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -241,6 +246,96 @@ fn populate_registry(repo: &DirectoryManager) -> (Reg, Vec<Vec<Key>>, CommitId) 
     (source, all_keys, commit_id)
 }
 
+/// Apply `count` random modifications to existing keys, spread across the
+/// registry's databases.
+fn modify_n(
+    registry: &mut Reg,
+    all_keys: &[Vec<Key>],
+    database_count: usize,
+    count: usize,
+    rng: &mut impl rand::Rng,
+) {
+    for _ in 0..count {
+        let db_index = rng.random_range(0..database_count);
+        let keys = &all_keys[db_index];
+        let key = keys[rng.random_range(0..keys.len())].clone();
+        let value = Bytes::from(generate_random_bytes_in_range(rng, 1..32));
+        registry
+            .database_mut(db_index)
+            .expect("The database index should be valid")
+            .set(key, value)
+            .expect("Modifying a key should succeed");
+    }
+}
+
+/// Clone `source`, modify `count` keys across all of its databases, then settle
+/// the writes (see the module docs), leaving them dirty and unhashed.
+fn clone_modified_spread(
+    source: &Reg,
+    all_keys: &[Vec<Key>],
+    database_count: usize,
+    count: usize,
+) -> Reg {
+    let mut working = source
+        .try_clone()
+        .expect("Cloning the registry should succeed");
+    modify_n(&mut working, all_keys, database_count, count, &mut rng());
+    working
+        .try_clone()
+        .expect("Settling the modifications should succeed")
+}
+
+/// Clone `source`, modify `count` keys and commit, then modify another `count`
+/// and settle. The returned registry is ready for a timed *second* commit, which
+/// should only pay for the newly-dirtied paths.
+fn clone_for_second_commit(
+    source: &Reg,
+    all_keys: &[Vec<Key>],
+    database_count: usize,
+    count: usize,
+) -> Reg {
+    let mut working = source
+        .try_clone()
+        .expect("Cloning the registry should succeed");
+    let mut rng = rng();
+    modify_n(&mut working, all_keys, database_count, count, &mut rng);
+    working.commit().expect("The first commit should succeed");
+    modify_n(&mut working, all_keys, database_count, count, &mut rng);
+    working
+        .try_clone()
+        .expect("Settling the modifications should succeed")
+}
+
+/// Like [`clone_for_second_commit`], but checks the registry out afresh from the
+/// first commit, so the timed second commit starts from a cold, fully-lazy tree.
+/// Both commit twice against the same on-disk engine, so the difference between
+/// their timings isolates what the warm in-memory tree is worth.
+fn clone_for_second_commit_fresh_checkout(
+    source: &Reg,
+    repo: &DirectoryManager,
+    all_keys: &[Vec<Key>],
+    database_count: usize,
+    count: usize,
+) -> Reg {
+    let mut working = source
+        .try_clone()
+        .expect("Cloning the registry should succeed");
+    let mut rng = rng();
+    modify_n(&mut working, all_keys, database_count, count, &mut rng);
+    let commit_id = working.commit().expect("The first commit should succeed");
+
+    // Drop the warm working registry so the second round starts from a cold
+    // checkout (lazy nodes reloaded from disk), not the in-memory tree.
+    drop(working);
+
+    let mut fresh = Reg::checkout(repo.clone(), commit_id)
+        .expect("Checking out the first commit should succeed");
+    modify_n(&mut fresh, all_keys, database_count, count, &mut rng);
+    fresh
+        .try_clone()
+        .expect("Settling the modifications should succeed")
+}
+
 /// Clone `source`, apply `count` random modifications to a single database
 /// (`db_index`), then settle the writes (see the module docs). Used by the
 /// modified copy/move/clear scenarios, where the database being operated on has
@@ -406,6 +501,75 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
                 registry
                     .clear_database(0)
                     .expect("Clearing the database should succeed");
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // The floor cost of a commit — re-storing the loaded nodes, hashing the
+    // registry and writing the manifest, with nothing dirty.
+    group.bench_function("Commit registry (no modifications)", |b| {
+        b.iter_batched(
+            || {
+                source
+                    .try_clone()
+                    .expect("Cloning the registry should succeed")
+            },
+            |registry| {
+                let commit_id = registry.commit().expect("Committing should succeed");
+                black_box(commit_id);
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // The realistic commit. The setup settles the writes, so the dirty-node
+    // persistence and the hashing are inside the measurement.
+    group.bench_function("Commit registry (with modifications)", |b| {
+        b.iter_batched(
+            || clone_modified_spread(&source, &all_keys, database_count, modified_keys_count),
+            |registry| {
+                let commit_id = registry.commit().expect("Committing should succeed");
+                black_box(commit_id);
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // The *second* commit. The first commit's nodes are already persisted and
+    // keep their cached hashes, so this measures the cached-hash and
+    // skip-clean-subtree optimisations against the commit above.
+    group.bench_function("Commit registry (second commit)", |b| {
+        b.iter_batched(
+            || clone_for_second_commit(&source, &all_keys, database_count, modified_keys_count),
+            |registry| {
+                let commit_id = registry.commit().expect("Committing should succeed");
+                black_box(commit_id);
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // The second commit from a fresh checkout, so it runs on a cold, fully-lazy
+    // tree. The gap from the scenario above is what the warm tree is worth.
+    group.bench_function("Commit registry (second commit, fresh checkout)", |b| {
+        b.iter_batched(
+            || {
+                clone_for_second_commit_fresh_checkout(
+                    &source,
+                    &repo,
+                    &all_keys,
+                    database_count,
+                    modified_keys_count,
+                )
+            },
+            |registry| {
+                let commit_id = registry.commit().expect("Committing should succeed");
+                black_box(commit_id);
                 registry
             },
             BatchSize::PerIteration,
