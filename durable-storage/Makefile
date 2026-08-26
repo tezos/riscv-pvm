@@ -102,4 +102,4 @@ run-registry-long-test-stable:
 		--bin long_test -- registry test --max-minutes 10 --keep-epochs 1 \
 		--keep-stable-size --fail-on-warning
 
-.PHONY: all check test gen-regression-inputs run-database-long-test reset-database-regressions reset-registry-regressions build-long-test run-registry-long-test run-registry-long-test-stable build-gc-space space-metrics space-metrics-reference space-metrics-long
+.PHONY: all check test run-database-long-test reset-database-regressions reset-registry-regressions reset-regressions build-long-test run-registry-long-test run-registry-long-test-stable build-gc-space space-metrics space-metrics-reference space-metrics-long
