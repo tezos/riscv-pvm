@@ -31,9 +31,9 @@
 use std::collections::BTreeSet;
 use std::ops::Range;
 
-use octez_riscv_data::components::bytes::test_utils;
 use octez_riscv_data::components::bytes::NODE_ARITY as BYTES_NODE_ARITY;
 use octez_riscv_data::components::bytes::PAGE_SIZE;
+use octez_riscv_data::components::bytes::test_utils;
 use octez_riscv_data::components::vector::NODE_ARITY as VECTOR_NODE_ARITY;
 use octez_riscv_data::foldable::seq_tree::tree_depth;
 use octez_riscv_data::hash::Hash;
