@@ -5,7 +5,7 @@
 
 //! A Merkleised key-value store layer.
 //!
-//! [`MerkleLayer`] wraps a [`KeyValueStore`] (KV) and duplicates all stored data in an AVL
+//! [`MerkleLayer`] wraps a [`ReadableKeyValueStore`] (KV) and duplicates all stored data in an AVL
 //! [`Tree`]. When [`MerkleLayer::commit`] is called, the tree is serialised and stored in the KV
 //! and the root hash of the tree is used to identify that commitment of the layer as a
 //! [`CommitId`]. The inverse operation, [`MerkleLayer::checkout`], takes a [`CommitId`] and
@@ -729,7 +729,7 @@ impl<KV: ReadableKeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_
                 &deleted_node.data,
             )
         } else {
-            let key = initial_node.key();
+            let key = initial_node.key().as_ref();
             let cached_only_resolver = CachedOnlyResolver;
             let cached_id = self
                 .prove_impl
@@ -740,11 +740,7 @@ impl<KV: ReadableKeyValueStore> Foldable<MerkleProofFold> for InitialNodeFold<'_
             let cached = cached_only_resolver
                 .resolve(cached_id)
                 .expect("Working-tree lookup should not fail for an accessed node.");
-            (
-                cached.balance_factor_atom(),
-                cached.key_atom(),
-                cached.data(),
-            )
+            (cached.balance_factor_atom(), cached.key(), cached.data())
         };
 
         // Fold balance_factor + key + data from the prove-mode node (they carry per-field read
@@ -2006,7 +2002,7 @@ mod tests {
 
             assert_eq!(node.hash(), loaded_node.hash());
             assert_eq!(node.balance_factor(), loaded_node.balance_factor());
-            assert_eq!(node.key(), loaded_node.key());
+            assert_eq!(node.key().as_ref(), loaded_node.key().as_ref());
 
             let node_data = node.resolve_data(&merkle_layer.inner.resolver).expect("Loading data should succeed");
             assert_eq!(node_data, loaded_node.data());

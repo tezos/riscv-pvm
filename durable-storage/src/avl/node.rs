@@ -6,7 +6,6 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::ops::Deref;
 use std::sync::OnceLock;
 
 use bincode::Decode;
@@ -29,6 +28,8 @@ use octez_riscv_data::serialisation::deserialise;
 use octez_riscv_data::serialisation::serialise;
 use perfect_derive::perfect_derive;
 
+use super::key::NodeKey;
+use super::key::NodeKeyMode;
 use super::resolver::LazyDataId;
 use super::resolver::LazyTreeId;
 use super::resolver::ProveNode;
@@ -66,7 +67,7 @@ pub struct Node<TreeId, DataId, M: Mode> {
     balance_factor: Atom<i8, M>,
 
     /// The [`Key`] used to locate this [`Node`] within the AVL tree.
-    key: Atom<Key, M>,
+    key: NodeKey<M>,
 
     data: DataId,
     left: TreeId,
@@ -102,7 +103,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
     ) -> Self {
         Node {
             balance_factor: Atom::new(balance_factor),
-            key: Atom::new(key),
+            key: NodeKey::new(key),
             data,
             left,
             right,
@@ -115,7 +116,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
         &self,
         resolver: &impl AvlResolver<super::resolver::LazyNodeId, LazyDataId, LazyTreeId, Normal>,
     ) -> Result<&Bytes<Normal>, OperationalError> {
-        resolver.resolve_bytes(&self.data, &self.key)
+        resolver.resolve_bytes(&self.data, self.key.as_ref())
     }
 }
 
@@ -174,7 +175,7 @@ impl<TreeId, DataId, M: Mode> Node<TreeId, DataId, M> {
     }
 }
 
-impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
+impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
     /// Find the id of the [`Node`] within the subtree of this [`Node`] with a given [`Key`].
     pub(super) fn get<'a, NodeId>(
         mut node: &'a NodeId,
@@ -214,7 +215,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     {
         Node {
             balance_factor: Atom::new(0),
-            key: Atom::new(key),
+            key: NodeKey::new(key),
             data: data.into(),
             left: TreeId::default(),
             right: TreeId::default(),
@@ -228,12 +229,12 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     ) -> Result<(D, Self), <D::Parent as Deserialiser>::Error>
     where
         Atom<i8, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
-        Atom<Key, M>: FromProof<<D::Parent as Deserialiser>::Codec>,
+        NodeKey<M>: FromProof<<D::Parent as Deserialiser>::Codec>,
         DataId: FromProof<<D::Parent as Deserialiser>::Codec>,
         TreeId: FromProof<<D::Parent as Deserialiser>::Codec>,
     {
         let (ctx, balance_factor) = ctx.next_branch::<Atom<i8, M>>()?;
-        let (ctx, key) = ctx.next_branch::<Atom<Key, M>>()?;
+        let (ctx, key) = ctx.next_branch::<NodeKey<M>>()?;
         let (ctx, data) = ctx.next_branch::<DataId>()?;
         let (ctx, left) = ctx.next_branch::<TreeId>()?;
         let (ctx, right) = ctx.next_branch::<TreeId>()?;
@@ -257,7 +258,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     pub(crate) fn hash(&self) -> &Hash
     where
         Atom<i8, M>: Foldable<HashFold>,
-        Atom<Key, M>: Foldable<HashFold>,
+        NodeKey<M>: Foldable<HashFold>,
         DataId: Foldable<HashFold>,
         TreeId: Foldable<HashFold>,
     {
@@ -268,12 +269,6 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
     #[inline]
     pub(crate) fn balance_factor_atom(&self) -> &Atom<i8, M> {
         &self.balance_factor
-    }
-
-    /// The [`Atom`] holding the [`Key`] of this [`Node`].
-    #[inline]
-    pub(crate) fn key_atom(&self) -> &Atom<Key, M> {
-        &self.key
     }
 
     /// The difference in heights between child branches.
@@ -288,9 +283,9 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         &mut self.balance_factor
     }
 
-    /// The [`Key`] used for determining the [`Node`].
+    /// The [`NodeKey`] used for determining the [`Node`].
     #[inline]
-    pub(crate) fn key(&self) -> &Key {
+    pub(crate) fn key(&self) -> &NodeKey<M> {
         &self.key
     }
 
@@ -484,7 +479,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         match self.key.cmp(key) {
             // The key already exists and should be updated.
             Ordering::Equal => {
-                let bytes = resolver.resolve_mut_bytes(&mut self.data, &self.key)?;
+                let bytes = resolver.resolve_mut_bytes(&mut self.data, key)?;
                 data(bytes)?;
                 self.invalidate_hash();
                 Ok(false)
@@ -793,7 +788,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
 }
 
 #[cfg(test)]
-impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
+impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
     /// Returns true if the balance factors stored in the [`Node`]'s subtree are correct.
     pub(super) fn has_correct_balance_factors<NodeId>(
         &self,
@@ -804,7 +799,7 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         TreeId: std::fmt::Debug,
         DataId: std::fmt::Debug,
         Atom<i8, M>: std::fmt::Debug,
-        Atom<Key, M>: std::fmt::Debug,
+        NodeKey<M>: std::fmt::Debug,
     {
         let left_height = self.left_ref(resolver)?.height(resolver)?;
         let right_height = self.right_ref(resolver)?.height(resolver)?;
@@ -861,18 +856,23 @@ impl<TreeId, DataId, M: AtomMode> Node<TreeId, DataId, M> {
         min: &Key,
         max: &Key,
         resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
-    ) -> Result<bool, OperationalError> {
-        if self.key() < min || self.key() > max {
+    ) -> Result<bool, OperationalError>
+    where
+        NodeKey<M>: AsRef<Key>,
+    {
+        if resolver.compare_key(self, min).is_lt() || resolver.compare_key(self, max).is_gt() {
             return Ok(false);
         }
 
+        let key = self.key().as_ref();
+
         let left_in_order = self
             .left_ref(resolver)?
-            .is_inorder_inner(min, self.key(), resolver)?;
+            .is_inorder_inner(min, key, resolver)?;
 
-        let right_in_order =
-            self.right_ref(resolver)?
-                .is_inorder_inner(self.key(), max, resolver)?;
+        let right_in_order = self
+            .right_ref(resolver)?
+            .is_inorder_inner(key, max, resolver)?;
 
         Ok(left_in_order && right_in_order)
     }
@@ -892,7 +892,7 @@ where
         // child *trees* (the same values folded into this node's hash).
         let repr = StoredNode {
             balance_factor: self.balance_factor.read(),
-            key: self.key.deref().clone(),
+            key: self.key.as_ref().clone(),
             data: Hash::from_foldable(&self.data),
             left: Hash::from_foldable(&self.left),
             right: Hash::from_foldable(&self.right),
@@ -909,7 +909,7 @@ where
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {
-            let key: &[u8] = self.key.as_ref();
+            let key: &[u8] = self.key.as_ref().as_ref();
             let value: &[u8] = self.data.borrow();
             store.set(key, value)?;
         }
@@ -982,11 +982,11 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
             deserialise(bytes.as_ref())?
         };
 
-        let key = Atom::new(key);
-
         // The stored representation does not include the `data` field, so we need to load it
         // separately from the KV store.
         let data = DataId::load(data, &key, store)?;
+
+        let key = NodeKey::new(key);
 
         let left = TreeId::load(left, store)?;
         let right = TreeId::load(right, store)?;
@@ -1007,7 +1007,7 @@ where
     F: Fold,
     M: Mode,
     Atom<i8, M>: Foldable<F>,
-    Atom<Key, M>: Foldable<F>,
+    NodeKey<M>: Foldable<F>,
     DataId: Foldable<F>,
     TreeId: Foldable<F>,
 {
