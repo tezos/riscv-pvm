@@ -44,7 +44,7 @@ use crate::registry::RegistryMode;
 use crate::repo::RegistryRepo;
 use crate::test_helpers::OperationView;
 use crate::test_helpers::StepOutcome;
-use crate::test_helpers::proof_size::assert_proof_size;
+use crate::test_helpers::proof_size::assert_registry_proof_size;
 use crate::test_helpers::proof_size::registry_operation_proof_size_bound;
 
 /// Operations on a [`Registry`]
@@ -458,7 +458,7 @@ where
 
         if let Some((proof, prove_outcome)) = proof_and_outcome {
             let bound = bound.expect("provable operations have a size bound");
-            assert_proof_size(&operation, proof.len(), bound, false);
+            assert_registry_proof_size(&operation, proof.len(), bound, false);
 
             let normal_outcome =
                 normal_outcome.expect("a provable operation must produce a Normal-mode outcome");
