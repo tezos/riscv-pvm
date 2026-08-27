@@ -31,6 +31,7 @@
 use std::collections::BTreeSet;
 use std::ops::Range;
 
+use octez_riscv_data::components::bytes::test_utils;
 use octez_riscv_data::components::bytes::NODE_ARITY as BYTES_NODE_ARITY;
 use octez_riscv_data::components::bytes::PAGE_SIZE;
 use octez_riscv_data::components::vector::NODE_ARITY as VECTOR_NODE_ARITY;
@@ -84,6 +85,9 @@ pub(crate) const fn key_leaf(key_len: usize) -> usize {
 /// every accessed node's key. The subtree the path continues into is charged
 /// by its own level; the terminal node's second child is charged
 /// via [`terminal_blind`].
+///
+/// An operation that opens the value subtree refunds the blinded-data charge
+/// of the terminal node, which [`value_open`] then charges in full.
 pub(crate) const fn avl_path_node(key_len: usize) -> usize {
     TREE_WRAP + TAG_BYTES + BALANCE_FACTOR_LEAF + key_leaf(key_len) + 2 * BLIND_LEAF
 }
@@ -145,7 +149,9 @@ fn value_open(value_len: usize, byte_ranges: &[Range<usize>]) -> usize {
         .sum();
     let layers = depth * touched.len() * (TAG_BYTES + (BYTES_NODE_ARITY - 1) * BLIND_LEAF);
 
-    TAG_BYTES + LEN_LEAF + (page_leaves + layers).max(BLIND_LEAF)
+    let computed = TAG_BYTES + LEN_LEAF + (page_leaves + layers).max(BLIND_LEAF);
+
+    computed.min(test_utils::MAX_PROOF_LENGTH)
 }
 
 /// The pages of a value of `value_len` bytes touched by the given byte ranges,
@@ -369,10 +375,12 @@ pub(crate) fn database_operation_proof_size_bound(
     );
 
     if exists && opens_value {
-        // The path node's blinded-data charge is deliberately kept even
-        // though the data child is opened and charged by `value_open`.
+        // The terminal node on the search path charges its data child as one
+        // blinded subtree (see [`avl_path_node`]); opening the value replaces
+        // that blinded leaf, so the charge is refunded rather than paid twice.
+        // `exists` implies a non-empty tree, so the path has a terminal node.
         let value_len = model.data()[key].len();
-        cost += value_open(value_len, &value_byte_ranges(op, value_len));
+        cost += value_open(value_len, &value_byte_ranges(op, value_len)) - BLIND_LEAF;
     }
 
     // An untouched database is compressed to a single blinded leaf.
