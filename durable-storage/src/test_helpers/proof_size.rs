@@ -16,6 +16,10 @@
 //! node or leaf, a `Blind` leaf carrying a hash and a `Read` leaf carrying raw
 //! bytes (see the `Encode` impl in `octez_riscv_data::merkle_proof::proof_tree`).
 //!
+//! Registry proofs are checked against [`MAX_REGISTRY_PROOF_SIZE`], whereas database
+//! proofs are checked against [`DATABASE_MAX_PROOF_SIZE`] - which takes into
+//! account that databases are wrapped in the registry component too.
+//!
 //! Compression makes [`BLIND_LEAF`] an upper bound rather than an exact cost for
 //! every subtree the model treats as blinded. `MerkleProof::blind` leaves a leaf
 //! shorter than [`Hash::DIGEST_SIZE`] inlined as a `Read` leaf instead of
@@ -37,6 +41,12 @@ use crate::key::KEY_MAX_SIZE;
 use crate::test_helpers::database::DatabaseOperation;
 use crate::test_helpers::database::DatabaseReferenceModel;
 use crate::test_helpers::registry::RegistryOperation;
+
+/// Ceiling on the serialised size of a whole NDS proof.
+///
+/// We limit it to half of the max size supported by L1 - as the WASM component
+/// will also be included (which itself also fits into 16KiB).
+const MAX_PROOF_SIZE: usize = 16 * 1024;
 
 /// Serialised size of a proof tree tag. Tags are written as one byte each by the
 /// `Encode` impl of `octez_riscv_data::merkle_proof::proof_tree::MerkleProof`.
@@ -181,9 +191,47 @@ fn value_byte_ranges(op: &DatabaseOperation, value_len: usize) -> [Range<usize>;
     }
 }
 
-/// Ceiling on serialised proof sizes. Proofs above it are reported by
-/// [`assert_proof_size`].
-const MAXIMUM_PROOF_SIZE: usize = 16 * 1024;
+/// One layer of a registry slot path: the node tag plus the blinded siblings of
+/// the child the path descends into.
+const REGISTRY_LAYER: usize = TAG_BYTES + (VECTOR_NODE_ARITY - 1) * BLIND_LEAF;
+
+/// The envelope a full proof wraps around the proofs of the db's it
+/// touches. This includes the registry envelope: registry's `u64` length leaf,
+/// and, per touched slot, one [`REGISTRY_LAYER`] per layer of the tree.
+const fn registry_envelope(tree_depth: usize, touched_dbs: usize) -> usize {
+    let path_cost = tree_depth * REGISTRY_LAYER;
+
+    TAG_BYTES + LEN_LEAF + path_cost * touched_dbs
+}
+
+/// Largest registry the nds host functions admit: `registry_resize` refuses to grow
+/// the registry beyond `Int32.max_int` slots.
+#[cfg(rocksdb_test_utils)]
+const MAX_REGISTRY_LEN: usize = i32::MAX as usize;
+
+/// Depth bound for the slot tree of the largest admissible registry: the tree is
+/// [`VECTOR_NODE_ARITY`]-ary, so `tree_depth` never exceeds the logarithm of
+/// [`MAX_REGISTRY_LEN`] in that base.
+#[cfg(rocksdb_test_utils)]
+const MAX_REGISTRY_DEPTH: usize = MAX_REGISTRY_LEN
+    .next_power_of_two() // required as `ilog2` rounds down
+    .ilog2()
+    .div_ceil(VECTOR_NODE_ARITY.ilog2()) as usize;
+
+/// Ceiling on the serialised size of a whole registry proof: the shape that
+/// ships for any operation on a database held in a registry slot. Proofs above
+/// it are reported by [`assert_registry_proof_size`].
+const MAX_REGISTRY_PROOF_SIZE: usize = MAX_PROOF_SIZE - Hash::DIGEST_SIZE;
+
+/// Ceiling on the serialised size of a standalone database proof.
+///
+/// A database proof within this ceiling still fits [`MAX_REGISTRY_PROOF_SIZE`]
+/// once wrapped, whatever the length of the registry holding it.
+///
+/// Proofs above it are reported by [`assert_database_proof_size`].
+#[cfg(rocksdb_test_utils)]
+const DATABASE_MAX_PROOF_SIZE: usize =
+    MAX_REGISTRY_PROOF_SIZE - registry_envelope(MAX_REGISTRY_DEPTH, 1);
 
 /// Print a warning, or panic when `fail_on_warning` is set.
 fn report_over_maximum(fail_on_warning: bool, message: String) {
@@ -193,28 +241,70 @@ fn report_over_maximum(fail_on_warning: bool, message: String) {
     eprintln!("warning: {message}");
 }
 
-/// Assert an actual serialised proof size is within the modelled bound.
-/// Sizes above [`MAXIMUM_PROOF_SIZE`] are reported as warnings, or as test
-/// failures when `fail_on_warning` is set.
-pub(crate) fn assert_proof_size(
+/// Assert an actual serialised proof size is within the modelled bound. Sizes
+/// above `maximum`, named `ceiling` in the report, are reported as warnings, or
+/// as test failures when `fail_on_warning` is set.
+///
+/// `bound` is the bound of _just_ the initial state proof of the component under test.
+fn assert_proof_size(
     op: &impl std::fmt::Debug,
     actual: usize,
     bound: usize,
+    ceiling: &str,
+    maximum: usize,
     fail_on_warning: bool,
 ) {
+    // Generated proofs additionally contain the final state hash.
+    let bound = bound + Hash::DIGEST_SIZE;
+
     assert!(
         actual <= bound,
         "proof size {actual} exceeds the modelled bound {bound} for {op:?}"
     );
 
-    if actual > MAXIMUM_PROOF_SIZE {
+    if actual > maximum {
         report_over_maximum(
             fail_on_warning,
-            format!(
-                "proof size {actual} exceeds MAXIMUM_PROOF_SIZE {MAXIMUM_PROOF_SIZE} for {op:?}"
-            ),
+            format!("proof size {actual} exceeds {ceiling} {maximum} for {op:?}"),
         );
     }
+}
+
+/// Assert a database proof is within its modelled bound and
+/// [`DATABASE_MAX_PROOF_SIZE`], leaving room for the registry envelope.
+#[cfg(rocksdb_test_utils)]
+pub(crate) fn assert_database_proof_size(
+    op: &impl std::fmt::Debug,
+    actual: usize,
+    bound: usize,
+    fail_on_warning: bool,
+) {
+    assert_proof_size(
+        op,
+        actual,
+        bound,
+        "DATABASE_MAX_PROOF_SIZE",
+        DATABASE_MAX_PROOF_SIZE,
+        fail_on_warning,
+    );
+}
+
+/// Assert a registry proof — envelope included — is within its modelled bound
+/// and [`MAX_REGISTRY_PROOF_SIZE`].
+pub(crate) fn assert_registry_proof_size(
+    op: &impl std::fmt::Debug,
+    actual: usize,
+    bound: usize,
+    fail_on_warning: bool,
+) {
+    assert_proof_size(
+        op,
+        actual,
+        bound,
+        "MAX_REGISTRY_PROOF_SIZE",
+        MAX_REGISTRY_PROOF_SIZE,
+        fail_on_warning,
+    );
 }
 
 /// Bound on the serialised proof size of a database operation: the worst-case
@@ -293,18 +383,14 @@ pub(crate) fn database_operation_proof_size_bound(
 /// pre-operation reference models (one per registry slot). `None` if the
 /// operation is not a provable step.
 ///
-/// A registry proof is prefixed with the final state hash (see `serialise_proof`
-/// in `octez_riscv_data::merkle_proof::proof`) and folds as a node of a `u64`
-/// length leaf and a slot tree of arity [`VECTOR_NODE_ARITY`]; each touched slot
-/// costs one branch of blinded siblings per layer plus its blinded content. The
-/// length leaf is charged at [`BLIND_LEAF`], which bounds the [`LEN_LEAF`] form
-/// the encoder actually emits for it.
+/// The proof folds as the [`registry_envelope`] over the slot tree of arity
+/// [`VECTOR_NODE_ARITY`], wrapping the bound of the database operation it
+/// carries, if any.
 pub(crate) fn registry_operation_proof_size_bound<M: DatabaseReferenceModel>(
     databases: &[M],
     op: &RegistryOperation,
 ) -> Option<usize> {
     let depth = tree_depth(databases.len(), VECTOR_NODE_ARITY) as usize;
-    let slot_path = depth * (TAG_BYTES + (VECTOR_NODE_ARITY - 1) * BLIND_LEAF) + BLIND_LEAF;
 
     let (touched_slots, inner) = match op {
         RegistryOperation::CommitCheckoutRoundtrip => return None,
@@ -314,11 +400,13 @@ pub(crate) fn registry_operation_proof_size_bound<M: DatabaseReferenceModel>(
         }
         RegistryOperation::GrowRegistry
         | RegistryOperation::ShrinkRegistry
-        | RegistryOperation::ClearDatabase(_) => (1, 0),
-        RegistryOperation::CopyDatabase(..) | RegistryOperation::MoveDatabase(..) => (2, 0),
+        | RegistryOperation::ClearDatabase(_) => (1, BLIND_LEAF),
+        RegistryOperation::CopyDatabase(..) | RegistryOperation::MoveDatabase(..) => {
+            (2, 2 * BLIND_LEAF)
+        }
     };
 
-    Some(Hash::DIGEST_SIZE + TAG_BYTES + BLIND_LEAF + touched_slots * slot_path + inner)
+    Some(registry_envelope(depth, touched_slots) + inner)
 }
 
 #[cfg(test)]
@@ -406,6 +494,34 @@ mod tests {
 
         assert_eq!(max_write, chunk_pages + 1);
         assert_eq!(max_set, chunk_pages);
+    }
+
+    #[test]
+    fn max_registry_depth_bounds_every_registry_length() {
+        for len in [0, 1, 2, 3, VECTOR_NODE_ARITY, 1 << 20, MAX_REGISTRY_LEN] {
+            let depth = tree_depth(len, VECTOR_NODE_ARITY) as usize;
+            assert!(
+                depth <= MAX_REGISTRY_DEPTH,
+                "a registry of {len} slots is {depth} layers deep, \
+                 beyond MAX_REGISTRY_DEPTH {MAX_REGISTRY_DEPTH}"
+            );
+        }
+    }
+
+    /// A database proof at [`DATABASE_MAX_PROOF_SIZE`] must still fit
+    /// [`MAX_REGISTRY_PROOF_SIZE`] once the registry envelope is added, for every
+    /// registry length.
+    #[test]
+    fn database_ceiling_leaves_room_for_the_registry_envelope() {
+        for len in [1, 2, 3, VECTOR_NODE_ARITY, 1 << 20, MAX_REGISTRY_LEN] {
+            let depth = tree_depth(len, VECTOR_NODE_ARITY) as usize;
+            let wrapped = DATABASE_MAX_PROOF_SIZE + registry_envelope(depth, 1);
+            assert!(
+                wrapped <= MAX_REGISTRY_PROOF_SIZE,
+                "a maximal database proof in a registry of {len} slots serialises \
+                 to {wrapped} bytes, beyond MAX_REGISTRY_PROOF_SIZE {MAX_REGISTRY_PROOF_SIZE}"
+            );
+        }
     }
 
     #[test]

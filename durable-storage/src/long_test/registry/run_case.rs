@@ -29,7 +29,7 @@ use crate::storage::in_memory::InMemoryKeyValueStore;
 use crate::storage::in_memory::InMemoryRepo;
 use crate::test_helpers::StepOutcome;
 use crate::test_helpers::database::check_and_apply_value_operation;
-use crate::test_helpers::proof_size::assert_proof_size;
+use crate::test_helpers::proof_size::assert_registry_proof_size;
 use crate::test_helpers::proof_size::registry_operation_proof_size_bound;
 use crate::test_helpers::registry::RegistryOperation;
 use crate::test_helpers::registry::grow_registry;
@@ -141,7 +141,7 @@ fn apply_sequence(
             let bound = registry_operation_proof_size_bound(&targets.model.databases, op);
             prove_and_verify_registry_operation(&targets.persistent, op).map(|(proof, outcome)| {
                 let bound = bound.expect("provable operations have a size bound");
-                assert_proof_size(op, proof.len(), bound, fail_on_warning);
+                assert_registry_proof_size(op, proof.len(), bound, fail_on_warning);
                 outcome
             })
         } else {

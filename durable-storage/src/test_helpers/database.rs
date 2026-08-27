@@ -46,7 +46,7 @@ use crate::test_helpers::OperationView;
 use crate::test_helpers::StepOutcome;
 use crate::test_helpers::outcome_from_value;
 #[cfg(test)]
-use crate::test_helpers::proof_size::assert_proof_size;
+use crate::test_helpers::proof_size::assert_database_proof_size;
 #[cfg(test)]
 use crate::test_helpers::proof_size::database_operation_proof_size_bound;
 
@@ -905,7 +905,7 @@ where
         let proof_and_outcome = prove_and_verify_database_operation(&database, &operation);
         if let Some((proof, _)) = &proof_and_outcome {
             let bound = bound.expect("provable operations have a size bound");
-            assert_proof_size(&operation, proof.len(), bound, false);
+            assert_database_proof_size(&operation, proof.len(), bound, false);
         }
 
         let normal_outcome = apply_database_operation_with_model::<KV, _>(
