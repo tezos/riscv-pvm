@@ -29,6 +29,7 @@ use octez_riscv_data::merkle_proof::SuspendedResult;
 use octez_riscv_data::mode::utils::not_found;
 use perfect_derive::perfect_derive;
 
+use super::key::NodeKeyMode;
 use super::node::Node;
 use super::resolver::ProveNodeId;
 use super::resolver::VerifyNodeId;
@@ -108,7 +109,7 @@ impl<NodeId> Tree<NodeId> {
     /// Delete the [`Node`] in the [`Tree`] with a given key.
     ///
     /// Returns true if the [`Tree`] has shrunk in size.
-    pub fn delete<TreeId, DataId, M: AtomMode>(
+    pub fn delete<TreeId, DataId, M: AtomMode + NodeKeyMode>(
         &mut self,
         key: &Key,
         resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
@@ -169,7 +170,7 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// Find the id of the [`Node`] in the [`Tree`] with a given [`Key`].
-    pub(crate) fn get<'a, TreeId: 'a, DataId: 'a, M: AtomMode + 'a>(
+    pub(crate) fn get<'a, TreeId: 'a, DataId: 'a, M: AtomMode + NodeKeyMode + 'a>(
         &'a self,
         key: &Key,
         resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
@@ -184,7 +185,7 @@ impl<NodeId> Tree<NodeId> {
     /// Set the value of the [`Node`] with a given key.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub fn set<TreeId, DataId, M: BytesMode + AtomMode>(
+    pub fn set<TreeId, DataId, M: BytesMode + AtomMode + NodeKeyMode>(
         &mut self,
         key: &Key,
         data: &[u8],
@@ -246,7 +247,7 @@ impl<NodeId> Tree<NodeId> {
 
     #[inline]
     /// The difference in heights between any child branches in the [`Tree`].
-    pub(super) fn balance_factor<TreeId, DataId, M: AtomMode>(
+    pub(super) fn balance_factor<TreeId, DataId, M: AtomMode + NodeKeyMode>(
         &self,
         resolver: &impl NodeResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<i8, OperationalError> {
@@ -278,7 +279,7 @@ impl<NodeId> Tree<NodeId> {
     ///  - The occupied [`Tree`] with the minimum [`Key`].
     ///  - The minimum [`Tree`]'s right child, if it hasn't been moved to its new position.
     ///  - True if the [`Tree`] has shrunk in size.
-    pub(super) fn take_min<TreeId, DataId, M: AtomMode>(
+    pub(super) fn take_min<TreeId, DataId, M: AtomMode + NodeKeyMode>(
         &mut self,
         resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(Tree<NodeId>, Tree<NodeId>, bool), OperationalError>
@@ -306,7 +307,7 @@ impl<NodeId> Tree<NodeId> {
     /// `data` defines what data is upserted.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn upsert<TreeId, DataId, M: BytesMode + AtomMode>(
+    pub(crate) fn upsert<TreeId, DataId, M: BytesMode + AtomMode + NodeKeyMode>(
         &mut self,
         key: &Key,
         offset: usize,
@@ -348,7 +349,7 @@ impl<NodeId> Tree<NodeId> {
     /// given offset, overwriting existing data if the node already exists.
     ///
     /// Returns true if the [`Tree`] has grown in size.
-    pub(crate) fn write<TreeId, DataId, M: BytesMode + AtomMode>(
+    pub(crate) fn write<TreeId, DataId, M: BytesMode + AtomMode + NodeKeyMode>(
         &mut self,
         key: &Key,
         offset: usize,
@@ -386,7 +387,7 @@ impl<NodeId> Tree<NodeId> {
     ///
     /// The [`Tree`] must already have balance factor in the range of -2..=2, else it is an invalid
     /// AVL tree.
-    fn rebalance<TreeId, DataId, M: AtomMode>(
+    fn rebalance<TreeId, DataId, M: AtomMode + NodeKeyMode>(
         &mut self,
         resolver: &mut impl AvlResolver<NodeId, DataId, TreeId, M>,
     ) -> Result<(), OperationalError>
@@ -507,6 +508,7 @@ mod tests {
     use proptest::test_runner::TestCaseError;
 
     use super::*;
+    use crate::avl::key::NodeKey;
     use crate::avl::resolver::ArcNodeId;
     use crate::avl::resolver::ArcResolver;
     use crate::avl::resolver::ArcTreeId;
@@ -518,7 +520,7 @@ mod tests {
 
     impl<NodeId> Tree<NodeId> {
         /// Asserts that the [`Tree`] is a valid AVL tree
-        pub(crate) fn check<TreeId, DataId, M: AtomMode>(
+        pub(crate) fn check<TreeId, DataId, M: AtomMode + NodeKeyMode>(
             &self,
             resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<(), OperationalError>
@@ -527,7 +529,7 @@ mod tests {
             TreeId: std::fmt::Debug,
             DataId: std::fmt::Debug,
             Atom<i8, M>: std::fmt::Debug,
-            Atom<Key, M>: std::fmt::Debug,
+            NodeKey<M>: std::fmt::Debug + AsRef<Key>,
         {
             let inorder = self.is_inorder(resolver)?;
             let is_balanced = self.is_balanced(resolver)?;
@@ -545,10 +547,13 @@ mod tests {
         }
 
         /// Returns true if the [`Tree`] is in-order.
-        pub(crate) fn is_inorder<TreeId, DataId, M: AtomMode>(
+        pub(crate) fn is_inorder<TreeId, DataId, M: AtomMode + NodeKeyMode>(
             &self,
             resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
-        ) -> Result<bool, OperationalError> {
+        ) -> Result<bool, OperationalError>
+        where
+            NodeKey<M>: AsRef<Key>,
+        {
             self.is_inorder_inner(
                 &Key::new(&[u8::MIN]).expect("Size less than KEY_MAX_SIZE"),
                 &Key::new(&[u8::MAX; KEY_MAX_SIZE]).expect("Size less than KEY_MAX_SIZE"),
@@ -557,7 +562,7 @@ mod tests {
         }
 
         /// Returns true if the balance factors stored in any [`Node`]'s subtree are correct.
-        pub(crate) fn has_correct_balance_factors<TreeId, DataId, M: AtomMode>(
+        pub(crate) fn has_correct_balance_factors<TreeId, DataId, M: AtomMode + NodeKeyMode>(
             &self,
             resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<bool, OperationalError>
@@ -566,7 +571,7 @@ mod tests {
             TreeId: std::fmt::Debug,
             DataId: std::fmt::Debug,
             Atom<i8, M>: std::fmt::Debug,
-            Atom<Key, M>: std::fmt::Debug,
+            NodeKey<M>: std::fmt::Debug,
         {
             match self.root() {
                 None => Ok(true),
@@ -577,7 +582,7 @@ mod tests {
         }
 
         /// Returns the height of the [`Tree`].
-        pub(crate) fn height<TreeId, DataId, M: AtomMode>(
+        pub(crate) fn height<TreeId, DataId, M: AtomMode + NodeKeyMode>(
             &self,
             resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<u32, OperationalError> {
@@ -588,7 +593,7 @@ mod tests {
         }
 
         /// Returns true if the [`Tree`] is balanced.
-        pub(crate) fn is_balanced<TreeId, DataId, M: AtomMode>(
+        pub(crate) fn is_balanced<TreeId, DataId, M: AtomMode + NodeKeyMode>(
             &self,
             resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
         ) -> Result<bool, OperationalError> {
@@ -601,12 +606,15 @@ mod tests {
         }
 
         /// Returns true if the [`Tree`] is in-order and all values lie between the `min` and `max`.
-        pub(crate) fn is_inorder_inner<TreeId, DataId, M: AtomMode>(
+        pub(crate) fn is_inorder_inner<TreeId, DataId, M: AtomMode + NodeKeyMode>(
             &self,
             min: &Key,
             max: &Key,
             resolver: &impl AvlResolver<NodeId, DataId, TreeId, M>,
-        ) -> Result<bool, OperationalError> {
+        ) -> Result<bool, OperationalError>
+        where
+            NodeKey<M>: AsRef<Key>,
+        {
             match self.root() {
                 None => Ok(true),
                 Some(node) => resolver
@@ -807,7 +815,7 @@ mod tests {
     fn iterated_keys(tree: &Tree<ArcNodeId>) -> Result<Vec<Key>, OperationalError> {
         let resolver = ArcResolver;
         tree.iter(&resolver)
-            .map(|node| node.map(|node| node.key().clone()))
+            .map(|node| node.map(|node| node.key().as_ref().clone()))
             .collect()
     }
 
@@ -904,7 +912,7 @@ mod tests {
 
         loop {
             match iter.next() {
-                Some(Ok(node)) => observed_prefix.push(node.key().clone()),
+                Some(Ok(node)) => observed_prefix.push(node.key().as_ref().clone()),
                 Some(Err(OperationalError::ResolverInvariantViolated)) => break,
                 Some(Err(err)) => {
                     return Err(TestCaseError::fail(format!(

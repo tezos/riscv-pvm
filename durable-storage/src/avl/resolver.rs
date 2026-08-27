@@ -62,6 +62,7 @@ use trait_set::trait_set;
 
 use super::node::Node;
 use super::tree::Tree;
+use crate::avl::key::NodeKey;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::Loadable;
@@ -731,7 +732,7 @@ impl<'inner> KeyResolver<ProveTreeId, Bytes<Prove<'inner>>, Prove<'inner>> for C
     ) -> Ordering {
         // this is safe w.r.t. proof-generation: Self is a resolver only used during
         // the MerkleProofFold.
-        node.key_atom().unrecorded_deref().cmp(key)
+        node.key().unrecorded_cmp(key)
     }
 }
 
@@ -823,7 +824,7 @@ impl ProveTreeId {
 #[derive(Debug)]
 pub(crate) struct DeletedNodeFields {
     pub(crate) balance_factor: Atom<i8, Prove<'static>>,
-    pub(crate) key: Atom<Key, Prove<'static>>,
+    pub(crate) key: NodeKey<Prove<'static>>,
     pub(crate) data: Bytes<Prove<'static>>,
 }
 
@@ -927,7 +928,7 @@ impl<R> ProveResolver<R> {
             if let Some(lazy_id) = &id.lazy_id {
                 let fields = DeletedNodeFields {
                     balance_factor: node.balance_factor_atom().clone(),
-                    key: node.key_atom().clone(),
+                    key: node.key().clone(),
                     data: node.data().clone(),
                 };
                 self.deleted_nodes
@@ -1040,7 +1041,7 @@ where
         let node = prove_node.as_ref();
         let fields = DeletedNodeFields {
             balance_factor: node.balance_factor_atom().clone(),
-            key: node.key_atom().clone(),
+            key: node.key().clone(),
             data: node.data().clone(),
         };
 
