@@ -179,14 +179,11 @@ mod tests {
 
     /// The node holding the key under test, at the bottom of the search path.
     ///
-    /// Its encoding is close to [`avl_path_node`] — tree wrapper, node tag, balance factor
-    /// and key leaves, and two blinded subtrees — but both the key and the two blinds are
-    /// different things. A node *on* the path blinds its untouched value and the sibling the
-    /// path skips; this node blinds both of its children, which are empty. `Node::get` returns
-    /// as soon as the keys compare equal, so neither child is ever resolved and both are
-    /// emitted as hashes rather than as present-but-empty subtrees. That same equal comparison
-    /// is one the verifier can redo against the hash of the key as a whole, so this node's key
-    /// is blinded too rather than paged into the proof.
+    /// Its encoding is close to [`avl_path_node`], but this node blinds three things where a
+    /// path node blinds two. `Node::get` returns as soon as the keys compare equal, so both of
+    /// its (empty) children stay unresolved and are emitted as hashes rather than as
+    /// present-but-empty subtrees - and that equal comparison is one the verifier can redo
+    /// against the hash of the key as a whole, so the key blinds too.
     const COUNTERFEIT_TARGET_NODE: usize =
         TREE_WRAP + TAG_BYTES + BALANCE_FACTOR_LEAF + 3 * BLIND_LEAF;
 

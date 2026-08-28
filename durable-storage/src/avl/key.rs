@@ -14,10 +14,10 @@
 //! - An equality check is settled against the hash of the key as a whole, which
 //!   lets the key be blinded outright.
 //! - Two different keys are ordered within the first page on which they differ:
-//!   the pages before it are equal, which the verifier re-checks against their
-//!   hashes, and the pages after it never enter into the comparison. Only that
-//!   one page has to be fully included in the proof, so an ordering costs a
-//!   less than including the full key in the worst case.
+//!   the subtrees before it are equal, which the verifier re-checks against the
+//!   subtree hash, and the subtree after it is never compared. Only that
+//!   one page has to be fully included in the proof, so an ordering costs a that
+//!   page, plus the hash of a precending/subsequent subtree/page.
 //! - Keys where one is a prefix of the other may agree on every page they share
 //!   and are additionally ordered by their lengths.
 //!
@@ -29,10 +29,8 @@ use std::convert::Infallible;
 use std::ops::Deref;
 use std::ops::Range;
 
-use bincode::BorrowDecode;
 use bincode::Decode;
 use bincode::Encode;
-use bincode::de::BorrowDecoder;
 use bincode::de::read::Reader;
 use bincode::enc::Encoder;
 use bincode::enc::write::Writer;
@@ -45,6 +43,7 @@ use octez_riscv_data::foldable::FoldLeaf;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
 use octez_riscv_data::foldable::seq_tree::IndexableSeqAsTree;
+use octez_riscv_data::foldable::seq_tree::tree_depth;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::HashFold;
 use octez_riscv_data::hash::PartialHash;
@@ -56,7 +55,6 @@ use octez_riscv_data::merkle_proof::FromProof;
 use octez_riscv_data::merkle_proof::Partial;
 use octez_riscv_data::merkle_proof::Suspended;
 use octez_riscv_data::merkle_proof::SuspendedResult;
-use octez_riscv_data::merkle_proof::descend_tree;
 use octez_riscv_data::merkle_proof::proof_tree::ForceMinimumPresence;
 use octez_riscv_data::merkle_proof::proof_tree::MerkleProofFold;
 use octez_riscv_data::merkle_proof::proof_tree::MinimumPresence;
@@ -77,7 +75,7 @@ use crate::key::Key;
 ///
 /// This is the page size that minimises a key's contribution to a proof. A
 /// comparison reveals one page plus a hash per layer of the page tree, so
-/// halving the page size trades 32 bytes of page content for a 33-byte layer.
+/// halving the page size trades 32 bytes of page content for a 34-byte layer.
 pub const PAGE_SIZE: usize = 64;
 
 /// Children per node of a key's page tree.
@@ -107,14 +105,67 @@ fn key_length(key: &Key) -> u8 {
 }
 
 /// The first page on which two keys differ, if they share such a page.
-///
-/// Pages before it are equal, and a verifier can check that against their
-/// hashes. The ordering of two keys that differ on a shared page is decided
-/// within that page; keys that agree on every page they share are ordered by
-/// their lengths.
 fn first_differing_page(lhs: &[u8], rhs: &[u8]) -> Option<usize> {
     (0..page_count(lhs.len()).min(page_count(rhs.len())))
         .find(|&page| lhs[page_range(lhs.len(), page)] != rhs[page_range(rhs.len(), page)])
+}
+
+/// Where a chunk of pages sits within a key's page tree.
+///
+/// A chunk is one subtree of the layout [`IndexableSeqAsTree`] gives the pages,
+/// which is what lets a verifier recompute the hash a blinded subtree carries
+/// from the pages of the key it is comparing against: a chunk the two keys agree
+/// on folds to the same hash whatever else the keys hold.
+#[derive(Clone, Copy, Debug)]
+struct Chunk {
+    /// Pages of the whole tree this chunk belongs to, not of the chunk itself.
+    total_pages: usize,
+
+    /// Index of the chunk's first page.
+    start: usize,
+
+    /// Depth of the chunk within the tree. A chunk at depth zero is a single
+    /// page, which the layout does not wrap in a node.
+    depth: u32,
+}
+
+impl Chunk {
+    /// The whole page tree of a key of `total_pages` pages.
+    fn root(total_pages: usize) -> Self {
+        Chunk {
+            total_pages,
+            start: 0,
+            depth: tree_depth(total_pages, NODE_ARITY),
+        }
+    }
+
+    /// One past the last page this chunk covers.
+    fn end(self) -> usize {
+        let span = NODE_ARITY.saturating_pow(self.depth);
+
+        self.start.saturating_add(span).min(self.total_pages)
+    }
+
+    /// The chunks of this chunk's children, in order.
+    ///
+    /// Mirrors how [`IndexableSeqAsTree`] lays out a node's children: each spans
+    /// a [`NODE_ARITY`]th of this one - which at the layer above the leaves is a
+    /// single page each - and children starting past the end of the sequence are
+    /// dropped rather than left empty. Only called on a chunk that is a node, so
+    /// never at depth zero.
+    fn children(self) -> impl Iterator<Item = Chunk> {
+        let depth = self.depth.saturating_sub(1);
+        let span = NODE_ARITY.saturating_pow(depth);
+
+        (0..NODE_ARITY)
+            .map(move |child| self.start + child * span)
+            .take_while(move |&start| start < self.total_pages)
+            .map(move |start| Chunk {
+                start,
+                depth,
+                ..self
+            })
+    }
 }
 
 /// The AVL-node key representation of a [`Key`].
@@ -212,12 +263,13 @@ where
         "Should be able to serialise a key's length",
     ));
 
-    let page = |index: usize| {
-        EncodeLeaf::new(
-            PageRef(&bytes[page_range(bytes.len(), index)]),
-            "Should be able to serialise a key's page",
-        )
-    };
+    // TODO TZX-192: the empty key has no pages, so its page tree is a node with no children,
+    // which no comparison marks and a proof therefore blinds to a full-length hash. Carrying
+    // such a node in full instead - it encodes shorter than a digest, as blinding already does
+    // for leaves shorter than one - is what stops an ordering against the empty key costing
+    // more than one against a key of a few bytes, whose single page is already cheaper revealed
+    // than hashed.
+    let page = page_leaf(bytes);
     builder.add(&IndexableSeqAsTree::new(
         page_count(bytes.len()),
         NODE_ARITY,
@@ -225,6 +277,16 @@ where
     ));
 
     builder.done()
+}
+
+/// The pages of `bytes`, as leaves to fold a page tree from.
+fn page_leaf<'key>(bytes: &'key [u8]) -> impl Fn(usize) -> EncodeLeaf<PageRef<'key>> {
+    move |index| {
+        EncodeLeaf::new(
+            PageRef(&bytes[page_range(bytes.len(), index)]),
+            "Should be able to serialise a key's page",
+        )
+    }
 }
 
 /// The hash a key folds to.
@@ -242,6 +304,30 @@ where
     for<'page> PageRef<'page>: LeafEncode<C>,
 {
     Hash::hash_leaf::<C, _>(&PageRef(page)).expect("Hashing a key's page should not fail")
+}
+
+/// The hash the pages of `key` fold to over the given chunk of a page tree.
+///
+/// The chunk's shape comes from the key the proof was generated for, and its
+/// contents from `key` - so this is the hash the blinded subtree would carry if
+/// the two keys agreed over that chunk.
+fn chunk_hash<C: LeafCodec>(key: &Key, chunk: Chunk) -> Hash
+where
+    for<'page> PageRef<'page>: LeafEncode<C>,
+{
+    let page = page_leaf(key.as_ref());
+
+    if chunk.depth == 0 {
+        return Hash::from_foldable_with::<C>(&page(chunk.start));
+    }
+
+    Hash::from_foldable_with::<C>(&IndexableSeqAsTree::chunk(
+        chunk.total_pages,
+        NODE_ARITY,
+        &page,
+        chunk.start,
+        chunk.depth,
+    ))
 }
 
 impl<F: FoldLeaf> Foldable<F> for NodeKey<Normal>
@@ -308,7 +394,7 @@ where
 
         let page = |index: usize| ProofLeaf {
             value: PageRef(&bytes[page_range(bytes.len(), index)]),
-            access: self.0.page_access(index),
+            access: self.0.pages[index].get(),
         };
         builder.add(&IndexableSeqAsTree::new(
             page_count(bytes.len()),
@@ -353,28 +439,143 @@ where
 
         let mut builder = builder.into_node_fold();
 
-        builder.add(&PartialLeaf(length.clone().map_present(|length| {
-            Hash::hash_leaf::<C, _>(&length).expect("Hashing a key's length should not fail")
-        })));
-
-        let page = |index: usize| PartialLeaf(pages[index].hash::<C>());
-        builder.add(&IndexableSeqAsTree::new(pages.len(), NODE_ARITY, &page));
+        builder.add(&length.clone().map_present(|length| {
+            PartialHash::Present(
+                Hash::hash_leaf::<C, _>(&length).expect("Hashing a key's length should not fail"),
+            )
+        }));
+        builder.add(pages);
 
         builder.done()
     }
 }
 
-/// A leaf of a key's merkle tree in [`Verify`] mode, folded to whichever of its
-/// hash the proof carries.
-struct PartialLeaf(Partial<Hash>);
+/// As much of a key's page tree as a proof carries.
+///
+/// A comparison leaves most of the tree blinded, and a blinded subtree is kept
+/// here as the hash it folds to rather than dropped: that hash is what lets the
+/// pages under it be checked in one go, against the same chunk of the key being
+/// compared. Flattening the tree to a list of pages would lose it.
+#[derive(Clone, Debug)]
+enum PageTree {
+    /// Nothing of this subtree is in the proof.
+    Absent,
 
-impl<C: LeafCodec> Foldable<PartialHashFold<C>> for PartialLeaf {
-    fn fold(&self, builder: PartialHashFold<C>) -> <PartialHashFold<C> as Fold>::Folded {
-        match self.0 {
-            Partial::Absent => builder.previous(),
-            Partial::Blinded(hash) | Partial::Present(hash) => PartialHash::Present(hash),
+    /// Only the hash this subtree folds to.
+    Blinded {
+        /// Hash the subtree folds to.
+        hash: Hash,
+
+        /// Hashes the same chunk of another key's pages, so that the two can be
+        /// compared.
+        ///
+        /// Captured while deserialising, where the [`LeafCodec`] is known.
+        hash_chunk: fn(&Key, Chunk) -> Hash,
+    },
+
+    /// One page's bytes.
+    Page(Vec<u8>),
+
+    /// A node of the tree, with its children in order.
+    Node(Vec<PageTree>),
+}
+
+impl PageTree {
+    /// The tree of a key whose every page is known.
+    fn present(bytes: &[u8], chunk: Chunk) -> Self {
+        if chunk.depth == 0 {
+            return PageTree::Page(bytes[page_range(bytes.len(), chunk.start)].to_vec());
+        }
+
+        PageTree::Node(
+            chunk
+                .children()
+                .map(|child| PageTree::present(bytes, child))
+                .collect(),
+        )
+    }
+
+    /// Build the tree of a page leaf from its deserialised proof leaf.
+    fn leaf<C: LeafCodec>(page: Partial<Page>) -> Self
+    where
+        for<'page> PageRef<'page>: LeafEncode<C>,
+    {
+        match page {
+            Partial::Absent => PageTree::Absent,
+            Partial::Blinded(hash) => PageTree::Blinded {
+                hash,
+                hash_chunk: chunk_hash::<C>,
+            },
+            Partial::Present(page) => PageTree::Page(page.0),
         }
     }
+}
+
+impl<C: LeafCodec> Foldable<PartialHashFold<C>> for PageTree
+where
+    for<'page> PageRef<'page>: LeafEncode<C>,
+{
+    fn fold(&self, builder: PartialHashFold<C>) -> <PartialHashFold<C> as Fold>::Folded {
+        match self {
+            PageTree::Absent => builder.previous(),
+            PageTree::Blinded { hash, .. } => PartialHash::Present(*hash),
+            PageTree::Page(page) => PartialHash::Present(page_hash::<C>(page)),
+            PageTree::Node(children) => {
+                let mut builder = builder.into_node_fold();
+
+                for child in children {
+                    builder.add(child);
+                }
+
+                builder.done()
+            }
+        }
+    }
+}
+
+/// Rebuild as much of a key's page tree as the proof carries, keeping the hash of
+/// every subtree it blinded.
+///
+/// The recursion follows the layout [`IndexableSeqAsTree`] gives the pages, and
+/// stops at anything that is not present - a blinded subtree has nothing below it
+/// to read. Its depth is bounded by the key's `u8` length, so a proof cannot
+/// choose how far it descends.
+fn page_tree_from_proof<C: LeafCodec, Proof: Deserialiser<Codec = C>>(
+    proof: Proof,
+    chunk: Chunk,
+) -> SuspendedResult<Proof, PageTree>
+where
+    Page: LeafDecode<C>,
+    for<'page> PageRef<'page>: LeafEncode<C>,
+{
+    if chunk.depth == 0 {
+        return Ok(proof.into_leaf::<Page>()?.map(PageTree::leaf::<C>));
+    }
+
+    let mut node = proof.into_node()?;
+
+    match node.presence() {
+        Partial::Absent => return node.done(PageTree::Absent),
+        Partial::Blinded(hash) => {
+            return node.done(PageTree::Blinded {
+                hash,
+                hash_chunk: chunk_hash::<C>,
+            });
+        }
+        Partial::Present(()) => {}
+    }
+
+    let mut children = Vec::new();
+
+    for child in chunk.children() {
+        let (next, tree) =
+            node.next_branch_with(|proof| page_tree_from_proof::<C, _>(proof, child))?;
+
+        node = next;
+        children.push(tree);
+    }
+
+    node.done(PageTree::Node(children))
 }
 
 impl<C: LeafCodec> FromProof<C> for NodeKey<Verify>
@@ -395,8 +596,8 @@ where
 
         let (node, pages) = node.next_branch_with(|proof| {
             let Partial::Present(length) = &length else {
-                // Without the length there is no telling how many pages to expect,
-                // so the page tree must not be present either.
+                // Without the length there is no telling what shape the page tree
+                // has, so it must not be present either.
                 let proof = proof.into_node()?;
 
                 if let Partial::Present(()) = proof.presence() {
@@ -405,21 +606,10 @@ where
                     ));
                 }
 
-                return proof.done(Vec::new());
+                return proof.done(PageTree::Absent);
             };
 
-            let count = page_count(*length as usize);
-            let mut pages = vec![VerifyPage::Absent; count];
-
-            let mut for_leaf = |index: usize, proof: Proof| {
-                Ok(proof.into_leaf::<Page>()?.map(|page| {
-                    pages[index] = VerifyPage::new::<C>(page);
-                }))
-            };
-
-            let result = descend_tree(proof, NODE_ARITY, count, &mut for_leaf)?;
-
-            Ok(result.map(|()| pages))
+            page_tree_from_proof::<C, _>(proof, Chunk::root(page_count(*length as usize)))
         })?;
 
         let key = match presence {
@@ -464,12 +654,6 @@ impl Encode for PageRef<'_> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Page(Vec<u8>);
 
-impl Encode for Page {
-    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), bincode::error::EncodeError> {
-        PageRef(&self.0).encode(encoder)
-    }
-}
-
 impl<Context> Decode<Context> for Page {
     fn decode<D: bincode::de::Decoder<Context = Context>>(
         decoder: &mut D,
@@ -486,14 +670,6 @@ impl<Context> Decode<Context> for Page {
         decoder.reader().read(page.as_mut_slice())?;
 
         Ok(Page(page))
-    }
-}
-
-impl<'de, Context> BorrowDecode<'de, Context> for Page {
-    fn borrow_decode<D: BorrowDecoder<'de, Context = Context>>(
-        decoder: &mut D,
-    ) -> Result<Self, bincode::error::DecodeError> {
-        Decode::decode(decoder)
     }
 }
 
@@ -604,6 +780,7 @@ impl KeyAccess {
 
 #[derive(Clone, Debug)]
 struct ProveImpl<'normal> {
+    /// The key itself.
     inner: Source<'normal, Key>,
 
     /// How the key as a whole was compared.
@@ -629,32 +806,33 @@ impl<'normal> ProveImpl<'normal> {
 
     /// Record a comparison that the verifier settles against the hash of the key
     /// as a whole.
-    fn record_whole(&self) {
+    fn record_equality(&self) {
         self.whole.set(self.whole.get().max(KeyAccess::Hashed));
     }
 
-    /// Record the page-by-page comparison of this key against `rhs`, which must
-    /// not be equal to it.
-    fn record_pages(&self, rhs: &Key) {
+    /// Record an ordering of this key against `rhs`, which must not be equal to it.
+    fn record_ordering(&self, rhs: &Key) {
         // Every page comparison starts from the key's length, which fixes where
         // its pages end.
         self.length.set(KeyAccess::Read);
 
         let bytes = self.inner.as_ref();
-        let shared = page_count(bytes.len()).min(page_count(rhs.as_ref().len()));
+        let pages = page_count(bytes.len());
+        let shared = pages.min(page_count(rhs.as_ref().len()));
 
-        // The pages up to the one that decides the ordering are equal, which the
-        // verifier re-checks against their hashes. Where the keys agree on every
-        // page they share, their lengths decide the ordering and every shared
-        // page has to be checked.
-        let divergence = first_differing_page(bytes, rhs.as_ref());
+        // Only the boundary page is marked. The path down to it stays in the
+        // proof, which leaves the subtrees spanning the pages before it blinded as
+        // units - one hash to check per layer rather than one per page.
+        match first_differing_page(bytes, rhs.as_ref()) {
+            Some(page) => self.record_page(page, KeyAccess::Read),
 
-        for page in 0..divergence.unwrap_or(shared) {
-            self.record_page(page, KeyAccess::Hashed);
-        }
+            // The keys agree on every shared page, so their lengths order them -
+            // but the shared pages still have to be checkable, and hashing the
+            // first page past them holds the path open.
+            None if shared < pages => self.record_page(shared, KeyAccess::Hashed),
 
-        if let Some(page) = divergence {
-            self.record_page(page, KeyAccess::Read);
+            // The tree spans exactly the shared pages, so it blinds as one.
+            None => {}
         }
     }
 
@@ -662,27 +840,6 @@ impl<'normal> ProveImpl<'normal> {
     fn record_page(&self, index: usize, access: KeyAccess) {
         let page = &self.pages[index];
         page.set(page.get().max(access));
-    }
-
-    /// How the proof must carry page `index`.
-    ///
-    /// A comparison settled against the hash of the key as a whole needs nothing
-    /// of the pages - but only while the key is blinded whole. Once a page
-    /// comparison has put the key's tree into the proof, that hash is no longer
-    /// there to check against, so every page has to be checkable instead.
-    fn page_access(&self, index: usize) -> KeyAccess {
-        let access = self.pages[index].get();
-
-        if self.whole.get() > KeyAccess::None && self.compared_by_page() {
-            access.max(KeyAccess::Hashed)
-        } else {
-            access
-        }
-    }
-
-    /// Was this key compared page by page at any point?
-    fn compared_by_page(&self) -> bool {
-        self.pages.iter().any(|page| page.get() > KeyAccess::None)
     }
 }
 
@@ -698,7 +855,7 @@ impl<'normal> private::NodeKeyImpl for Prove<'normal> {
     fn eq(this: &NodeKey<Self>, rhs: &Key) -> bool {
         // The verifier settles equality by hashing `rhs` itself, so the key can
         // stay blinded whichever way the comparison goes.
-        this.key.record_whole();
+        this.key.record_equality();
         this.key.inner.eq(rhs)
     }
 
@@ -708,9 +865,9 @@ impl<'normal> private::NodeKeyImpl for Prove<'normal> {
         if ordering.is_eq() {
             // An exact match is an equality check, which the verifier can redo
             // against the hash of the blinded key.
-            this.key.record_whole();
+            this.key.record_equality();
         } else {
-            this.key.record_pages(rhs);
+            this.key.record_ordering(rhs);
         }
 
         ordering
@@ -747,72 +904,9 @@ enum VerifyImpl {
         /// The key's length in bytes.
         length: Partial<u8>,
 
-        /// The key's pages, in order.
-        pages: Vec<VerifyPage>,
+        /// As much of the key's page tree as the proof carries.
+        pages: PageTree,
     },
-}
-
-/// One page of a key in [`Verify`] mode.
-#[derive(Clone, Debug)]
-enum VerifyPage {
-    /// The page is missing from the proof.
-    Absent,
-
-    /// The page was compared by its hash alone.
-    Blinded {
-        /// Hash the page folds to.
-        hash: Hash,
-
-        /// Hashes a page as the proof's pages were hashed.
-        ///
-        /// Captured while deserialising, where the [`LeafCodec`] is known.
-        hash_page: fn(&[u8]) -> Hash,
-    },
-
-    /// The page's bytes are in the proof.
-    Present(Vec<u8>),
-}
-
-impl VerifyPage {
-    /// Build the verify-mode representation of a page, remembering how to hash a
-    /// page under the proof's codec.
-    fn new<C: LeafCodec>(page: Partial<Page>) -> Self
-    where
-        for<'page> PageRef<'page>: LeafEncode<C>,
-    {
-        match page {
-            Partial::Absent => VerifyPage::Absent,
-            Partial::Blinded(hash) => VerifyPage::Blinded {
-                hash,
-                hash_page: page_hash::<C>,
-            },
-            Partial::Present(page) => VerifyPage::Present(page.0),
-        }
-    }
-
-    /// The hash this page folds to, as far as the proof determines it.
-    fn hash<C: LeafCodec>(&self) -> Partial<Hash>
-    where
-        for<'page> PageRef<'page>: LeafEncode<C>,
-    {
-        match self {
-            VerifyPage::Absent => Partial::Absent,
-            VerifyPage::Blinded { hash, .. } => Partial::Blinded(*hash),
-            VerifyPage::Present(page) => Partial::Present(page_hash::<C>(page)),
-        }
-    }
-
-    /// Is this page equal to `rhs`?
-    ///
-    /// Returns `None` when the proof does not carry the page at all.
-    fn eq_page(&self, rhs: &[u8]) -> Option<bool> {
-        match self {
-            VerifyPage::Absent => None,
-            // A page's encoding is length-prefixed, so equal hashes mean equal bytes.
-            VerifyPage::Blinded { hash, hash_page } => Some(*hash == hash_page(rhs)),
-            VerifyPage::Present(page) => Some(page == rhs),
-        }
-    }
 }
 
 /// How far a proof settles the comparison of a [`NodeKey`] against a [`Key`].
@@ -828,10 +922,56 @@ enum Comparison {
     Unknown,
 }
 
+/// Compare one chunk of a key's pages against `rhs`, whose first `shared` pages
+/// are the ones the comparison reaches.
+///
+/// `None` means every page of the chunk that the comparison reaches matches.
+fn compare_chunk(tree: &PageTree, chunk: Chunk, shared: usize, rhs: &Key) -> Option<Comparison> {
+    // Pages past the ones the two keys share take no part in the comparison: the
+    // keys are ordered before them, or by their lengths.
+    if chunk.start >= shared {
+        return None;
+    }
+
+    match tree {
+        PageTree::Absent => Some(Comparison::Unknown),
+
+        PageTree::Blinded { hash, hash_chunk } => {
+            // A chunk reaching past the shared pages holds pages of this key that
+            // `rhs` has no counterpart for, so its hash cannot be reproduced.
+            if chunk.end() > shared {
+                return Some(Comparison::Unknown);
+            }
+
+            // Pages fold injectively, so equal chunk hashes mean the two keys hold
+            // the same bytes right across the chunk.
+            (*hash != hash_chunk(rhs, chunk)).then_some(Comparison::Unequal)
+        }
+
+        PageTree::Page(page) => {
+            let bytes = rhs.as_ref();
+
+            // The keys are ordered within the first page on which they differ.
+            match page
+                .as_slice()
+                .cmp(&bytes[page_range(bytes.len(), chunk.start)])
+            {
+                Ordering::Equal => None,
+                ordering => Some(Comparison::Decided(ordering)),
+            }
+        }
+
+        PageTree::Node(children) => children
+            .iter()
+            .zip(chunk.children())
+            .find_map(|(tree, chunk)| compare_chunk(tree, chunk, shared, rhs)),
+    }
+}
+
 impl VerifyImpl {
     /// Compare this key against `rhs`, as far as the proof allows.
     fn compare(&self, rhs: &Key) -> Comparison {
-        let (length, pages) = match self {
+        let (length, tree) = match self {
             VerifyImpl::Absent => return Comparison::Unknown,
             // The key folds injectively, so equal hashes mean equal keys.
             VerifyImpl::Blinded { hash, hash_key } if *hash == hash_key(rhs) => {
@@ -846,30 +986,24 @@ impl VerifyImpl {
         };
 
         let length = *length as usize;
-        let rhs = rhs.as_ref();
+        let rhs_length = rhs.as_ref().len();
+        let pages = page_count(length);
+        let shared = pages.min(page_count(rhs_length));
 
-        for index in 0..page_count(length).min(page_count(rhs.len())) {
-            let rhs_page = &rhs[page_range(rhs.len(), index)];
+        match compare_chunk(tree, Chunk::root(pages), shared, rhs) {
+            // Keys that agree on every page they share are ordered by their lengths.
+            None => Comparison::Decided(length.cmp(&rhs_length)),
 
-            match &pages[index] {
-                VerifyPage::Present(page) => match page.as_slice().cmp(rhs_page) {
-                    // The keys are ordered within the first page on which they
-                    // differ, and agree on every page before it.
-                    Ordering::Equal => continue,
-                    ordering => return Comparison::Decided(ordering),
-                },
-                page => match page.eq_page(rhs_page) {
-                    Some(true) => continue,
-                    // A blinded page tells the verifier that the keys differ, but
-                    // not which way round they go.
-                    Some(false) => return Comparison::Unequal,
-                    None => return Comparison::Unknown,
-                },
-            }
+            // Keys of different lengths are different whatever their pages say, so
+            // a proof too thin to order them still settles that much. This is what
+            // an equality check falls back on when some other comparison has put
+            // the key's tree in the proof: the chunk spanning the pages past the
+            // shared ones is blinded, and it cannot be checked against a key that
+            // has no such pages.
+            Some(Comparison::Unknown) if length != rhs_length => Comparison::Unequal,
+
+            Some(comparison) => comparison,
         }
-
-        // Keys that agree on every page they share are ordered by their lengths.
-        Comparison::Decided(length.cmp(&rhs.len()))
     }
 }
 
@@ -878,14 +1012,11 @@ impl NodeKeyMode for Verify {}
 impl private::NodeKeyImpl for Verify {
     fn new(key: Key) -> NodeKey<Self> {
         let bytes = key.as_ref();
-        let pages = (0..page_count(bytes.len()))
-            .map(|index| VerifyPage::Present(bytes[page_range(bytes.len(), index)].to_vec()))
-            .collect();
 
         NodeKey {
             key: VerifyImpl::Tree {
                 length: Partial::Present(key_length(&key)),
-                pages,
+                pages: PageTree::present(bytes, Chunk::root(page_count(bytes.len()))),
             },
         }
     }
