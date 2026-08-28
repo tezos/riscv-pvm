@@ -29,6 +29,7 @@ use proptest::sample::Index;
 use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
+use crate::avl::key::PAGE_SIZE as KEY_PAGE_SIZE;
 use crate::commit::CommitId;
 use crate::database::Database;
 use crate::database::DatabaseMode;
@@ -131,9 +132,38 @@ pub fn make_database_operations(
         .collect()
 }
 
+/// Keys for sampled operations.
+///
+/// Two uniformly random keys differ in their first page, so an ordering between them never
+/// reaches the subtree hashes that prove the pages before a divergence equal, nor the branches
+/// that order keys agreeing on every page they share. Half the samples are therefore built from
+/// a fixed run of whole pages, so that keys drawn independently of one another still agree page
+/// for page - and, where the remainder is empty, are page-aligned prefixes of one another.
+///
+/// The empty key gets an arm of its own rather than being left to turn up in the length range,
+/// where it would be one draw in `KEY_MAX_SIZE`. Nothing rejects it - [`Key`] validation only
+/// bounds the length from above - and it is the one key with no page for a comparison to mark,
+/// so its page tree blinds whole rather than opening down to a page.
 pub(crate) fn key_strategy() -> impl Strategy<Value = Key> {
-    proptest::collection::vec(any::<u8>(), 1usize..=KEY_MAX_SIZE)
-        .prop_map(|bytes| Key::new(&bytes).expect("The size is less than KEY_MAX_SIZE"))
+    let arbitrary = proptest::collection::vec(any::<u8>(), 0usize..=KEY_MAX_SIZE);
+
+    let page_aligned = (
+        1usize..=KEY_MAX_SIZE / KEY_PAGE_SIZE,
+        proptest::collection::vec(any::<u8>(), 0usize..KEY_PAGE_SIZE),
+    )
+        .prop_map(|(pages, remainder)| {
+            let mut bytes = vec![0xa5; pages * KEY_PAGE_SIZE];
+            bytes.extend_from_slice(&remainder);
+
+            bytes
+        });
+
+    prop_oneof![
+        1 => Just(Vec::new()),
+        8 => arbitrary,
+        8 => page_aligned,
+    ]
+    .prop_map(|bytes| Key::new(&bytes).expect("The size is less than KEY_MAX_SIZE"))
 }
 
 pub(crate) fn value_strategy() -> impl Strategy<Value = Bytes> {

@@ -69,6 +69,44 @@ impl<'a, L, G> IndexableSeqAsTree<'a, L, G> {
             _leaf: std::marker::PhantomData,
         }
     }
+
+    /// Construct the [`Foldable`] driver for one aligned chunk of an indexable sequence:
+    /// the subtree at `depth` whose first item is `start`, laid out as it sits within the
+    /// tree that [`IndexableSeqAsTree::new`] gives a sequence of `len` items.
+    ///
+    /// Use this to recompute the hash a subtree of a folded sequence carries from another
+    /// sequence's items - a chunk that both sequences agree on folds to the same hash.
+    ///
+    /// A chunk at depth zero is a single leaf rather than a subtree, and the layout does not
+    /// wrap it in a node, so fold the item itself instead of calling this.
+    ///
+    /// A chunk that is not a subtree of that layout still folds to a hash, and nothing
+    /// downstream can tell that hash from a real one - a verifier checking a blinded subtree
+    /// against it would be comparing against a shape no prover ever folds. The arguments are
+    /// therefore checked in every build, not just under `debug_assertions`.
+    pub fn chunk(len: usize, arity: usize, generator: &'a G, start: usize, depth: u32) -> Self {
+        assert!(
+            depth > 0 || len <= 1,
+            "a chunk at depth zero is a leaf, not a subtree"
+        );
+        assert!(
+            depth <= tree_depth(len, arity),
+            "a chunk cannot be deeper than the tree it is a subtree of"
+        );
+        assert!(
+            start % arity.saturating_pow(depth) == 0,
+            "a chunk must start where a subtree of its depth starts"
+        );
+
+        Self {
+            total_len: len,
+            current_depth: depth,
+            current_start: start,
+            arity,
+            generator,
+            _leaf: std::marker::PhantomData,
+        }
+    }
 }
 
 impl<'a, L, G, F> Foldable<F> for IndexableSeqAsTree<'a, L, G>
@@ -737,5 +775,104 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The subtree of `tree` that [`IndexableSeqAsTree`] puts at `start` and `depth`, found by
+    /// the same descent [`Foldable::fold`] makes. This is the shape a prover folds, and so the
+    /// shape [`IndexableSeqAsTree::chunk`] has to reproduce.
+    fn subtree(
+        tree: &TestTree,
+        arity: usize,
+        start: usize,
+        depth: u32,
+        current_start: usize,
+        current_depth: u32,
+    ) -> TestTree {
+        if current_depth == depth && current_start == start {
+            return tree.clone();
+        }
+
+        let TestTree::Node(children) = tree else {
+            panic!("descended into a leaf looking for the chunk at {start}, depth {depth}");
+        };
+
+        let span = arity.pow(current_depth - 1);
+        let child = (start - current_start) / span;
+
+        subtree(
+            &children[child],
+            arity,
+            start,
+            depth,
+            current_start + child * span,
+            current_depth - 1,
+        )
+    }
+
+    /// A chunk spanning the whole sequence is the whole tree. This covers the layout's two
+    /// special cases - an empty sequence is an empty node and a single item is a bare leaf -
+    /// which the recursive descent never reaches.
+    #[test]
+    fn chunk_at_the_root_folds_like_the_whole_tree() {
+        for arity in [2usize, 4, 32] {
+            for len in [0usize, 1, 2, 3, 4, 5, 8, 9, 64, 255, 1024] {
+                let whole = IndexableSeqAsTree::new(len, arity, &generator).fold(TestFolder);
+                let chunk =
+                    IndexableSeqAsTree::chunk(len, arity, &generator, 0, tree_depth(len, arity))
+                        .fold(TestFolder);
+
+                assert_eq!(chunk, whole, "arity {arity}, len {len}");
+            }
+        }
+    }
+
+    /// Every aligned chunk folds to exactly the subtree it names. A chunk that folded to
+    /// anything else would let a verifier accept a hash over a shape no prover produces.
+    #[test]
+    fn chunk_folds_like_the_subtree_it_names() {
+        for arity in [2usize, 4] {
+            // Lengths from two items up, the layout's special cases being covered above.
+            for len in [2usize, 3, 4, 5, 7, 8, 9, 16, 17, 64, 255] {
+                let whole = IndexableSeqAsTree::new(len, arity, &generator).fold(TestFolder);
+                let root = tree_depth(len, arity);
+
+                for depth in 1..=root {
+                    let span = arity.pow(depth);
+
+                    for start in (0..len).step_by(span) {
+                        let chunk = IndexableSeqAsTree::chunk(len, arity, &generator, start, depth)
+                            .fold(TestFolder);
+
+                        assert_eq!(
+                            chunk,
+                            subtree(&whole, arity, start, depth, 0, root),
+                            "arity {arity}, len {len}, start {start}, depth {depth}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// At depth zero the layout gives a bare item, so a chunk there would fold a node of the
+    /// item and its siblings instead - a shape the tree does not contain.
+    #[test]
+    #[should_panic = "a chunk at depth zero is a leaf, not a subtree"]
+    fn chunk_at_depth_zero_is_rejected() {
+        IndexableSeqAsTree::chunk(4, 2, &generator, 0, 0).fold(TestFolder);
+    }
+
+    /// A chunk deeper than the tree would fold a taller chain of nodes than the tree has.
+    #[test]
+    #[should_panic = "a chunk cannot be deeper than the tree it is a subtree of"]
+    fn chunk_deeper_than_the_tree_is_rejected() {
+        IndexableSeqAsTree::chunk(4, 2, &generator, 0, 3).fold(TestFolder);
+    }
+
+    /// An unaligned start names no subtree of the layout, so its fold answers for nothing.
+    #[test]
+    #[should_panic = "a chunk must start where a subtree of its depth starts"]
+    fn chunk_starting_off_alignment_is_rejected() {
+        IndexableSeqAsTree::chunk(8, 2, &generator, 1, 2).fold(TestFolder);
     }
 }
