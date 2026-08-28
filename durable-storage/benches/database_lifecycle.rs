@@ -53,6 +53,12 @@
 //! was built with, so a mismatched directory is rebuilt rather than misused.
 //! Unset → ephemeral temp dir, populate every run.
 //!
+//! A run leaves that directory holding the prepopulated snapshot and nothing
+//! else. Every commit scenario writes a checkpoint per iteration, and the
+//! registry keeps a temporary database per clone, so a directory that kept what
+//! its runs produced would outgrow the volume that makes reuse possible. What a
+//! run removes is therefore also what an interrupted earlier run left behind.
+//!
 //! [`Database`]: octez_riscv_durable_storage::database::Database
 
 mod random;
@@ -70,6 +76,7 @@ use criterion::criterion_main;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_durable_storage::commit::CommitId;
 use octez_riscv_durable_storage::database::DirectoryManager;
+use octez_riscv_durable_storage::gc_space::retain_only;
 use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use octez_riscv_durable_storage::registry::Registry;
@@ -366,6 +373,24 @@ fn clone_modified_db(source: &Reg, all_keys: &[Vec<Key>], db_index: usize, count
         .expect("Settling the modifications should succeed")
 }
 
+/// Leave the repository holding the prepopulated snapshot and nothing else.
+///
+/// Reporting a failure rather than raising it: the measurements are already taken by the time this
+/// runs, and a directory that could not be tidied is a problem for the next run, not this one.
+fn retain_snapshot_only(repo: &DirectoryManager, repo_path: &Path, snapshot: CommitId) {
+    match retain_only(repo, repo_path, &[snapshot]) {
+        Ok(removed) if removed.total() > 0 => eprintln!(
+            "Removed {} commit(s) the prepopulated snapshot does not need.",
+            removed.total()
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!(
+            "Warning: could not remove the commits in {}: {error:#}",
+            repo_path.display()
+        ),
+    }
+}
+
 fn database_lifecycle_benchmark(c: &mut Criterion) {
     let database_count = env_usize("REGISTRY_DATABASE_COUNT", REGISTRY_DATABASE_COUNT);
     let node_keys_count = env_usize("PREPOPULATED_NODE_KEYS_COUNT", PREPOPULATED_NODE_KEYS_COUNT);
@@ -387,6 +412,17 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
         (None, Some(tmp)) => tmp.path().to_path_buf(),
         (None, None) => unreachable!("tmpdir is Some whenever registry_dir is None"),
     };
+    // A persistent directory keeps whatever an interrupted run left in it, and a temporary
+    // database is a checkpoint clone of a whole database. Nothing is open on the directory yet, so
+    // anything still in there belongs to a run that is over; the directory manager recreates it.
+    if registry_dir.is_some() {
+        let temporary = repo_path.join("databases").join("temporary");
+        if temporary.exists() {
+            std::fs::remove_dir_all(&temporary)
+                .expect("Removing the temporary databases of earlier runs should succeed");
+        }
+    }
+
     let repo = DirectoryManager::new(&repo_path).expect("Failed to create directory manager");
 
     // One large source registry, reused (by cloning) as the starting point for
@@ -413,6 +449,13 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
             (source, all_keys, commit)
         }
     };
+
+    // Whatever else is in a reused directory came from an earlier run, and the commit scenarios
+    // below are about to add to it. Clearing it first means a reused directory holds what a freshly
+    // populated one would, so the scenarios measure the same thing either way.
+    if registry_dir.is_some() {
+        retain_snapshot_only(&repo, &repo_path, snapshot_commit);
+    }
 
     let mut group = c.benchmark_group("Registry lifecycle");
 
@@ -630,6 +673,14 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
     });
 
     group.finish();
+
+    // The commit scenarios have written a checkpoint per iteration, and the clones have left
+    // temporary databases the registry removes as it drops. Dropping the source registry first
+    // releases those; removing the checkpoints leaves the directory as the next run wants it.
+    if registry_dir.is_some() {
+        drop(source);
+        retain_snapshot_only(&repo, &repo_path, snapshot_commit);
+    }
 }
 
 criterion_group! {
