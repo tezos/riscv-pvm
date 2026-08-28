@@ -5,7 +5,7 @@
 //! Collection at directory granularity, and what it frees.
 //!
 //! At this granularity collection is no more than the removal of every commit directory that no
-//! retained root reaches. What survives it is the point — see [`prune_unreachable`].
+//! retained root reaches. What survives it is the point — see [`retain_only`].
 
 use std::collections::HashSet;
 use std::fs;
@@ -22,18 +22,21 @@ use super::scenario::Reg;
 use crate::commit::CommitId;
 use crate::repo::DirectoryManager;
 
-/// Delete every commit not reachable from `retained`, and report what that frees.
+/// Delete every commit not reachable from `retained`.
 ///
-/// This is collection at directory granularity: the reachable database commits are read from the
-/// retained registry manifest, and every other commit directory and manifest is removed. Blocks
-/// come back only where no surviving link remains, which is exactly the point — the dead node data
-/// inside the retained commit survives this untouched, because the retained commit still needs the
-/// files holding it.
-pub(super) fn prune_unreachable(
+/// The reachable database commits are read from the retained registry manifests, and every other
+/// commit directory and manifest is removed. Blocks come back only where no surviving link
+/// remains, which is exactly the point — the dead node data inside a retained commit survives this
+/// untouched, because the retained commit still needs the files holding it.
+///
+/// Two callers want this for opposite reasons. Collection wants to know what it frees; a run over
+/// a reused repository wants the commits earlier runs left to be gone before it starts, so that
+/// what it measures does not depend on what ran before it.
+pub fn retain_only(
     repo: &DirectoryManager,
     repo_path: &Path,
     retained: &[CommitId],
-) -> Result<PruneOutcome> {
+) -> Result<Removed> {
     let mut reachable: HashSet<CommitId> = HashSet::new();
 
     for commit in retained {
@@ -42,10 +45,7 @@ pub(super) fn prune_unreachable(
         );
     }
 
-    let mut outcome = PruneOutcome {
-        before: disk_usage(repo_path).context("measuring usage before pruning")?,
-        ..PruneOutcome::default()
-    };
+    let mut removed = Removed::default();
 
     let commits_dir = repo_path.join("databases").join("commits");
     let entries =
@@ -74,7 +74,7 @@ pub(super) fn prune_unreachable(
 
         fs::remove_dir_all(entry.path())
             .with_context(|| format!("removing {}", entry.path().display()))?;
-        outcome.databases_removed += 1;
+        removed.databases += 1;
     }
 
     let registries_dir = repo_path.join("registries").join("commits");
@@ -93,14 +93,46 @@ pub(super) fn prune_unreachable(
 
         fs::remove_file(entry.path())
             .with_context(|| format!("removing {}", entry.path().display()))?;
-        outcome.registries_removed += 1;
+        removed.registries += 1;
     }
 
-    outcome.after = disk_usage(repo_path).context("measuring usage after pruning")?;
-    outcome.after_commits =
-        commits_disk_usage(repo_path).context("measuring committed history after pruning")?;
+    Ok(removed)
+}
 
-    Ok(outcome)
+/// What a collection removed.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Removed {
+    /// Database commit directories removed.
+    pub databases: u64,
+
+    /// Registry manifests removed.
+    pub registries: u64,
+}
+
+impl Removed {
+    /// Commits removed in total, database directories and registry manifests together.
+    pub fn total(&self) -> u64 {
+        self.databases + self.registries
+    }
+}
+
+/// Delete every commit not reachable from `retained`, and report what that frees.
+pub(super) fn prune_unreachable(
+    repo: &DirectoryManager,
+    repo_path: &Path,
+    retained: &[CommitId],
+) -> Result<PruneOutcome> {
+    let before = disk_usage(repo_path).context("measuring usage before pruning")?;
+    let removed = retain_only(repo, repo_path, retained)?;
+
+    Ok(PruneOutcome {
+        before,
+        after: disk_usage(repo_path).context("measuring usage after pruning")?,
+        after_commits: commits_disk_usage(repo_path)
+            .context("measuring committed history after pruning")?,
+        databases_removed: removed.databases,
+        registries_removed: removed.registries,
+    })
 }
 
 /// What a simulated directory-level collection removed and freed.

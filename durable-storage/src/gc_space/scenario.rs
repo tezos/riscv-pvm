@@ -15,6 +15,7 @@ use std::io::BufWriter;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::slice;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -32,6 +33,7 @@ use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 
 use super::measure::measure;
 use super::prune::prune_unreachable;
+use super::prune::retain_only;
 use super::report::record;
 use super::report::report;
 use super::report::report_header;
@@ -363,60 +365,14 @@ fn reset_to_base(
     repo_path: &Path,
     base: &CommitId,
 ) -> Result<()> {
-    let reachable =
-        Reg::database_commits(repo, base).context("reading the base state's registry manifest")?;
+    let removed = retain_only(repo, repo_path, slice::from_ref(base))
+        .context("resetting the repository to the base state")?;
 
-    let mut removed = 0;
-
-    let commits_dir = repo_path.join("databases").join("commits");
-    let entries =
-        fs::read_dir(&commits_dir).with_context(|| format!("reading {}", commits_dir.display()))?;
-
-    for entry in entries {
-        let entry =
-            entry.with_context(|| format!("reading an entry of {}", commits_dir.display()))?;
-
-        // A commit is a directory, and `remove_dir_all` would fail on anything else.
-        if !entry
-            .file_type()
-            .with_context(|| format!("reading the type of {}", entry.path().display()))?
-            .is_dir()
-        {
-            continue;
-        }
-
-        let name = entry.file_name().to_string_lossy().into_owned();
-
-        if reachable.iter().any(|commit| commit.hex_encode() == name) {
-            continue;
-        }
-
-        fs::remove_dir_all(entry.path())
-            .with_context(|| format!("removing {}", entry.path().display()))?;
-        removed += 1;
-    }
-
-    let registries_dir = repo_path.join("registries").join("commits");
-    let entries = fs::read_dir(&registries_dir)
-        .with_context(|| format!("reading {}", registries_dir.display()))?;
-
-    for entry in entries {
-        let entry =
-            entry.with_context(|| format!("reading an entry of {}", registries_dir.display()))?;
-
-        if entry.file_name().to_string_lossy() == base.hex_encode() {
-            continue;
-        }
-
-        fs::remove_file(entry.path())
-            .with_context(|| format!("removing {}", entry.path().display()))?;
-        removed += 1;
-    }
-
-    if removed > 0 {
+    if removed.total() > 0 {
         writeln!(
             out,
-            "removed {removed} commit(s) left by earlier runs, resetting to the base state"
+            "removed {} commit(s) left by earlier runs, resetting to the base state",
+            removed.total()
         )?;
     }
 
