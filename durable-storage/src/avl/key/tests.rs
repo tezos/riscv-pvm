@@ -4,6 +4,10 @@
 
 //! Tests for [`NodeKey`]
 
+use std::cmp::Ordering;
+
+use octez_riscv_data::codec::Bincode;
+use octez_riscv_data::codec::LeafEncode;
 use octez_riscv_data::hash::Hash;
 use octez_riscv_data::hash::PartialHash;
 use octez_riscv_data::merkle_proof::FromProof;
@@ -16,6 +20,7 @@ use proptest::prelude::*;
 
 use super::NodeKey;
 use super::NodeKeyMode;
+use crate::key::KEY_MAX_SIZE;
 use crate::key::Key;
 
 mode_test!(new_equal, F: NodeKeyMode, {
@@ -134,22 +139,107 @@ fn verify_absent() {
     assert_eq!(cmp_value, None);
 }
 
-/// Test pinning NodeKey initial behaviour onto the same behaviour
-/// as Atom<Key>
+/// A blinded key still answers equality, in both directions, by hashing the key it is
+/// compared against.
 #[test]
-fn verify_blinded() {
-    let key = Key::new(&[1; 42]).unwrap();
-    let hash = Hash::hash_encodable(&key).unwrap();
+fn verify_blinded_eq() {
+    proptest!(|(key: Key, other: Key)| {
+        let node_key = blinded_node_key(&key);
 
-    let proof = MerkleProof::leaf_blind(hash);
+        prop_assert_eq!(catch_not_found(|| node_key.eq(&key)).ok(), Some(true));
+        prop_assert_eq!(
+            catch_not_found(|| node_key.eq(&other)).ok(),
+            Some(key == other)
+        );
+    });
+}
 
-    let node_key = NodeKey::from_proof(ProofTree::present(&proof))
-        .expect("Should create absent NodeKey")
+/// A blinded key can settle the [`Ordering::Equal`] case of a comparison, but not the
+/// orderings that need the key bytes.
+#[test]
+fn verify_blinded_cmp() {
+    proptest!(|(key: Key, other: Key)| {
+        let node_key = blinded_node_key(&key);
+
+        prop_assert_eq!(
+            catch_not_found(|| node_key.cmp(&key)).ok(),
+            Some(Ordering::Equal)
+        );
+        prop_assert_eq!(
+            catch_not_found(|| node_key.cmp(&other)).ok(),
+            (key == other).then_some(Ordering::Equal)
+        );
+    });
+}
+
+/// A key that was only ever compared for equality is blinded in the proof, and remains
+/// usable for equality on the verifying side.
+#[test]
+fn eq_blinds_the_key_in_the_proof() {
+    let key = Key::new(&[1; KEY_MAX_SIZE]).unwrap();
+    let other = Key::new(&[2; KEY_MAX_SIZE]).unwrap();
+
+    let key_normal = NodeKey::new(key.clone());
+
+    let key_prove = key_normal.start_proof();
+    assert!(!key_prove.eq(&other));
+
+    let merkle_proof = MerkleProof::from_foldable(&key_prove);
+
+    // The proof is the hash the key folds to and nothing else.
+    assert_eq!(
+        merkle_proof,
+        MerkleProof::leaf_blind(Hash::from_foldable(&key_normal))
+    );
+
+    let key_verify = NodeKey::from_proof(ProofTree::present(&merkle_proof))
+        .expect("from_proof should succeed")
         .into_result();
 
-    let eq_value = catch_not_found(|| node_key.eq(&key)).ok();
-    assert_eq!(eq_value, None);
+    assert_eq!(catch_not_found(|| key_verify.eq(&other)).ok(), Some(false));
+    assert_eq!(catch_not_found(|| key_verify.eq(&key)).ok(), Some(true));
+}
 
-    let cmp_value = catch_not_found(|| node_key.cmp(&key)).ok();
-    assert_eq!(cmp_value, None);
+/// A comparison that had to look at the key bytes keeps the key in the proof.
+#[test]
+fn unequal_cmp_keeps_the_key_in_the_proof() {
+    proptest!(|(
+        (key, other) in (any::<Key>(), any::<Key>())
+        .prop_filter("An ordering is only decided by the bytes for different keys", |(lhs, rhs)| lhs != rhs)
+    )| {
+        let expected = key.cmp(&other);
+
+        let key_normal = NodeKey::new(key.clone());
+
+        let key_prove = key_normal.start_proof();
+        prop_assert_eq!(key_prove.cmp(&other), expected);
+
+        let merkle_proof = MerkleProof::from_foldable(&key_prove);
+
+        // The proof carries the key's leaf, in full: an ordering is not re-checkable
+        // against the hash the blinded key would leave behind.
+        let leaf = <Key as LeafEncode<Bincode>>::leaf_encode(&key)
+            .expect("Encoding the key's leaf should succeed");
+        prop_assert_eq!(&merkle_proof, &MerkleProof::leaf_read(leaf));
+
+        let key_verify = NodeKey::from_proof(ProofTree::present(&merkle_proof))
+            .expect("from_proof should succeed")
+            .into_result();
+
+        prop_assert_eq!(
+            catch_not_found(|| key_verify.cmp(&other)).ok(),
+            Some(expected)
+        );
+    });
+}
+
+/// Build a [`NodeKey`] in [`Verify`] mode whose key is blinded.
+///
+/// [`Verify`]: octez_riscv_data::mode::Verify
+fn blinded_node_key(key: &Key) -> NodeKey<octez_riscv_data::mode::Verify> {
+    let proof = MerkleProof::leaf_blind(Hash::hash_encodable(key).unwrap());
+
+    NodeKey::from_proof(ProofTree::present(&proof))
+        .expect("Should create blinded NodeKey")
+        .into_result()
 }
