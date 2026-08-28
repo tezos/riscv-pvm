@@ -35,35 +35,18 @@ const PAGE_LEAF_SIZE: usize = 1 + 1 + PAGE_SIZE;
 /// Serialised size of a key's length leaf: a tag byte and the length.
 const LENGTH_LEAF_SIZE: usize = 1 + 1;
 
-/// Serialised size of the proof leaf holding a [`KEY_MAX_SIZE`] key's last page. It is the
-/// only page of that key that is not full, as [`KEY_MAX_SIZE`] is not a multiple of
-/// [`PAGE_SIZE`].
-const LAST_PAGE_LEAF_SIZE: usize = 1 + 1 + KEY_MAX_SIZE % PAGE_SIZE;
-
-/// Serialised size of a proof for the cheapest ordering of two [`KEY_MAX_SIZE`] keys: they
-/// differ in their first page, so the pages after it are never compared and the subtree
-/// holding them blinds away.
-const BEST_CASE_CMP_PROOF_SIZE: usize = 1
+/// Serialised size of a proof for an ordering of two [`KEY_MAX_SIZE`] keys that differ in a
+/// full page. What the ordering costs is set by the page tree's depth, which is the same
+/// wherever the keys diverge, so this is what any ordering of two such keys costs - bar the
+/// last page of a [`KEY_MAX_SIZE`] key, which is short of a full page and so can only be
+/// cheaper.
+const CMP_PROOF_SIZE: usize = 1
     + LENGTH_LEAF_SIZE
-    // The page tree's root, the subtree holding the untouched second half, and the
-    // revealed page beside the blinded page it shares a parent with.
+    // The page tree's root, the subtree spanning the pages the comparison does not reach,
+    // and the revealed page beside the blinded page it shares a parent with.
     + 1
     + BLIND_LEAF_SIZE
     + (1 + PAGE_LEAF_SIZE + BLIND_LEAF_SIZE);
-
-/// Serialised size of a proof for the dearest ordering of two [`KEY_MAX_SIZE`] keys: they
-/// differ in the last page, so every page before it costs a hash to prove equal.
-///
-/// The page tree is symmetric, so this is dearer than the best case only because of which
-/// pages are blinded and how: the pages after a divergence are never compared, so the
-/// subtree spanning them blinds as one, whereas the pages before it are blinded one at a
-/// time. Blinding those as subtrees too would leave what an ordering costs the same
-/// wherever the keys diverge.
-const WORST_CASE_CMP_PROOF_SIZE: usize = 1
-    + LENGTH_LEAF_SIZE
-    + 1
-    + (1 + 2 * BLIND_LEAF_SIZE)
-    + (1 + BLIND_LEAF_SIZE + LAST_PAGE_LEAF_SIZE);
 
 mode_test!(new_equal, F: NodeKeyMode, {
     proptest!(|(key: Key)| {
@@ -259,33 +242,28 @@ fn cmp_reveals_only_the_diverging_page() {
         assert_eq!(node_key.cmp(&other), Ordering::Less);
     });
 
-    assert_eq!(proof_size(&merkle_proof), BEST_CASE_CMP_PROOF_SIZE);
+    assert_eq!(proof_size(&merkle_proof), CMP_PROOF_SIZE);
     assert_eq!(
         catch_not_found(|| key_verify.cmp(&other)).ok(),
         Some(Ordering::Less)
     );
 }
 
-/// Diverging in the last page is the worst a comparison can cost: every page before it
-/// has to be proven equal, which is a hash each.
+/// Diverging in the last page means every page before it has to be proven equal - but they
+/// are proven together, against the subtrees spanning them, which costs the same as the
+/// single subtree an early divergence leaves untouched. The last page is therefore never the
+/// dearest page to diverge in.
 #[test]
-fn cmp_diverging_late_proves_the_earlier_pages_by_hash() {
-    let mut bytes = [1; KEY_MAX_SIZE];
-    let key = Key::new(&bytes).unwrap();
+fn cmp_diverging_late_proves_the_earlier_pages_as_subtrees() {
+    let pages = KEY_MAX_SIZE.div_ceil(PAGE_SIZE);
+    let last = divergence_proof_size(pages - 1);
 
-    bytes[KEY_MAX_SIZE - 1] = 2;
-    let other = Key::new(&bytes).unwrap();
-
-    let (merkle_proof, key_verify) = prove(&key, |node_key| {
-        assert_eq!(node_key.cmp(&other), Ordering::Less);
-    });
-
-    // Still far short of the 257 bytes the whole key would take.
-    assert_eq!(proof_size(&merkle_proof), WORST_CASE_CMP_PROOF_SIZE);
-    assert_eq!(
-        catch_not_found(|| key_verify.cmp(&other)).ok(),
-        Some(Ordering::Less)
-    );
+    for page in 0..pages - 1 {
+        assert!(
+            last <= divergence_proof_size(page),
+            "diverging in the last page should cost no more than diverging in page {page}"
+        );
+    }
 }
 
 /// A key that is a prefix of the key it is compared against agrees on every page they
@@ -310,10 +288,10 @@ fn cmp_of_a_prefix_is_decided_by_length() {
     );
 }
 
-/// The comparison a proof was generated for is the only one it has to answer. A key that
-/// diverges from this one in a page the proof left out cannot be compared against it at
-/// all - not even for equality - and that is a missing-state failure rather than a wrong
-/// answer.
+/// The comparison a proof was generated for is the only one it has to order. A key that
+/// diverges from this one in a page the proof blinded away can still be told apart from
+/// it - the blinded subtree's hash settles that much - but ordering the two needs the page
+/// itself, which is a missing-state failure rather than a wrong answer.
 #[test]
 fn cmp_against_an_unproven_key_is_not_found() {
     let key = Key::new(&[1; KEY_MAX_SIZE]).unwrap();
@@ -327,10 +305,74 @@ fn cmp_against_an_unproven_key_is_not_found() {
         assert_eq!(node_key.cmp(&other), Ordering::Less);
     });
 
-    // The two keys agree on every page the proof carries and differ only in one it
-    // omitted, so neither comparison can be settled.
     assert_eq!(catch_not_found(|| key_verify.cmp(&unproven)).ok(), None);
-    assert_eq!(catch_not_found(|| key_verify.eq(&unproven)).ok(), None);
+    assert_eq!(
+        catch_not_found(|| key_verify.eq(&unproven)).ok(),
+        Some(false)
+    );
+}
+
+/// Keys sharing a prefix are what page-wise comparison exists for: arbitrary keys almost
+/// always differ in their first page, which never exercises proving the pages before the
+/// divergence equal.
+#[test]
+fn cmp_of_keys_sharing_a_prefix_verifies_from_the_blinded_pages() {
+    proptest!(|(
+        shared in prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE),
+        lhs_tail in prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE),
+        rhs_tail in prop::collection::vec(any::<u8>(), 0..=KEY_MAX_SIZE),
+    )| {
+        let extend = |tail: &[u8]| {
+            let mut bytes = shared.clone();
+            bytes.extend_from_slice(tail);
+            bytes.truncate(KEY_MAX_SIZE);
+
+            Key::new(&bytes).expect("Bytes within KEY_MAX_SIZE are a valid key")
+        };
+
+        let key = extend(&lhs_tail);
+        let other = extend(&rhs_tail);
+        let expected = key.cmp(&other);
+
+        let (_, key_verify) = prove(&key, |node_key| {
+            assert_eq!(node_key.cmp(&other), expected);
+        });
+
+        prop_assert_eq!(
+            catch_not_found(|| key_verify.cmp(&other)).ok(),
+            Some(expected)
+        );
+    });
+}
+
+/// An equality check is settled against the hash of the key as a whole - but an ordering
+/// in the same proof puts the key's tree there instead, and that hash with it. The
+/// equality then has to be answered from the tree, against a key whose pages run out
+/// before the blinded chunk spanning the rest does.
+#[test]
+fn eq_still_answers_once_an_ordering_has_opened_the_key() {
+    let key = Key::new(&[1; KEY_MAX_SIZE]).unwrap();
+
+    // Shorter than `key`, and a whole number of pages, so it shares every page it has.
+    let shorter = Key::new(&[1; 3 * PAGE_SIZE]).unwrap();
+
+    let mut bytes = [1; KEY_MAX_SIZE];
+    bytes[0] = 2;
+    let ordered = Key::new(&bytes).unwrap();
+
+    let (_, key_verify) = prove(&key, |node_key| {
+        assert!(!node_key.eq(&shorter));
+        assert_eq!(node_key.cmp(&ordered), Ordering::Less);
+    });
+
+    assert_eq!(
+        catch_not_found(|| key_verify.eq(&shorter)).ok(),
+        Some(false)
+    );
+    assert_eq!(
+        catch_not_found(|| key_verify.cmp(&ordered)).ok(),
+        Some(Ordering::Less)
+    );
 }
 
 /// Generate a proof for the comparisons `compare` makes against `key`, and reconstruct
@@ -360,6 +402,27 @@ fn prove(
     );
 
     (merkle_proof, key_verify)
+}
+
+/// Prove an ordering of two [`KEY_MAX_SIZE`] keys that first differ in `page`, check that
+/// the verifier orders them the same way, and give back the size of the proof it did so
+/// against.
+fn divergence_proof_size(page: usize) -> usize {
+    let mut bytes = [1; KEY_MAX_SIZE];
+    let key = Key::new(&bytes).unwrap();
+
+    bytes[page * PAGE_SIZE] = 2;
+    let other = Key::new(&bytes).unwrap();
+
+    let (merkle_proof, key_verify) = prove(&key, |node_key| {
+        assert_eq!(node_key.cmp(&other), Ordering::Less);
+    });
+    assert_eq!(
+        catch_not_found(|| key_verify.cmp(&other)).ok(),
+        Some(Ordering::Less)
+    );
+
+    proof_size(&merkle_proof)
 }
 
 /// The serialised size of a proof.
