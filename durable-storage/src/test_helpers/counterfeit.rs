@@ -145,7 +145,6 @@ mod tests {
     use crate::test_helpers::proof_size::TAG_BYTES;
     use crate::test_helpers::proof_size::TREE_WRAP;
     use crate::test_helpers::proof_size::avl_path_node;
-    use crate::test_helpers::proof_size::blinded_key_leaf;
 
     /// Every key in these tests is [`COUNTERFEIT_KEY_LEN`] bytes, to make the size of the
     /// generated proofs predictable.
@@ -186,13 +185,10 @@ mod tests {
     /// path skips; this node blinds both of its children, which are empty. `Node::get` returns
     /// as soon as the keys compare equal, so neither child is ever resolved and both are
     /// emitted as hashes rather than as present-but-empty subtrees. That same equal comparison
-    /// is one the verifier can redo against the key's hash, so this node's key is blinded too
-    /// rather than read.
-    const COUNTERFEIT_TARGET_NODE: usize = TREE_WRAP
-        + TAG_BYTES
-        + BALANCE_FACTOR_LEAF
-        + blinded_key_leaf(COUNTERFEIT_KEY_LEN)
-        + 2 * BLIND_LEAF;
+    /// is one the verifier can redo against the hash of the key as a whole, so this node's key
+    /// is blinded too rather than paged into the proof.
+    const COUNTERFEIT_TARGET_NODE: usize =
+        TREE_WRAP + TAG_BYTES + BALANCE_FACTOR_LEAF + 3 * BLIND_LEAF;
 
     /// The target node's value, opened by the read rather than blinded.
     ///
