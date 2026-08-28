@@ -1,6 +1,18 @@
 name: Durable Storage Latency Benchmark
 
 on:
+  # A run reserves the reference machine for its duration, and the machine is shared with the
+  # Benchmark workflow, so a pull request asks for one with the `durable-bench-trigger` label
+  # rather than getting one for free. The label stays on: a pull request that has asked once is
+  # measured again on every push, which is what makes it useful while a change is being worked on.
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - labeled
+
   push:
     branches: [main]
 
@@ -18,8 +30,24 @@ jobs:
     name: Durable Storage Latency Benchmark
     runs-on: ubuntu-latest
 
-    # The reference machine does the work; this job only drives it. Prepopulating the databases
-    # dominates the run.
+    # Three conditions on a pull request, and none of them on anything else. It must carry the
+    # label; the label must be the one just added, if a label was what triggered this, or adding
+    # any unrelated label would queue a second run of the same revision; and it must come from a
+    # branch of this repository, because a fork is given no secrets and so cannot reach the
+    # reference machine at all.
+    if: >-
+      github.event_name != 'pull_request'
+      || (contains(github.event.pull_request.labels.*.name, 'durable-bench-trigger')
+      && (github.event.action != 'labeled' || github.event.label.name == 'durable-bench-trigger')
+      && github.event.pull_request.head.repo.full_name == github.repository)
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # The reference machine does the work; this job only drives it. A revision that changes how
+    # durable storage is stored builds its own prepopulated registry, which dominates the run;
+    # every other revision reuses the one already on the machine.
     timeout-minutes: 180
 
     steps:
@@ -38,7 +66,28 @@ jobs:
         run: |
           scp scripts/ci-durable-bench.sh ${{ secrets.BENCH_HOST }}:durable-bench-${{ github.run_id }}.sh
 
-          ssh ${{ secrets.BENCH_HOST }} ./durable-bench-${{ github.run_id }}.sh -r "${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          # Kept as a file as well as written to the summary, because the summary is a different
+          # file in every step and the comment below is composed in another one.
+          ssh ${{ secrets.BENCH_HOST }} ./durable-bench-${{ github.run_id }}.sh -r "${{ github.ref }}" | tee latencies.md >> $GITHUB_STEP_SUMMARY
 
           # Delete the benchmark script if the job succeeded, otherwise keep it for investigation
           ssh ${{ secrets.BENCH_HOST }} rm ./durable-bench-${{ github.run_id }}.sh
+
+      - name: Compose the report
+        if: github.event_name == 'pull_request'
+        run: |
+          {
+            echo "Registry lifecycle latencies for revision ${{ github.sha }}, measured on the"
+            echo "reference machine. The scale lives in durable-storage/Makefile."
+            echo
+            cat latencies.md
+            echo
+            echo "Compare these with [those for the default branch](${{ github.server_url }}/${{ github.repository }}/actions/workflows/durable-bench.yml?query=branch%3Amain), measured on the same machine at the same scale."
+          } > pr-comment.md
+
+      - name: Comment results on PR
+        if: github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@v3.0.1
+        with:
+          file-path: pr-comment.md
+          comment-tag: durable-bench-result
