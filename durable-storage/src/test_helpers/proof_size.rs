@@ -83,13 +83,30 @@ pub(crate) const fn key_leaf(key_len: usize) -> usize {
     TAG_BYTES + 1 + key_len
 }
 
+/// A node's [`Key`] where the search stopped on it: the comparison came out
+/// equal, and the verifier can redo an equality check against the key's hash, so
+/// the key is blinded rather than read.
+///
+/// `MerkleProof::blind` leaves a leaf shorter than a hash inlined instead of
+/// replacing it, so short keys still cost their [`key_leaf`] encoding.
+///
+/// [`Key`]: crate::key::Key
+pub(crate) const fn blinded_key_leaf(key_len: usize) -> usize {
+    let read = key_leaf(key_len);
+
+    if read < BLIND_LEAF { read } else { BLIND_LEAF }
+}
+
 /// An accessed node on the search path: tree wrapper, node tag, balance factor
 /// and key leaves, blinded data and one blinded sibling subtree. The balance
 /// factor is shorter than a hash so it is always included directly. The key is
-/// also always included in full, never blinded: generating the proof reads
-/// every accessed node's key. The subtree the path continues into is charged
-/// by its own level; the terminal node's second child is charged
-/// via [`terminal_blind`].
+/// charged in full: steering the traversal past a node compares its key against
+/// a different key, which needs the key bytes. Only the node the search stops on
+/// compares equal, and so blinds its key; a path holds at most one such node, so
+/// [`database_operation_proof_size_bound`] refunds the difference once rather
+/// than this charging for it. The subtree the path continues into is charged by
+/// its own level; the terminal node's second child is charged via
+/// [`terminal_blind`].
 ///
 /// An operation that opens the value subtree refunds the blinded-data charge
 /// of the terminal node, which [`value_open`] then charges in full.
@@ -365,6 +382,15 @@ pub(crate) fn database_operation_proof_size_bound(
             cost += rotations * 2 * avl_extra_node();
         }
         _ => cost += avl_search_path(depth),
+    }
+
+    // The node the search stops on compared equal, and the verifier can redo an
+    // equality check against the key's hash, so that node's key is blinded
+    // rather than read. Every other node on the path was compared against a
+    // different key, and is charged in full by [`avl_search_path`]. `exists`
+    // implies a non-empty tree, so the path has a terminal node.
+    if exists {
+        cost -= key_leaf(KEY_MAX_SIZE) - blinded_key_leaf(KEY_MAX_SIZE);
     }
 
     // Only operations that open the value subtree pay for it. `Delete`

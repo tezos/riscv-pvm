@@ -7,6 +7,13 @@
 //! Specifically, this contains an optimised [`PartialOrd`] representation -
 //! that compares by hashes as much as possible (in [`Prove`] and [`Verify`] modes).
 //!
+//! A key's leaf encoding is length-prefixed, and therefore injective: two keys hash
+//! to the same leaf hash exactly when they are the same key. Equality can therefore be
+//! settled against a *blinded* key, and so can the [`Ordering::Equal`] case of a
+//! comparison - which is the case every exact-match lookup ends on. Only a comparison
+//! that must return [`Ordering::Less`] or [`Ordering::Greater`] needs the key bytes
+//! themselves in the proof.
+//!
 //! [`PartialOrd`]: std::cmp::PartialOrd
 
 use std::cell::Cell;
@@ -72,9 +79,10 @@ impl<M: NodeKeyMode> NodeKey<M> {
 }
 
 impl<'normal> NodeKey<Prove<'normal>> {
-    /// Was the value accessed (read or written) during proof generation?
-    fn was_accessed(&self) -> bool {
-        self.key.read.get()
+    /// How the key was accessed during proof generation - this does not itself
+    /// count as an access.
+    fn accessed(&self) -> KeyAccess {
+        self.key.access.get()
     }
 
     /// Compare `Self` against a plain [`Key`] - without recording the access.
@@ -108,7 +116,7 @@ impl NodeKey<Normal> {
         NodeKey {
             key: ProveImpl {
                 inner: Source::Owned(Box::new(self.key)),
-                read: Cell::new(false),
+                access: Cell::new(KeyAccess::None),
             },
         }
     }
@@ -127,7 +135,7 @@ impl<'normal> Provable<'normal> for NodeKey<Normal> {
         NodeKey {
             key: ProveImpl {
                 inner: Source::Borrowed(&self.key),
-                read: Cell::new(false),
+                access: Cell::new(KeyAccess::None),
             },
         }
     }
@@ -163,12 +171,13 @@ where
         let data = <Key as LeafEncode<C>>::leaf_encode(self.key.inner.deref())
             .expect("Serialisation should not fail");
 
-        // Determine whether the value has been read or written during proof generation. If so, we
-        // must keep it in the Merkle tree (not blind it).
-        let constraint = if self.was_accessed() {
-            MinimumPresence::Present
-        } else {
-            MinimumPresence::MayOmit
+        // How much of the key the proof must retain depends on how it was accessed during proof
+        // generation: a comparison that was settled by hash alone is re-checkable against the
+        // blinded key, whereas one that needed the ordering of two different keys is not.
+        let constraint = match self.accessed() {
+            KeyAccess::None => MinimumPresence::MayOmit,
+            KeyAccess::Hashed => MinimumPresence::MayBlind,
+            KeyAccess::Read => MinimumPresence::Present,
         };
 
         builder.into_leaf(constraint, data)
@@ -180,10 +189,10 @@ where
     Key: LeafEncode<C>,
 {
     fn fold(&self, builder: PartialHashFold<C>) -> <PartialHashFold<C> as Fold>::Folded {
-        let hash = match &self.key.inner {
-            Partial::Absent => return builder.previous(),
-            Partial::Blinded(hash) => *hash,
-            Partial::Present(value) => {
+        let hash = match &self.key {
+            VerifyImpl::Absent => return builder.previous(),
+            VerifyImpl::Blinded { hash, .. } => *hash,
+            VerifyImpl::Present(value) => {
                 Hash::hash_leaf::<C, _>(value).expect("Hashing should not fail")
             }
         };
@@ -194,12 +203,13 @@ where
 
 impl<C: LeafCodec> FromProof<C> for NodeKey<Verify>
 where
-    Key: LeafDecode<C>,
+    Key: LeafDecode<C> + LeafEncode<C>,
 {
     fn from_proof<Proof: Deserialiser<Codec = C>>(proof: Proof) -> SuspendedResult<Proof, Self> {
-        let result = proof.into_leaf()?.map(|key| NodeKey {
-            key: VerifyImpl { inner: key },
-        });
+        let result = proof
+            .into_leaf()?
+            .map(VerifyImpl::new::<C>)
+            .map(|key| NodeKey { key });
 
         Ok(result)
     }
@@ -282,10 +292,34 @@ impl private::NodeKeyImpl for Normal {
     }
 }
 
+/// How much of a [`NodeKey`] a proof must contain, given how it was accessed during proof
+/// generation.
+///
+/// The variants are ordered by how much they reveal, so that repeated accesses to the same
+/// key can be accumulated with [`Ord::max`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum KeyAccess {
+    /// The key was never looked at, and may be omitted from the proof entirely.
+    None,
+
+    /// The key was only compared by hash, so the proof need only carry that hash.
+    Hashed,
+
+    /// The key's bytes were needed to justify an ordering, so the proof must carry them.
+    Read,
+}
+
 #[derive(Clone, Debug)]
 struct ProveImpl<'normal> {
     inner: Source<'normal, Key>,
-    read: Cell<bool>,
+    access: Cell<KeyAccess>,
+}
+
+impl<'normal> ProveImpl<'normal> {
+    /// Record an access to the key, keeping the most revealing one seen so far.
+    fn record(&self, access: KeyAccess) {
+        self.access.set(self.access.get().max(access));
+    }
 }
 
 impl<'normal> NodeKeyMode for Prove<'normal> {}
@@ -294,20 +328,31 @@ impl<'normal> private::NodeKeyImpl for Prove<'normal> {
     fn new(key: Key) -> NodeKey<Self> {
         let prove_impl = ProveImpl {
             inner: Source::owned(key),
-            read: Cell::new(false),
+            access: Cell::new(KeyAccess::None),
         };
 
         NodeKey { key: prove_impl }
     }
 
     fn eq(this: &NodeKey<Self>, rhs: &Key) -> bool {
-        this.key.read.set(true);
+        // The verifier settles equality by hashing `rhs` itself, so a blinded key suffices
+        // whichever way the comparison goes.
+        this.key.record(KeyAccess::Hashed);
         this.key.inner.eq(rhs)
     }
 
     fn cmp(this: &NodeKey<Self>, rhs: &Key) -> Ordering {
-        this.key.read.set(true);
-        this.key.inner.cmp(rhs)
+        let ordering = this.key.inner.cmp(rhs);
+
+        // An exact match is just an equality check, which the verifier can redo against the
+        // blinded key. Any other ordering has to be read off the key bytes themselves.
+        this.key.record(if ordering.is_eq() {
+            KeyAccess::Hashed
+        } else {
+            KeyAccess::Read
+        });
+
+        ordering
     }
 
     fn clone(this: &NodeKey<Self>) -> NodeKey<Self> {
@@ -317,41 +362,89 @@ impl<'normal> private::NodeKeyImpl for Prove<'normal> {
     }
 }
 
+/// Hashes a [`Key`] the way the proof's leaves were hashed.
+///
+/// Captured while deserialising a proof, where the [`LeafCodec`] is known, so that a blinded
+/// key can still be compared against a locally held [`Key`] later on.
+type HashKey = fn(&Key) -> Hash;
+
 #[derive(Clone, Debug)]
-struct VerifyImpl {
-    inner: Partial<Key>,
+enum VerifyImpl {
+    /// The key is missing from the proof entirely.
+    Absent,
+
+    /// Only the key's hash is in the proof.
+    Blinded {
+        /// Hash of the key's leaf encoding.
+        hash: Hash,
+
+        /// Hasher used to compare a locally held [`Key`] against `hash`.
+        hash_key: HashKey,
+    },
+
+    /// The key itself is in the proof.
+    Present(Key),
+}
+
+impl VerifyImpl {
+    /// Build the verify-mode representation from a deserialised proof leaf, remembering how to
+    /// hash a [`Key`] under the proof's codec.
+    fn new<C: LeafCodec>(key: Partial<Key>) -> Self
+    where
+        Key: LeafEncode<C>,
+    {
+        match key {
+            Partial::Absent => VerifyImpl::Absent,
+            Partial::Blinded(hash) => VerifyImpl::Blinded {
+                hash,
+                hash_key: |key| Hash::hash_leaf::<C, _>(key).expect("Hashing should not fail"),
+            },
+            Partial::Present(key) => VerifyImpl::Present(key),
+        }
+    }
+
+    /// Does this key equal `rhs`?
+    ///
+    /// Returns `None` when the proof does not contain enough to tell.
+    fn eq_key(&self, rhs: &Key) -> Option<bool> {
+        match self {
+            VerifyImpl::Absent => None,
+            // The leaf encoding is injective, so equal hashes mean equal keys.
+            VerifyImpl::Blinded { hash, hash_key } => Some(*hash == hash_key(rhs)),
+            VerifyImpl::Present(key) => Some(key == rhs),
+        }
+    }
 }
 
 impl NodeKeyMode for Verify {}
 
 impl private::NodeKeyImpl for Verify {
     fn new(key: Key) -> NodeKey<Self> {
-        let verify_impl = VerifyImpl {
-            inner: Partial::Present(key),
-        };
-
-        NodeKey { key: verify_impl }
+        NodeKey {
+            key: VerifyImpl::Present(key),
+        }
     }
 
     fn eq(this: &NodeKey<Self>, rhs: &Key) -> bool {
-        match &this.key.inner {
-            Partial::Absent | Partial::Blinded(_) => {
-                // SAFETY: `not_found` is safe to call because
-                //         we're in `Verify` mode.
-                unsafe { not_found() }
-            }
-            Partial::Present(key) => key.eq(rhs),
+        match this.key.eq_key(rhs) {
+            Some(equal) => equal,
+            // SAFETY: `not_found` is safe to call because
+            //         we're in `Verify` mode.
+            None => unsafe { not_found() },
         }
     }
 
     fn cmp(this: &NodeKey<Self>, rhs: &Key) -> Ordering {
-        match &this.key.inner {
-            Partial::Absent | Partial::Blinded(_) => {
+        match &this.key {
+            VerifyImpl::Present(key) => key.cmp(rhs),
+            // A blinded key can only settle equality. Any other ordering needs the key bytes,
+            // which the prover only omits when it did not need them either.
+            key => match key.eq_key(rhs) {
+                Some(true) => Ordering::Equal,
                 // SAFETY: `not_found` is safe to call because
                 //         we're in `Verify` mode.
-                unsafe { not_found() }
-            }
-            Partial::Present(key) => key.cmp(rhs),
+                Some(false) | None => unsafe { not_found() },
+            },
         }
     }
 
