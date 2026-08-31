@@ -1185,6 +1185,54 @@ pub(super) mod tests {
         registry.verify_manifest(&root_commit, &expected_db_hashes);
     });
 
+    kv_test!(#[ignore] test_mutating_a_copy_does_not_change_the_source_root, KV: BackgroundPersistentKeyValueStore, {
+        let keys =
+            [0u16, 1, 2].map(|i| Key::new(&i.to_be_bytes()).expect("Sizes less than KEY_MAX_SIZE"));
+
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo.clone());
+
+        // Setup: write values in db 0, then extend the registry and copy it to slot 2.
+        // Dbs 0 and 2 are identical.
+        for (i, key) in keys.iter().enumerate() {
+            registry.databases[0]
+                .set(key.clone(), Bytes::from(format!("value-{i}")))
+                .expect("Setting a key should succeed");
+        }
+        registry
+            .resize_tick(3)
+            .expect("Growing the registry should succeed.");
+        registry.copy_database(0, 2).expect("Copying should succeed");
+        assert_eq!(
+            registry.databases[0].hash().expect("Hashing should succeed"),
+            registry.databases[2].hash().expect("Hashing should succeed"),
+        );
+        let commit = registry.commit().expect("Commit should succeed");
+
+        let [lhs, root, rhs] = keys;
+
+        // Restart from checkout so nothing is resolved.
+        let mut registry =
+            Registry::<KV, Normal>::checkout(repo, commit).expect("Checkout should succeed");
+        registry.copy_database(0, 1).expect("Copying should succeed");
+        registry.databases[1]
+            .delete(root.clone())
+            .expect("Deleting from the copy should succeed");
+        for database in [0, 2] {
+            registry.databases[database]
+                .set(lhs.clone(), Bytes::from_static(b"written-in-the-source"))
+                .expect("Setting a key should succeed");
+        }
+        registry.databases[1]
+            .set(rhs.clone(), Bytes::from_static(b"only-in-the-copy"))
+            .expect("Setting in the copy should succeed");
+
+        assert_eq!(
+            registry.databases[0].hash().expect("Hashing should succeed"),
+            registry.databases[2].hash().expect("Hashing should succeed"),
+        );
+    });
+
     kv_test!(test_committing_identical_registry_succeeds, KV: BackgroundPersistentKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let mut registry = setup_registry::<KV>(repo);
