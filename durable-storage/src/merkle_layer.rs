@@ -1055,6 +1055,74 @@ mod tests {
         );
     }
 
+    // Reading a copy must not change the root the source commits to.
+    //
+    // The source and the copy share tree structure while each holds a store of its own, so
+    // resolving a shared identifier fills it from whichever store the resolving layer holds.
+    // Nothing is mutated, so copy-on-write never engages: a read on the copy is enough.
+    kv_test!(#[ignore] test_reading_a_copy_does_not_change_the_source_root, KV: PersistentKeyValueStore, {
+        use std::ops::Deref;
+
+        let keys =
+            [0u16, 1, 2].map(|i| Key::new(&i.to_be_bytes()).expect("Sizes less than KEY_MAX_SIZE"));
+
+        let (_keepalive, repo) = KV::setup_repo();
+
+        // Written to the store as well as the tree, and committed without node data, as
+        // `Database` uses the layer - so a node's value comes from the store, by key.
+        let persistence = Arc::new(KV::new(&repo).unwrap());
+        let mut merkle = MerkleLayer::new(persistence.clone());
+
+        for (i, key) in keys.iter().enumerate() {
+            let value = format!("value-{i}");
+            persistence.set(key, value.as_bytes()).unwrap();
+            merkle.set(key, value.as_bytes()).unwrap();
+        }
+
+        let store_options = super::StoreOptions::default().without_node_data();
+
+        let commit = merkle.commit(&store_options).unwrap();
+        persistence.commit(&repo, &commit).unwrap();
+
+        let [_, _, rhs] = keys;
+
+        // Two independent checkouts of that one commit: the source, and a twin to compare it to.
+        let persistence_0 = Arc::new(KV::checkout(&repo, &commit).unwrap());
+        let persistence_2 = Arc::new(KV::checkout(&repo, &commit).unwrap());
+
+        let merkle_0 = MerkleLayer::checkout(persistence_0.clone(), commit).unwrap();
+        let merkle_2 = MerkleLayer::checkout(persistence_2.clone(), commit).unwrap();
+
+        // The twin alone: hashing the source here would memoise its root hash in the node the
+        // copy shares, hiding the fault until something invalidated it.
+        assert_eq!(merkle_2.hash(), *commit.as_hash());
+
+        let persistence_1 = Arc::new(
+            WriteableKeyValueStore::try_clone(persistence_0.deref(), &repo).unwrap(),
+        );
+        let merkle_1 = merkle_0.clone_with(persistence_1.clone());
+
+        // The two stores now disagree at `rhs`.
+        persistence_1.set(&rhs, b"only-in-the-copy").unwrap();
+
+        // The copy is never mutated: this is a read. Whether it succeeds or is refused is not
+        // what matters here - what matters is that it leaves the source alone.
+        let _ = merkle_1.get(&rhs);
+
+        // Checking the root alone is not enough: an identifier that still carries its committed
+        // hash folds by that hash, so the root can be right while the tree holds foreign bytes.
+        let value = merkle_0
+            .get(&rhs)
+            .expect("Reading the source should succeed")
+            .expect("The source holds a value at `rhs`");
+
+        let mut read = vec![0u8; value.len()];
+        value.read(0, &mut read);
+        assert_eq!(read.as_slice(), b"value-2");
+
+        assert_eq!(merkle_0.hash(), merkle_2.hash());
+    });
+
     kv_test!(test_mavl_cow, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
