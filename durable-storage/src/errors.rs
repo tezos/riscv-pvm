@@ -25,6 +25,15 @@ pub enum OperationalError {
     #[error("Commit is missing data for the value of key {key:?}")]
     CommitValueMissing { key: Key, source: Box<Error> },
 
+    #[error(
+        "Value loaded for key {key:?} hashes to {found:?}, but the node commits to {expected:?}"
+    )]
+    CommitValueMismatch {
+        key: Key,
+        expected: Hash,
+        found: Hash,
+    },
+
     #[cfg(rocksdb)]
     #[error("Unable to create checkpoint: {error}")]
     CheckpointCreationFailed { error: rocksdb::Error },
