@@ -406,6 +406,13 @@ impl StoreOptions {
     /// Turning this option on ensures the nodes are persisted completely. When using the
     /// [`crate::merkle_layer::MerkleLayer`] in isolation, this is necessary as there is no other
     /// component that will be writing the key-value data to the store.
+    ///
+    /// That completeness is bounded by what the layer holds: only the values it has actually
+    /// loaded are written. A value still held as the hash it was committed with was never mutated
+    /// through that layer, so the store being written is already the store that holds it, and
+    /// there is nothing to write for it. Committing into a store that does not already hold those
+    /// values therefore leaves them behind - see
+    /// [`crate::merkle_layer::MerkleLayer::clone_with`].
     pub fn with_node_data(self) -> Self {
         Self { node_data: true }
     }
