@@ -27,7 +27,6 @@
 //! [`Tree`]: crate::avl::tree::Tree
 //! [`Node`]: crate::avl::node::Node
 
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -375,6 +374,14 @@ impl LazyDataId {
             .into_proof()
     }
 
+    /// The value, if it has already been loaded.
+    ///
+    /// Lets a caller that must not trigger a load - such as writing node data back to the store it
+    /// was resolved from - tell "not loaded" from "loaded and empty".
+    pub(crate) fn loaded(&self) -> Option<&Bytes<Normal>> {
+        self.0.inner.get()
+    }
+
     /// Attempt to load the bytes value from the database, returning
     /// a reference to the bytes.
     pub(crate) fn try_get(
@@ -457,18 +464,6 @@ impl From<Bytes<Normal>> for LazyDataId {
 impl From<Hash> for LazyDataId {
     fn from(value: Hash) -> Self {
         Self(LazyId::from(value))
-    }
-}
-
-impl Borrow<[u8]> for LazyDataId {
-    fn borrow(&self) -> &[u8] {
-        let Some(bytes) = self.0.inner.get() else {
-            unreachable!(
-                "All LazyDataId instances are currently populated, except for nodes under deletion"
-            );
-        };
-
-        bytes.borrow()
     }
 }
 
@@ -977,7 +972,8 @@ impl<R> ProveResolver<R> {
 impl<R> Resolver<ProveNodeId, ProveNode> for ProveResolver<R>
 where
     R: Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>
-        + Resolver<LazyTreeId, Tree<LazyNodeId>>,
+        + Resolver<LazyTreeId, Tree<LazyNodeId>>
+        + DataResolver<LazyDataId, Normal>,
 {
     fn resolve<'b>(&self, id: &'b ProveNodeId) -> Result<&'b ProveNode, OperationalError> {
         if let Some(inner) = id.cache.get() {
@@ -989,7 +985,7 @@ where
             .as_ref()
             .expect("Any node that is not cached must have the lazy id present.");
         let resolved_node = self.resolve_and_track_node(lazy_id)?;
-        let prove_node: ProveNode = resolved_node.clone().into_proof();
+        let prove_node: ProveNode = resolved_node.clone().into_proof(&self.inner)?;
         id.cache
             .set(Rc::new(prove_node))
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;
@@ -1014,7 +1010,7 @@ where
             .as_ref()
             .expect("Any node that is not cached must have the lazy id present.");
         let resolved_node = self.resolve_and_track_node(lazy_id)?;
-        let prove_node: ProveNode = resolved_node.clone().into_proof();
+        let prove_node: ProveNode = resolved_node.clone().into_proof(&self.inner)?;
         id.cache
             .set(Rc::new(prove_node))
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;

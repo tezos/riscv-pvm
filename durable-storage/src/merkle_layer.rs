@@ -1123,6 +1123,52 @@ mod tests {
         assert_eq!(merkle_0.hash(), merkle_2.hash());
     });
 
+    // Committing a checked-out layer must not need the values it never loaded: those are already
+    // in the store it resolves from, which is the store being written. Deleting a key needs no
+    // value either, and must not start needing one - so a deletion is committed here too, leaving
+    // a sibling behind that is still only a hash.
+    kv_test!(test_commit_with_node_data_after_checkout, KV: PersistentKeyValueStore, {
+        let [kept, dropped] =
+            [0u16, 1].map(|i| Key::new(&i.to_be_bytes()).expect("Sizes less than KEY_MAX_SIZE"));
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let options = super::StoreOptions::default().with_node_data();
+
+        let persistence = Arc::new(KV::new(&repo).unwrap());
+        let mut merkle = MerkleLayer::new(persistence.clone());
+        merkle.set(&kept, b"the value that stays").unwrap();
+        merkle.set(&dropped, b"the value that goes").unwrap();
+
+        let commit = merkle.commit(&options).expect("Committing should succeed");
+        persistence.commit(&repo, &commit).unwrap();
+
+        let checked_out_persistence = Arc::new(KV::checkout(&repo, &commit).unwrap());
+        let mut checked_out =
+            MerkleLayer::checkout(checked_out_persistence, commit).expect("Checkout should succeed");
+
+        // Nothing was mutated, so there is no value here to write back.
+        assert_eq!(
+            checked_out.commit(&options).expect("Committing a checked-out layer should succeed"),
+            commit
+        );
+
+        // Drops one key without ever loading its value, leaving the survivor still unloaded.
+        checked_out.delete(&dropped).expect("Deleting should succeed");
+        let after_delete = checked_out
+            .commit(&options)
+            .expect("Committing a deletion should succeed");
+        assert_ne!(after_delete, commit);
+
+        // The survivor is still readable, so the deletion did not disturb the value it kept.
+        let value = checked_out
+            .get(&kept)
+            .expect("Reading the survivor should succeed")
+            .expect("The survivor holds a value");
+        let mut read = vec![0u8; value.len()];
+        value.read(0, &mut read);
+        assert_eq!(read.as_slice(), b"the value that stays");
+    });
+
     kv_test!(test_mavl_cow, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));
