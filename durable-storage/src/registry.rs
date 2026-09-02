@@ -472,7 +472,7 @@ impl<KV: ReadableKeyValueStore> FromProof for Registry<KV, Verify> {
     ) -> SuspendedResult<Proof, Self> {
         let suspended = Vector::<Database<KV, Verify>, Verify>::from_proof(proof)?;
         Ok(suspended.map(|databases| Self {
-            inner: VerifyImpl(PhantomData),
+            inner: VerifyImpl,
             databases,
         }))
     }
@@ -488,7 +488,7 @@ impl<KV: ReadableKeyValueStore> Modal for RegistryTemplate<KV> {
 
     type Prove<'normal> = ProveImpl<KV>;
 
-    type Verify = VerifyImpl<KV>;
+    type Verify = VerifyImpl;
 }
 
 /// Modes that implement this support operations on [`Registry`]
@@ -746,12 +746,10 @@ struct ProveImpl<KV: ReadableKeyValueStore> {
 }
 
 /// Registry implementation for the [`Verify`] mode.
-struct VerifyImpl<KV: ReadableKeyValueStore>(PhantomData<KV>);
+struct VerifyImpl;
 
 #[cfg(test)]
 pub(super) mod tests {
-    use std::marker::PhantomData;
-
     use bytes::Bytes;
     use octez_riscv_data::codec;
     use octez_riscv_data::components::vector::VectorMode;
@@ -865,7 +863,7 @@ pub(super) mod tests {
 
     fn setup_verify_registry<KV: BackgroundWriteableKeyValueStore>() -> Registry<KV, Verify> {
         Registry {
-            inner: VerifyImpl(PhantomData),
+            inner: VerifyImpl,
             databases: <Verify as VectorMode>::new(Vec::new()),
         }
     }
