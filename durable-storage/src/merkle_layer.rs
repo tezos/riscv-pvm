@@ -1060,8 +1060,16 @@ mod tests {
     // The source and the copy share tree structure while each holds a store of its own, so
     // resolving a shared identifier fills it from whichever store the resolving layer holds.
     // Nothing is mutated, so copy-on-write never engages: a read on the copy is enough.
-    kv_test!(#[ignore] test_reading_a_copy_does_not_change_the_source_root, KV: PersistentKeyValueStore, {
+    kv_test!(test_reading_a_copy_does_not_change_the_source_root, KV: PersistentKeyValueStore, {
         use std::ops::Deref;
+
+        use octez_riscv_data::components::bytes::Bytes;
+        use octez_riscv_data::hash::Hash;
+        use octez_riscv_data::mode::Normal;
+
+        use crate::errors::OperationalError;
+
+        let hash_of = |bytes: &[u8]| Hash::from_foldable(&Bytes::<Normal>::from(bytes));
 
         let keys =
             [0u16, 1, 2].map(|i| Key::new(&i.to_be_bytes()).expect("Sizes less than KEY_MAX_SIZE"));
@@ -1105,9 +1113,17 @@ mod tests {
         // The two stores now disagree at `rhs`.
         persistence_1.set(&rhs, b"only-in-the-copy").unwrap();
 
-        // The copy is never mutated: this is a read. Whether it succeeds or is refused is not
-        // what matters here - what matters is that it leaves the source alone.
-        let _ = merkle_1.get(&rhs);
+        // The copy is never mutated: this is a read. From this commit it is also refused, naming
+        // the key and the two hashes that disagree - serving those bytes is what would leave the
+        // tree inconsistent with itself, since the first write to `rhs` would fold them in.
+        match merkle_1.get(&rhs) {
+            Err(OperationalError::CommitValueMismatch { key, expected, found }) => {
+                assert_eq!(key, rhs);
+                assert_eq!(expected, hash_of(b"value-2"));
+                assert_eq!(found, hash_of(b"only-in-the-copy"));
+            }
+            other => panic!("Reading a diverged value should be refused, got {other:?}"),
+        }
 
         // Checking the root alone is not enough: an identifier that still carries its committed
         // hash folds by that hash, so the root can be right while the tree holds foreign bytes.
@@ -1167,6 +1183,42 @@ mod tests {
         let mut read = vec![0u8; value.len()];
         value.read(0, &mut read);
         assert_eq!(read.as_slice(), b"the value that stays");
+    });
+
+    // The out-of-order deletes the worker tolerates make a failed value load reachable on a write,
+    // and a layer that cannot be hashed afterwards would take down the caller that was only
+    // handed an error. So the failure has to leave the tree hashable, not merely report itself.
+    kv_test!(test_a_failed_load_leaves_the_node_foldable, KV: PersistentKeyValueStore, {
+        use crate::storage::ReadableKeyValueStore;
+
+        let key = Key::new(b"probe").expect("Sizes less than KEY_MAX_SIZE");
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let persistence = Arc::new(KV::new(&repo).unwrap());
+        let mut merkle = MerkleLayer::new(persistence.clone());
+        persistence.set(&key, b"the committed value").unwrap();
+        merkle.set(&key, b"the committed value").unwrap();
+
+        let commit = merkle
+            .commit(&super::StoreOptions::default().without_node_data())
+            .expect("Committing should succeed");
+        persistence.commit(&repo, &commit).unwrap();
+
+        let persistence = Arc::new(KV::checkout(&repo, &commit).unwrap());
+        let mut merkle = MerkleLayer::checkout(persistence.clone(), commit).expect("Checkout should succeed");
+
+        // The value the tree still commits to is no longer in the store to load.
+        persistence.delete(&key).unwrap();
+        assert!(persistence.get(&key).is_err(), "The store should no longer hold the value");
+
+        assert!(
+            merkle.write(&key, 0, b"WITH").is_err(),
+            "Writing a value that cannot be loaded should fail"
+        );
+
+        // Still folds by the hash the node commits to, rather than panicking on an identifier
+        // left holding neither a hash nor a value.
+        assert_eq!(merkle.hash(), *commit.as_hash());
     });
 
     kv_test!(test_mavl_cow, KV, {
