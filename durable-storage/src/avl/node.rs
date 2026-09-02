@@ -1089,7 +1089,7 @@ trait DataLoadable: Sized {
 
 impl DataLoadable for Bytes<Normal> {
     fn load(
-        _id: Hash,
+        id: Hash,
         key: &Key,
         store: &impl ReadableKeyValueStore,
     ) -> Result<Self, OperationalError> {
@@ -1103,6 +1103,19 @@ impl DataLoadable for Bytes<Normal> {
                     })?;
             Bytes::from(bytes.as_ref())
         };
+
+        // This value folds by hashing its own bytes, so an unchecked load would let whatever the
+        // store returned become the node's hash. Check it against the hash the node commits to
+        // for the same reason the lazy identifier does.
+        let found = Hash::from_foldable(&data);
+
+        if found != id {
+            return Err(OperationalError::CommitValueMismatch {
+                key: key.clone(),
+                expected: id,
+                found,
+            });
+        }
 
         Ok(data)
     }

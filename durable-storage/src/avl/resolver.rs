@@ -401,54 +401,93 @@ impl LazyDataId {
 
     /// Attempt to load the bytes value from the database, returning
     /// a mutable reference to the bytes.
+    ///
+    /// The load is not checked against the hash the node commits to: the store is written before
+    /// the tree operation is queued, so the bytes it returns are already the mutated ones. The
+    /// hash is dropped only once the value is in hand, so a load that fails leaves the identifier
+    /// still folding by the hash the node commits to.
     fn try_get_mut(
         &mut self,
         key: &Key,
         store: &impl ReadableKeyValueStore,
     ) -> Result<&mut Bytes<Normal>, OperationalError> {
+        if self.0.inner.get().is_none() {
+            let bytes = self.read_unchecked(key, store)?;
+
+            // `&mut self` is exclusive access to this identifier - it is reached only through
+            // `Arc::make_mut` on the owning node - and the value was absent a line ago, so no
+            // other initialisation can have got in first.
+            if self.0.inner.set(bytes).is_err() {
+                unreachable!("A value cannot be initialised twice under exclusive access");
+            }
+        }
+
         // evict the cached-hash, if any - the value will be mutated
         self.0.hash = None;
 
-        if let Some(bytes) = self.0.inner.get_mut() {
-            let temp = bytes as *mut Bytes<Normal>;
-            // This unsafe workaround is required because the rust borrow-checker
-            // is unable to identify the `bytes` mutable reference being dropped straight
-            // away if the condition is false.
-            //
-            // SAFETY: This is a value `&mut Bytes<Normal>` reference with no other
-            // references to the same Bytes being used after this return.
-            return Ok(unsafe { &mut *temp });
-        }
-
-        self.try_load_inner(key, store)?;
-        let bytes = self.0.inner.get_mut().expect("Try load succeeded");
+        let Some(bytes) = self.0.inner.get_mut() else {
+            unreachable!("The value is present: it was loaded above if it was not already");
+        };
 
         Ok(bytes)
     }
 
-    /// Attempt to load the value from a key-value store.
+    /// Read the value for `key` from `store`.
     ///
-    /// The stored representation of nodes does not include the `data` field,
-    /// so we need to load it separately from the KV store.
+    /// The stored representation of nodes does not include the `data` field, so it has to be
+    /// loaded separately from the KV store.
     ///
-    /// If this succeeds, the inner lazy-id is guaranteed to be
-    /// initialised.
-    fn try_load_inner(
+    /// Returns the bytes as the store gave them: not checked against the hash the node commits to,
+    /// and not cached on this identifier. Establishing that the value belongs to this tree - or
+    /// that no committed hash applies to it - is left to the caller.
+    fn read_unchecked(
         &self,
         key: &Key,
         store: &impl ReadableKeyValueStore,
-    ) -> Result<(), OperationalError> {
+    ) -> Result<Bytes<Normal>, OperationalError> {
         let bytes = store
             .get(key)
             .map_err(|error| OperationalError::CommitValueMissing {
                 key: key.clone(),
                 source: Box::new(error),
             })?;
-        let bytes = Bytes::from(bytes.as_ref());
 
-        // TODO (RV-987): ensure eventual consistency
-        // It's possible it's been initialised by another thread,
-        // but this should not affect overall semantics (see RV-987)
+        Ok(Bytes::from(bytes.as_ref()))
+    }
+
+    /// Attempt to load the value from a key-value store, checking it against the hash the node
+    /// commits to.
+    ///
+    /// A store whose value has moved on ahead of the tree is caught here, as is a store belonging
+    /// to a different layer entirely.
+    ///
+    /// If this succeeds, the inner lazy-id is guaranteed to be initialised.
+    fn try_load_inner(
+        &self,
+        key: &Key,
+        store: &impl ReadableKeyValueStore,
+    ) -> Result<(), OperationalError> {
+        let bytes = self.read_unchecked(key, store)?;
+
+        // An identifier with no value has a hash, so a missing one is a broken invariant rather
+        // than a value to wave through unchecked: only `try_get_mut` clears the hash, and only
+        // once the value is in hand.
+        let expected = self
+            .0
+            .hash()
+            .ok_or(OperationalError::ResolverInvariantViolated)?;
+        let found = Hash::from_foldable(&bytes);
+
+        if found != *expected {
+            return Err(OperationalError::CommitValueMismatch {
+                key: key.clone(),
+                expected: *expected,
+                found,
+            });
+        }
+
+        // Another thread may have initialised this already, which is harmless: the check above
+        // means every initialisation carries the value the node commits to.
         let _ = self.0.inner.set(bytes);
 
         Ok(())
@@ -938,34 +977,25 @@ impl<R> ProveResolver<R> {
         }
     }
 
-    /// Track node access and resolve the underlying lazy node in one step.
-    fn resolve_and_track_node<'a>(
-        &self,
-        id: &'a LazyNodeId,
-    ) -> Result<&'a Node<LazyTreeId, LazyDataId, Normal>, OperationalError>
-    where
-        R: Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>,
-    {
-        self.accessed_items
-            .borrow_mut()
-            .nodes
-            .insert(Hash::from_foldable(id));
-        self.inner.resolve(id)
+    /// Record that the node with this hash was accessed during the step.
+    ///
+    /// Only a resolution that *completed* is recorded. The fold blinds a node it has no access
+    /// for, and reads the read flags of one it does out of the prove-mode projection the
+    /// resolution caches - so an access recorded for a resolution that then failed leaves the
+    /// fold with a node it may neither blind nor read, and it panics on the missing projection.
+    /// A failed operation is something the caller is handed back; a fold that cannot run is not.
+    ///
+    /// Lazy loading is what makes this reachable: the node body loads, and only then does the
+    /// value it commits to turn out to be missing from the store, or not to hash to it.
+    fn track_node(&self, hash: Hash) {
+        self.accessed_items.borrow_mut().nodes.insert(hash);
     }
 
-    /// Track tree access and resolve the underlying lazy tree in one step.
-    fn resolve_and_track_tree<'a>(
-        &self,
-        id: &'a LazyTreeId,
-    ) -> Result<&'a Tree<LazyNodeId>, OperationalError>
-    where
-        R: Resolver<LazyTreeId, Tree<LazyNodeId>>,
-    {
-        self.accessed_items
-            .borrow_mut()
-            .trees
-            .insert(Hash::from_foldable(id));
-        self.inner.resolve(id)
+    /// Record that the tree with this hash was accessed during the step.
+    ///
+    /// Recorded after the resolution completes, for the reason given on [`Self::track_node`].
+    fn track_tree(&self, hash: Hash) {
+        self.accessed_items.borrow_mut().trees.insert(hash);
     }
 }
 
@@ -984,11 +1014,17 @@ where
             .lazy_id
             .as_ref()
             .expect("Any node that is not cached must have the lazy id present.");
-        let resolved_node = self.resolve_and_track_node(lazy_id)?;
+
+        // Taken before resolving, so it is the hash the initial tree folds this node by.
+        let hash = Hash::from_foldable(lazy_id);
+
+        let resolved_node = self.inner.resolve(lazy_id)?;
         let prove_node: ProveNode = resolved_node.clone().into_proof(&self.inner)?;
         id.cache
             .set(Rc::new(prove_node))
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        self.track_node(hash);
 
         Ok(id.cache.wait())
     }
@@ -1009,11 +1045,17 @@ where
             .lazy_id
             .as_ref()
             .expect("Any node that is not cached must have the lazy id present.");
-        let resolved_node = self.resolve_and_track_node(lazy_id)?;
+
+        // Taken before resolving, so it is the hash the initial tree folds this node by.
+        let hash = Hash::from_foldable(lazy_id);
+
+        let resolved_node = self.inner.resolve(lazy_id)?;
         let prove_node: ProveNode = resolved_node.clone().into_proof(&self.inner)?;
         id.cache
             .set(Rc::new(prove_node))
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        self.track_node(hash);
 
         Ok(Rc::make_mut(
             id.cache.get_mut().expect("inner was just set"),
@@ -1054,11 +1096,15 @@ where
             return Ok(inner);
         }
 
-        let resolved = self.resolve_and_track_tree(&id.tree)?;
+        let hash = Hash::from_foldable(&id.tree);
+
+        let resolved = self.inner.resolve(&id.tree)?;
         let result_tree: Tree<ProveNodeId> = resolved.clone().into_proof();
         id.inner
             .set(result_tree)
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        self.track_tree(hash);
 
         Ok(id.inner.wait())
     }
@@ -1075,11 +1121,15 @@ where
             }
         }
 
-        let resolved = self.resolve_and_track_tree(&id.tree)?;
+        let hash = Hash::from_foldable(&id.tree);
+
+        let resolved = self.inner.resolve(&id.tree)?;
         let result_tree: Tree<ProveNodeId> = resolved.clone().into_proof();
         id.inner
             .set(result_tree)
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;
+
+        self.track_tree(hash);
 
         Ok(id.inner.get_mut().expect("inner was just set"))
     }
