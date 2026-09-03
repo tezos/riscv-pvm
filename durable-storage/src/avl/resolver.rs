@@ -27,7 +27,6 @@
 //! [`Tree`]: crate::avl::tree::Tree
 //! [`Node`]: crate::avl::node::Node
 
-use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -375,6 +374,14 @@ impl LazyDataId {
             .into_proof()
     }
 
+    /// The value, if it has already been loaded.
+    ///
+    /// Lets a caller that must not trigger a load - such as writing node data back to the store it
+    /// was resolved from - tell "not loaded" from "loaded and empty".
+    pub(crate) fn loaded(&self) -> Option<&Bytes<Normal>> {
+        self.0.inner.get()
+    }
+
     /// Attempt to load the bytes value from the database, returning
     /// a reference to the bytes.
     pub(crate) fn try_get(
@@ -394,54 +401,93 @@ impl LazyDataId {
 
     /// Attempt to load the bytes value from the database, returning
     /// a mutable reference to the bytes.
+    ///
+    /// The load is not checked against the hash the node commits to: the store is written before
+    /// the tree operation is queued, so the bytes it returns are already the mutated ones. The
+    /// hash is dropped only once the value is in hand, so a load that fails leaves the identifier
+    /// still folding by the hash the node commits to.
     fn try_get_mut(
         &mut self,
         key: &Key,
         store: &impl ReadableKeyValueStore,
     ) -> Result<&mut Bytes<Normal>, OperationalError> {
+        if self.0.inner.get().is_none() {
+            let bytes = self.read_unchecked(key, store)?;
+
+            // `&mut self` is exclusive access to this identifier - it is reached only through
+            // `Arc::make_mut` on the owning node - and the value was absent a line ago, so no
+            // other initialisation can have got in first.
+            if self.0.inner.set(bytes).is_err() {
+                unreachable!("A value cannot be initialised twice under exclusive access");
+            }
+        }
+
         // evict the cached-hash, if any - the value will be mutated
         self.0.hash = None;
 
-        if let Some(bytes) = self.0.inner.get_mut() {
-            let temp = bytes as *mut Bytes<Normal>;
-            // This unsafe workaround is required because the rust borrow-checker
-            // is unable to identify the `bytes` mutable reference being dropped straight
-            // away if the condition is false.
-            //
-            // SAFETY: This is a value `&mut Bytes<Normal>` reference with no other
-            // references to the same Bytes being used after this return.
-            return Ok(unsafe { &mut *temp });
-        }
-
-        self.try_load_inner(key, store)?;
-        let bytes = self.0.inner.get_mut().expect("Try load succeeded");
+        let Some(bytes) = self.0.inner.get_mut() else {
+            unreachable!("The value is present: it was loaded above if it was not already");
+        };
 
         Ok(bytes)
     }
 
-    /// Attempt to load the value from a key-value store.
+    /// Read the value for `key` from `store`.
     ///
-    /// The stored representation of nodes does not include the `data` field,
-    /// so we need to load it separately from the KV store.
+    /// The stored representation of nodes does not include the `data` field, so it has to be
+    /// loaded separately from the KV store.
     ///
-    /// If this succeeds, the inner lazy-id is guaranteed to be
-    /// initialised.
-    fn try_load_inner(
+    /// Returns the bytes as the store gave them: not checked against the hash the node commits to,
+    /// and not cached on this identifier. Establishing that the value belongs to this tree - or
+    /// that no committed hash applies to it - is left to the caller.
+    fn read_unchecked(
         &self,
         key: &Key,
         store: &impl ReadableKeyValueStore,
-    ) -> Result<(), OperationalError> {
+    ) -> Result<Bytes<Normal>, OperationalError> {
         let bytes = store
             .get(key)
             .map_err(|error| OperationalError::CommitValueMissing {
                 key: key.clone(),
                 source: Box::new(error),
             })?;
-        let bytes = Bytes::from(bytes.as_ref());
 
-        // TODO (RV-987): ensure eventual consistency
-        // It's possible it's been initialised by another thread,
-        // but this should not affect overall semantics (see RV-987)
+        Ok(Bytes::from(bytes.as_ref()))
+    }
+
+    /// Attempt to load the value from a key-value store, checking it against the hash the node
+    /// commits to.
+    ///
+    /// A store whose value has moved on ahead of the tree is caught here, as is a store belonging
+    /// to a different layer entirely.
+    ///
+    /// If this succeeds, the inner lazy-id is guaranteed to be initialised.
+    fn try_load_inner(
+        &self,
+        key: &Key,
+        store: &impl ReadableKeyValueStore,
+    ) -> Result<(), OperationalError> {
+        let bytes = self.read_unchecked(key, store)?;
+
+        // An identifier with no value has a hash, so a missing one is a broken invariant rather
+        // than a value to wave through unchecked: only `try_get_mut` clears the hash, and only
+        // once the value is in hand.
+        let expected = self
+            .0
+            .hash()
+            .ok_or(OperationalError::ResolverInvariantViolated)?;
+        let found = Hash::from_foldable(&bytes);
+
+        if found != *expected {
+            return Err(OperationalError::CommitValueMismatch {
+                key: key.clone(),
+                expected: *expected,
+                found,
+            });
+        }
+
+        // Another thread may have initialised this already, which is harmless: the check above
+        // means every initialisation carries the value the node commits to.
         let _ = self.0.inner.set(bytes);
 
         Ok(())
@@ -457,18 +503,6 @@ impl From<Bytes<Normal>> for LazyDataId {
 impl From<Hash> for LazyDataId {
     fn from(value: Hash) -> Self {
         Self(LazyId::from(value))
-    }
-}
-
-impl Borrow<[u8]> for LazyDataId {
-    fn borrow(&self) -> &[u8] {
-        let Some(bytes) = self.0.inner.get() else {
-            unreachable!(
-                "All LazyDataId instances are currently populated, except for nodes under deletion"
-            );
-        };
-
-        bytes.borrow()
     }
 }
 
@@ -977,7 +1011,8 @@ impl<R> ProveResolver<R> {
 impl<R> Resolver<ProveNodeId, ProveNode> for ProveResolver<R>
 where
     R: Resolver<LazyNodeId, Node<LazyTreeId, LazyDataId, Normal>>
-        + Resolver<LazyTreeId, Tree<LazyNodeId>>,
+        + Resolver<LazyTreeId, Tree<LazyNodeId>>
+        + DataResolver<LazyDataId, Normal>,
 {
     fn resolve<'b>(&self, id: &'b ProveNodeId) -> Result<&'b ProveNode, OperationalError> {
         if let Some(inner) = id.cache.get() {
@@ -989,7 +1024,7 @@ where
             .as_ref()
             .expect("Any node that is not cached must have the lazy id present.");
         let resolved_node = self.resolve_and_track_node(lazy_id)?;
-        let prove_node: ProveNode = resolved_node.clone().into_proof();
+        let prove_node: ProveNode = resolved_node.clone().into_proof(&self.inner)?;
         id.cache
             .set(Rc::new(prove_node))
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;
@@ -1014,7 +1049,7 @@ where
             .as_ref()
             .expect("Any node that is not cached must have the lazy id present.");
         let resolved_node = self.resolve_and_track_node(lazy_id)?;
-        let prove_node: ProveNode = resolved_node.clone().into_proof();
+        let prove_node: ProveNode = resolved_node.clone().into_proof(&self.inner)?;
         id.cache
             .set(Rc::new(prove_node))
             .map_err(|_| OperationalError::ResolverInvariantViolated)?;

@@ -1055,6 +1055,172 @@ mod tests {
         );
     }
 
+    // Reading a copy must not change the root the source commits to.
+    //
+    // The source and the copy share tree structure while each holds a store of its own, so
+    // resolving a shared identifier fills it from whichever store the resolving layer holds.
+    // Nothing is mutated, so copy-on-write never engages: a read on the copy is enough.
+    kv_test!(test_reading_a_copy_does_not_change_the_source_root, KV: PersistentKeyValueStore, {
+        use std::ops::Deref;
+
+        use octez_riscv_data::components::bytes::Bytes;
+        use octez_riscv_data::hash::Hash;
+        use octez_riscv_data::mode::Normal;
+
+        use crate::errors::OperationalError;
+
+        let hash_of = |bytes: &[u8]| Hash::from_foldable(&Bytes::<Normal>::from(bytes));
+
+        let keys =
+            [0u16, 1, 2].map(|i| Key::new(&i.to_be_bytes()).expect("Sizes less than KEY_MAX_SIZE"));
+
+        let (_keepalive, repo) = KV::setup_repo();
+
+        // Written to the store as well as the tree, and committed without node data, as
+        // `Database` uses the layer - so a node's value comes from the store, by key.
+        let persistence = Arc::new(KV::new(&repo).unwrap());
+        let mut merkle = MerkleLayer::new(persistence.clone());
+
+        for (i, key) in keys.iter().enumerate() {
+            let value = format!("value-{i}");
+            persistence.set(key, value.as_bytes()).unwrap();
+            merkle.set(key, value.as_bytes()).unwrap();
+        }
+
+        let store_options = super::StoreOptions::default().without_node_data();
+
+        let commit = merkle.commit(&store_options).unwrap();
+        persistence.commit(&repo, &commit).unwrap();
+
+        let [_, _, rhs] = keys;
+
+        // Two independent checkouts of that one commit: the source, and a twin to compare it to.
+        let persistence_0 = Arc::new(KV::checkout(&repo, &commit).unwrap());
+        let persistence_2 = Arc::new(KV::checkout(&repo, &commit).unwrap());
+
+        let merkle_0 = MerkleLayer::checkout(persistence_0.clone(), commit).unwrap();
+        let merkle_2 = MerkleLayer::checkout(persistence_2.clone(), commit).unwrap();
+
+        // The twin alone: hashing the source here would memoise its root hash in the node the
+        // copy shares, hiding the fault until something invalidated it.
+        assert_eq!(merkle_2.hash(), *commit.as_hash());
+
+        let persistence_1 = Arc::new(
+            WriteableKeyValueStore::try_clone(persistence_0.deref(), &repo).unwrap(),
+        );
+        let merkle_1 = merkle_0.clone_with(persistence_1.clone());
+
+        // The two stores now disagree at `rhs`.
+        persistence_1.set(&rhs, b"only-in-the-copy").unwrap();
+
+        // The copy is never mutated: this is a read. From this commit it is also refused, naming
+        // the key and the two hashes that disagree - serving those bytes is what would leave the
+        // tree inconsistent with itself, since the first write to `rhs` would fold them in.
+        match merkle_1.get(&rhs) {
+            Err(OperationalError::CommitValueMismatch { key, expected, found }) => {
+                assert_eq!(key, rhs);
+                assert_eq!(expected, hash_of(b"value-2"));
+                assert_eq!(found, hash_of(b"only-in-the-copy"));
+            }
+            other => panic!("Reading a diverged value should be refused, got {other:?}"),
+        }
+
+        // Checking the root alone is not enough: an identifier that still carries its committed
+        // hash folds by that hash, so the root can be right while the tree holds foreign bytes.
+        let value = merkle_0
+            .get(&rhs)
+            .expect("Reading the source should succeed")
+            .expect("The source holds a value at `rhs`");
+
+        let mut read = vec![0u8; value.len()];
+        value.read(0, &mut read);
+        assert_eq!(read.as_slice(), b"value-2");
+
+        assert_eq!(merkle_0.hash(), merkle_2.hash());
+    });
+
+    // Committing a checked-out layer must not need the values it never loaded: those are already
+    // in the store it resolves from, which is the store being written. Deleting a key needs no
+    // value either, and must not start needing one - so a deletion is committed here too, leaving
+    // a sibling behind that is still only a hash.
+    kv_test!(test_commit_with_node_data_after_checkout, KV: PersistentKeyValueStore, {
+        let [kept, dropped] =
+            [0u16, 1].map(|i| Key::new(&i.to_be_bytes()).expect("Sizes less than KEY_MAX_SIZE"));
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let options = super::StoreOptions::default().with_node_data();
+
+        let persistence = Arc::new(KV::new(&repo).unwrap());
+        let mut merkle = MerkleLayer::new(persistence.clone());
+        merkle.set(&kept, b"the value that stays").unwrap();
+        merkle.set(&dropped, b"the value that goes").unwrap();
+
+        let commit = merkle.commit(&options).expect("Committing should succeed");
+        persistence.commit(&repo, &commit).unwrap();
+
+        let checked_out_persistence = Arc::new(KV::checkout(&repo, &commit).unwrap());
+        let mut checked_out =
+            MerkleLayer::checkout(checked_out_persistence, commit).expect("Checkout should succeed");
+
+        // Nothing was mutated, so there is no value here to write back.
+        assert_eq!(
+            checked_out.commit(&options).expect("Committing a checked-out layer should succeed"),
+            commit
+        );
+
+        // Drops one key without ever loading its value, leaving the survivor still unloaded.
+        checked_out.delete(&dropped).expect("Deleting should succeed");
+        let after_delete = checked_out
+            .commit(&options)
+            .expect("Committing a deletion should succeed");
+        assert_ne!(after_delete, commit);
+
+        // The survivor is still readable, so the deletion did not disturb the value it kept.
+        let value = checked_out
+            .get(&kept)
+            .expect("Reading the survivor should succeed")
+            .expect("The survivor holds a value");
+        let mut read = vec![0u8; value.len()];
+        value.read(0, &mut read);
+        assert_eq!(read.as_slice(), b"the value that stays");
+    });
+
+    // The out-of-order deletes the worker tolerates make a failed value load reachable on a write,
+    // and a layer that cannot be hashed afterwards would take down the caller that was only
+    // handed an error. So the failure has to leave the tree hashable, not merely report itself.
+    kv_test!(test_a_failed_load_leaves_the_node_foldable, KV: PersistentKeyValueStore, {
+        use crate::storage::ReadableKeyValueStore;
+
+        let key = Key::new(b"probe").expect("Sizes less than KEY_MAX_SIZE");
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let persistence = Arc::new(KV::new(&repo).unwrap());
+        let mut merkle = MerkleLayer::new(persistence.clone());
+        persistence.set(&key, b"the committed value").unwrap();
+        merkle.set(&key, b"the committed value").unwrap();
+
+        let commit = merkle
+            .commit(&super::StoreOptions::default().without_node_data())
+            .expect("Committing should succeed");
+        persistence.commit(&repo, &commit).unwrap();
+
+        let persistence = Arc::new(KV::checkout(&repo, &commit).unwrap());
+        let mut merkle = MerkleLayer::checkout(persistence.clone(), commit).expect("Checkout should succeed");
+
+        // The value the tree still commits to is no longer in the store to load.
+        persistence.delete(&key).unwrap();
+        assert!(persistence.get(&key).is_err(), "The store should no longer hold the value");
+
+        assert!(
+            merkle.write(&key, 0, b"WITH").is_err(),
+            "Writing a value that cannot be loaded should fail"
+        );
+
+        // Still folds by the hash the node commits to, rather than panicking on an identifier
+        // left holding neither a hash nor a value.
+        assert_eq!(merkle.hash(), *commit.as_hash());
+    });
+
     kv_test!(test_mavl_cow, KV, {
         let keys = [Key::new(&[0]), Key::new(&[1]), Key::new(&[2])]
             .map(|r| r.expect("Sizes less than KEY_MAX_SIZE"));

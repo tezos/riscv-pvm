@@ -1347,6 +1347,63 @@ pub(crate) mod tests {
         ));
     }
 
+    // A checked-out node no longer arrives with its value materialised, so a `set` or a `write`
+    // against a committed key resolves that value itself - a `write` after the store already
+    // holds it, since the store is written before the tree operation is queued.
+    kv_test!(test_database_set_and_write_after_checkout, KV: BackgroundPersistentKeyValueStore, {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .build()
+            .expect("Creating a Tokio runtime should succeed");
+        let handle = runtime.handle();
+        let (_keepalive, repo) = KV::setup_repo();
+
+        let key = Key::new(b"probe").expect("Size less than KEY_MAX_SIZE");
+
+        let mut database = new_database::<KV>(handle, &repo);
+        database
+            .set(key.clone(), Bytes::from_static(b"a value with room to write into"))
+            .expect("Setting should succeed");
+        let commit = database.commit(&repo).expect("Commit should succeed");
+
+        // Checkout, then overwrite a committed key outright.
+        let mut checked_out = TracedDatabase::<KV>::checkout(handle, &repo, commit)
+            .expect("Checkout should succeed");
+        checked_out
+            .set(key.clone(), Bytes::from_static(b"replaced outright"))
+            .expect("Setting a committed key after checkout should succeed");
+        checked_out.assert_database_value(&key, b"replaced outright");
+        let after_set = checked_out.hash().expect("Hashing after a set should succeed");
+
+        // Checkout again, and this time write into the middle of a committed value.
+        let mut checked_out = TracedDatabase::<KV>::checkout(handle, &repo, commit)
+            .expect("Checkout should succeed");
+        checked_out
+            .write(key.clone(), 7, Bytes::from_static(b"WITH"))
+            .expect("Writing into a committed value after checkout should succeed");
+        checked_out.assert_database_value(&key, b"a valueWITHh room to write into");
+        let after_write = checked_out.hash().expect("Hashing after a write should succeed");
+
+        // Reads are answered by the store, so the value assertions above hold however the tree
+        // resolved. Pin the tree itself against a database built from scratch with the same
+        // content: a tree that folded another value commits to a different root.
+        let expect_root = |value| {
+            let mut expected = new_database::<KV>(handle, &repo);
+            expected
+                .set(key.clone(), value)
+                .expect("Setting should succeed");
+            expected.hash().expect("Hashing should succeed")
+        };
+
+        assert_eq!(after_set, expect_root(Bytes::from_static(b"replaced outright")));
+        assert_eq!(
+            after_write,
+            expect_root(Bytes::from_static(b"a valueWITHh room to write into"))
+        );
+
+        (checked_out.into_trace(),)
+    });
+
     kv_test!(test_database_checkout_unknown_commit_fails, KV: BackgroundPersistentKeyValueStore, {
         use octez_riscv_data::hash::Hash;
 

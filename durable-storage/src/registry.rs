@@ -1183,7 +1183,7 @@ pub(super) mod tests {
         registry.verify_manifest(&root_commit, &expected_db_hashes);
     });
 
-    kv_test!(#[ignore] test_mutating_a_copy_does_not_change_the_source_root, KV: BackgroundPersistentKeyValueStore, {
+    kv_test!(test_mutating_a_copy_does_not_change_the_source_root, KV: BackgroundPersistentKeyValueStore, {
         let keys =
             [0u16, 1, 2].map(|i| Key::new(&i.to_be_bytes()).expect("Sizes less than KEY_MAX_SIZE"));
 

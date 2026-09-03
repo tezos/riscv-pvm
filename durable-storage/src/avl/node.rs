@@ -30,6 +30,7 @@ use perfect_derive::perfect_derive;
 
 use super::key::NodeKey;
 use super::key::NodeKeyMode;
+use super::resolver::DataResolver;
 use super::resolver::LazyDataId;
 use super::resolver::LazyTreeId;
 use super::resolver::ProveNode;
@@ -37,7 +38,6 @@ use super::resolver::TreeResolver;
 use super::tree::Tree;
 use crate::avl::resolver::AvlResolver;
 use crate::errors::Error;
-use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::key::Key;
 use crate::storage::Loadable;
@@ -82,15 +82,24 @@ pub struct Node<TreeId, DataId, M: Mode> {
 
 impl Node<LazyTreeId, LazyDataId, Normal> {
     /// Converts the [`Node`] to prove mode.
-    pub fn into_proof(self) -> ProveNode {
-        Node {
+    ///
+    /// A node's value is not loaded when the node is, but a prove-mode value carries the bytes
+    /// it is proved against and their length, so it is resolved here - through the resolver
+    /// that owns the store this node came from - rather than assumed already present.
+    pub fn into_proof(
+        self,
+        resolver: &impl DataResolver<LazyDataId, Normal>,
+    ) -> Result<ProveNode, OperationalError> {
+        resolver.resolve_bytes(&self.data, self.key.as_ref())?;
+
+        Ok(Node {
             balance_factor: self.balance_factor.into_proof(),
             key: self.key.into_proof(),
             data: self.data.into_proof(),
             left: self.left.into_proof(),
             right: self.right.into_proof(),
             hash: self.hash.clone(),
-        }
+        })
     }
 
     #[cfg(test)]
@@ -880,7 +889,7 @@ impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
 
 impl<TreeId: Storable, DataId> Storable for Node<TreeId, DataId, Normal>
 where
-    DataId: Foldable<HashFold> + Borrow<[u8]>,
+    DataId: Foldable<HashFold> + StorableData,
 {
     fn store(
         &self,
@@ -909,9 +918,7 @@ where
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {
-            let key: &[u8] = self.key.as_ref().as_ref();
-            let value: &[u8] = self.data.borrow();
-            store.set(key, value)?;
+            self.data.store_data(self.key.as_ref(), store)?;
         }
 
         self.left.store(store, options)?;
@@ -1022,6 +1029,53 @@ where
     }
 }
 
+/// Helper trait for writing a node's value to a [`WriteableKeyValueStore`].
+///
+/// A node loaded from a store carries only the hash its value was committed with, and there is
+/// nothing to write for such a node: the store this layer resolves from already holds that value,
+/// and it is the store being written. `Borrow<[u8]>` cannot express "nothing to write" - it would
+/// have to produce bytes that are not there - so storing goes through this trait instead.
+///
+/// This makes `MerkleLayer::commit` writing the layer's own persistence a precondition rather than
+/// a coincidence: committing a checked-out layer into some other store would leave the values it
+/// never loaded behind.
+trait StorableData {
+    /// Write the value for `key` to `store`.
+    fn store_data(
+        &self,
+        key: &Key,
+        store: &impl WriteableKeyValueStore,
+    ) -> Result<(), OperationalError>;
+}
+
+impl StorableData for Bytes<Normal> {
+    fn store_data(
+        &self,
+        key: &Key,
+        store: &impl WriteableKeyValueStore,
+    ) -> Result<(), OperationalError> {
+        let value: &[u8] = self.borrow();
+        store.set(key, value)
+    }
+}
+
+impl StorableData for LazyDataId {
+    fn store_data(
+        &self,
+        key: &Key,
+        store: &impl WriteableKeyValueStore,
+    ) -> Result<(), OperationalError> {
+        // A value still held as a hash was never mutated through this layer, so the store this
+        // layer resolves from already holds it - and that is the store being written. Loading it
+        // would read bytes back only to write the same ones again.
+        let Some(value) = self.loaded() else {
+            return Ok(());
+        };
+
+        store.set(key, Borrow::<[u8]>::borrow(value))
+    }
+}
+
 /// Helper trait for node data that can be reconstructed
 /// from a [`ReadableKeyValueStore`] by content hash and key.
 trait DataLoadable: Sized {
@@ -1035,7 +1089,7 @@ trait DataLoadable: Sized {
 
 impl DataLoadable for Bytes<Normal> {
     fn load(
-        _id: Hash,
+        id: Hash,
         key: &Key,
         store: &impl ReadableKeyValueStore,
     ) -> Result<Self, OperationalError> {
@@ -1050,6 +1104,19 @@ impl DataLoadable for Bytes<Normal> {
             Bytes::from(bytes.as_ref())
         };
 
+        // This value folds by hashing its own bytes, so an unchecked load would let whatever the
+        // store returned become the node's hash. Check it against the hash the node commits to
+        // for the same reason the lazy identifier does.
+        let found = Hash::from_foldable(&data);
+
+        if found != id {
+            return Err(OperationalError::CommitValueMismatch {
+                key: key.clone(),
+                expected: id,
+                found,
+            });
+        }
+
         Ok(data)
     }
 }
@@ -1057,30 +1124,14 @@ impl DataLoadable for Bytes<Normal> {
 impl DataLoadable for LazyDataId {
     fn load(
         id: Hash,
-        key: &Key,
-        store: &impl ReadableKeyValueStore,
+        _key: &Key,
+        _store: &impl ReadableKeyValueStore,
     ) -> Result<Self, OperationalError> {
-        // TODO (RV-998): go all in on laziness
-        let data = match store.get(key.as_ref()) {
-            Ok(bytes) => {
-                let bytes = Bytes::from(bytes.as_ref());
-                LazyDataId::from(bytes)
-            }
-            // On deletion, the persistence layer has already deleted the value from the
-            // KV-store. Therefore, loading fails with `KeyNotFound`. To ensure deletion
-            // still succeeds, we wrap the value. This is okay as the node will be deleted
-            // immediately.
-            //
-            // Attempting to do anything with the data (except hashing) will fail.
-            Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => LazyDataId::from(id),
-            Err(error) => {
-                return Err(OperationalError::CommitValueMissing {
-                    key: key.clone(),
-                    source: Box::new(error),
-                });
-            }
-        };
-
-        Ok(data)
+        // Keeping the hash rather than the bytes is what makes a node's fold independent of which
+        // store answered: an identifier holding bytes and no hash folds by hashing them, so an
+        // eager load here let whichever store was asked decide the node's hash.
+        //
+        // Deleting a key needs no value at all, so nothing here has to touch the store.
+        Ok(LazyDataId::from(id))
     }
 }
