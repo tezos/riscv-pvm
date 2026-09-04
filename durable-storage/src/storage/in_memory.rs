@@ -16,6 +16,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 
 use super::ReadableKeyValueStore;
+use super::StoreId;
 use super::WriteableKeyValueStore;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
@@ -67,6 +68,9 @@ pub struct InMemoryKeyValueStore {
 
     /// Holds the underlying key-value pairs
     values: RwLock<HashMap<Bytes, BytesMut>>,
+
+    /// Distinguishes this store from every other, including copies of it.
+    store_id: StoreId,
 }
 
 impl InMemoryKeyValueStore {
@@ -86,6 +90,9 @@ impl InMemoryKeyValueStore {
         Ok(Self {
             blobs: RwLock::new(blobs),
             values: RwLock::new(values),
+            // A copy is its own store: it holds what the original held at this moment, and nothing
+            // written to the original afterwards.
+            store_id: StoreId::next(),
         })
     }
 }
@@ -94,6 +101,9 @@ impl ReadableKeyValueStore for InMemoryKeyValueStore {
     type Repo = InMemoryRepo;
 
     type Merkle = MerkleWorker<Self>;
+    fn store_id(&self) -> StoreId {
+        self.store_id
+    }
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         let blob_store = self
@@ -335,6 +345,7 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
                     .map(|(k, v)| (k, BytesMut::from(v.as_ref())))
                     .collect(),
             ),
+            store_id: StoreId::next(),
         })
     }
 
@@ -356,6 +367,7 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
                     .map(|(k, v)| (k.clone(), BytesMut::from(v.as_ref())))
                     .collect(),
             ),
+            store_id: StoreId::next(),
         })
     }
 }

@@ -1393,6 +1393,10 @@ mod tests {
         type Repo = InMemoryRepo;
 
         type Merkle = crate::merkle_worker::MerkleWorker<Self>;
+        fn store_id(&self) -> crate::storage::StoreId {
+            // Delegated, so that wrapping a store does not make it look like a different one.
+            self.inner.store_id()
+        }
 
         fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
             self.blob_get_calls.fetch_add(1, Ordering::SeqCst);
