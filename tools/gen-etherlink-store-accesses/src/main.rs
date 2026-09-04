@@ -118,16 +118,16 @@ fn process_trace(trace_file: &Path, tx_index: usize) -> Result<OutputFormat> {
         );
 
         // Process storage events based on current section
-        if let LineType::StorageEvent(event) = line_type {
-            if let Some(access) = condenser.process_event(*event) {
-                match section {
-                    Section::Setup => setup_accesses.push(access),
-                    Section::Transaction if current_tx_index - 1 == tx_index => {
-                        transaction_accesses.push(access);
-                    }
-                    Section::BlockCreation => block_creation_accesses.push(access),
-                    _ => {} // Ignore the `Other` section and all other transactions
+        if let LineType::StorageEvent(event) = line_type
+            && let Some(access) = condenser.process_event(*event)
+        {
+            match section {
+                Section::Setup => setup_accesses.push(access),
+                Section::Transaction if current_tx_index - 1 == tx_index => {
+                    transaction_accesses.push(access);
                 }
+                Section::BlockCreation => block_creation_accesses.push(access),
+                _ => {} // Ignore the `Other` section and all other transactions
             }
         }
     }

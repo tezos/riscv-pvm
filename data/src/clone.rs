@@ -78,9 +78,16 @@ mod tests {
 
         const LEN: usize = 1_000_000;
 
+        eprintln!("start");
+
         let original: Box<[TestElem; LEN]> =
-            Box::new(std::array::from_fn(|_| TestElem([3u8; 128])));
+            crate::array_utils::boxed_from_fn(|| TestElem([3u8; 128]));
+
+        eprintln!("original");
+
         let cloned: Box<[TestElem; LEN]> = original.clone_state();
+
+        eprintln!("cloned");
         assert_eq!(cloned, original);
     }
 }

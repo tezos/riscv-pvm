@@ -21,6 +21,7 @@ pub(crate) mod tests {
 
     use crate::default::ConstDefault;
 
+    #[expect(dead_code, reason = "Test fixture kept for use in future region tests")]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     struct MyFoo(u64);
 

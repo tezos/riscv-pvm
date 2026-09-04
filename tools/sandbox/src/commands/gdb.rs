@@ -167,13 +167,13 @@ impl<S: Stepper> Target for RiscvGdb<'_, S> {
     type Arch = gdbstub_arch::riscv::Riscv64;
 
     #[inline(always)]
-    fn base_ops(&mut self) -> BaseOps<Self::Arch, Self::Error> {
+    fn base_ops(&mut self) -> BaseOps<'_, Self::Arch, Self::Error> {
         BaseOps::SingleThread(self)
     }
 
     // opt-in to support for setting/removing breakpoints
     #[inline(always)]
-    fn support_breakpoints(&mut self) -> Option<BreakpointsOps<Self>> {
+    fn support_breakpoints(&mut self) -> Option<BreakpointsOps<'_, Self>> {
         Some(self)
     }
 
@@ -223,7 +223,7 @@ impl<S: Stepper> SingleThreadBase for RiscvGdb<'_, S> {
     }
 
     #[inline(always)]
-    fn support_resume(&mut self) -> Option<SingleThreadResumeOps<Self>> {
+    fn support_resume(&mut self) -> Option<SingleThreadResumeOps<'_, Self>> {
         Some(self)
     }
 }
@@ -260,7 +260,7 @@ impl<S: Stepper> Breakpoints for RiscvGdb<'_, S> {
     // We implement support for Software Breakpoints, in a similar fashion to
     // the debugger.
     #[inline(always)]
-    fn support_sw_breakpoint(&mut self) -> Option<SwBreakpointOps<Self>> {
+    fn support_sw_breakpoint(&mut self) -> Option<SwBreakpointOps<'_, Self>> {
         Some(self)
     }
 }

@@ -297,7 +297,7 @@ impl Unfoldable for DataSpace<Normal> {
         let mut source = source.into_node()?;
 
         let length = source.next_branch_with::<u64>(|source| source.into_leaf())? as usize;
-        if length % PAGE_SIZE != 0 {
+        if !length.is_multiple_of(PAGE_SIZE) {
             // If the length isn't a multiple of PAGE_SIZE then we can't unfold safely, so we
             // error.
             return Err(UnfoldError::OfComponent(Box::new(

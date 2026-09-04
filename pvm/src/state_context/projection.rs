@@ -49,6 +49,10 @@ pub trait TypeCons {
 pub type ApplyCons<TC, MC, M> = <TC as TypeCons>::Applied<MC, M>;
 
 /// Type constructor [`Box`]
+#[expect(
+    dead_code,
+    reason = "Type constructor that only ever appears in type position"
+)]
 pub struct BoxCons<T>(PhantomData<T>);
 
 impl<T: TypeCons> TypeCons for BoxCons<T> {
@@ -56,6 +60,10 @@ impl<T: TypeCons> TypeCons for BoxCons<T> {
 }
 
 /// Type constructor `[T; LEN]`
+#[expect(
+    dead_code,
+    reason = "Type constructor that only ever appears in type position"
+)]
 pub struct ArrayCons<T, const LEN: usize>(PhantomData<T>);
 
 impl<T: TypeCons, const LEN: usize> TypeCons for ArrayCons<T, LEN> {
@@ -96,6 +104,10 @@ pub enum ProjectionOffset {
     ///
     /// Adding the offset to the base pointer will yield the address of the next base pointer. The
     /// `inner` projection then needs to proceed with the new base pointer.
+    #[expect(
+        dead_code,
+        reason = "Only built by `BoxProj`, which no projection uses yet"
+    )]
     Indirect {
         /// Offset from the base in bytes
         offset: i32,
@@ -216,6 +228,10 @@ pub trait Projection {
 }
 
 /// A projection from [`Box`] to its inner type
+#[expect(
+    dead_code,
+    reason = "Projection combinator that no projection uses yet"
+)]
 pub struct BoxProj<P>(P);
 
 impl<P: Projection> Projection for BoxProj<P> {
@@ -263,6 +279,10 @@ impl<P: Projection> Projection for BoxProj<P> {
 }
 
 /// Parameter for an array projection
+#[expect(
+    dead_code,
+    reason = "Projection combinator that no projection uses yet"
+)]
 pub struct ArrayProjParam<T> {
     /// Index of the element to project
     pub index: usize,
@@ -272,6 +292,10 @@ pub struct ArrayProjParam<T> {
 }
 
 /// A projection from an array to one of its elements
+#[expect(
+    dead_code,
+    reason = "Projection combinator that no projection uses yet"
+)]
 pub struct ArrayProj<P, const LEN: usize>(P);
 
 impl<P: Projection, const LEN: usize> Projection for ArrayProj<P, LEN> {

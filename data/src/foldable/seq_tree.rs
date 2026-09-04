@@ -94,7 +94,7 @@ impl<'a, L, G> IndexableSeqAsTree<'a, L, G> {
             "a chunk cannot be deeper than the tree it is a subtree of"
         );
         assert!(
-            start % arity.saturating_pow(depth) == 0,
+            start.is_multiple_of(arity.saturating_pow(depth)),
             "a chunk must start where a subtree of its depth starts"
         );
 
