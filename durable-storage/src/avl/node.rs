@@ -7,6 +7,8 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -43,6 +45,7 @@ use crate::key::Key;
 use crate::storage::Loadable;
 use crate::storage::ReadableKeyValueStore;
 use crate::storage::Storable;
+use crate::storage::StoreId;
 use crate::storage::StoreOptions;
 use crate::storage::WriteableKeyValueStore;
 
@@ -58,6 +61,61 @@ struct StoredNode {
     data: Hash,
     left: Hash,
     right: Hash,
+}
+
+/// Records the store a node's body has already been written to, so that committing can skip it.
+///
+/// [`Storable::store`] takes `&self`, so the memo is kept behind interior mutability, in the same
+/// spirit as the hash cache on [`Node`].
+///
+/// It records *which* store rather than a bare "already stored" flag because one tree can be
+/// shared between stores: [`crate::registry::Registry::copy_database`] hands the destination a
+/// copy of the source's store and the same in-memory nodes. A node still owing a copy at that
+/// moment owes it to both, and a flag would let the first commit satisfy the obligation and the
+/// second skip it - leaving a commit that refers to nodes which never reached its store.
+///
+/// The low bit records whether that write also included the node's value data, so a
+/// [`StoreOptions::with_node_data`] commit is never skipped on the strength of a
+/// [`StoreOptions::without_node_data`] one that came before it.
+#[derive(Debug, Default)]
+struct StoredIn(AtomicU64);
+
+impl StoredIn {
+    /// The memo of a node that is not known to be in any store.
+    ///
+    /// Distinguishable from a real store because [`StoreId::next`] hands out ids from one.
+    const NOT_STORED: u64 = StoreId::NONE.raw();
+
+    /// Whether the body is already in `store`, with the value data too if `node_data` needs it.
+    fn covers(&self, store: StoreId, node_data: bool) -> bool {
+        let memo = self.0.load(AtomicOrdering::Relaxed);
+        if memo == Self::NOT_STORED {
+            return false;
+        }
+
+        StoreId::from(memo >> 1) == store && (!node_data || memo & 1 == 1)
+    }
+
+    /// Record that the body - and, if `node_data`, the value data - is now in `store`.
+    fn record(&self, store: StoreId, node_data: bool) {
+        self.0.store(
+            (store.raw() << 1) | u64::from(node_data),
+            AtomicOrdering::Relaxed,
+        );
+    }
+
+    /// Forget where the body was written, because it no longer describes this node.
+    fn clear(&self) {
+        self.0.store(Self::NOT_STORED, AtomicOrdering::Relaxed);
+    }
+}
+
+impl Clone for StoredIn {
+    /// A clone holds the same content as the original, so it is in whichever store the original
+    /// had reached.
+    fn clone(&self) -> Self {
+        Self(AtomicU64::new(self.0.load(AtomicOrdering::Relaxed)))
+    }
 }
 
 /// A node that supports rebalancing and Merklisation.
@@ -78,6 +136,12 @@ pub struct Node<TreeId, DataId, M: Mode> {
     ///
     /// An uninitialised hash is a hash that has not been set or has been dirtied.
     hash: OnceLock<Hash>,
+
+    /// Which store this node's body has already been written to, if any.
+    ///
+    /// Cleared by [`Node::invalidate_hash`], so it is dropped by exactly the mutations that
+    /// change what this node hashes to.
+    stored_in: StoredIn,
 }
 
 impl Node<LazyTreeId, LazyDataId, Normal> {
@@ -99,6 +163,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
             left: self.left.into_proof(),
             right: self.right.into_proof(),
             hash: self.hash.clone(),
+            stored_in: StoredIn::default(),
         })
     }
 
@@ -117,6 +182,7 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
             left,
             right,
             hash: OnceLock::new(),
+            stored_in: StoredIn::default(),
         }
     }
 
@@ -131,8 +197,12 @@ impl Node<LazyTreeId, LazyDataId, Normal> {
 
 impl<TreeId, DataId, M: Mode> Node<TreeId, DataId, M> {
     /// Mark the hash of this node as dirty.
+    ///
+    /// Also forgets which store the body reached: the node no longer hashes to what was written
+    /// there, so that copy does not describe it any more.
     fn invalidate_hash(&mut self) {
         self.hash = OnceLock::new();
+        self.stored_in.clear();
     }
 
     /// Direct access to the left child identifier.
@@ -229,6 +299,7 @@ impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
             left: TreeId::default(),
             right: TreeId::default(),
             hash: OnceLock::new(),
+            stored_in: StoredIn::default(),
         }
     }
 
@@ -255,6 +326,7 @@ impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
             left,
             right,
             hash: Default::default(),
+            stored_in: StoredIn::default(),
         };
 
         Ok((ctx, node))
@@ -289,6 +361,8 @@ impl<TreeId, DataId, M: AtomMode + NodeKeyMode> Node<TreeId, DataId, M> {
     /// A mutable reference to the difference in heights between child branches.
     #[inline]
     pub(super) fn balance_factor_mut(&mut self) -> &mut i8 {
+        self.invalidate_hash();
+
         &mut self.balance_factor
     }
 
@@ -896,6 +970,15 @@ where
         store: &impl WriteableKeyValueStore,
         options: &StoreOptions,
     ) -> Result<(), OperationalError> {
+        // Nothing to write if this node is already in this store, and nothing below it either.
+        // Nodes are content-addressed: changing a descendant changes every hash above it, so an
+        // unchanged node cannot have a changed descendant. Skipping the body therefore skips the
+        // whole subtree, which is what keeps a commit to the size of what it changed.
+        let store_id = store.store_id();
+        if self.stored_in.covers(store_id, options.node_data()) {
+            return Ok(());
+        }
+
         // The stored representation is more compact. We don't include the `data` field, as that
         // should be written to the KV store separately. `left`/`right` are the hashes of the
         // child *trees* (the same values folded into this node's hash).
@@ -913,8 +996,22 @@ where
         // lookup instead of first reading a tree->node pointer. The hashes themselves are
         // unchanged, so commitments and proofs are unaffected.
         let tree_hash = Tree::<Hash>::present_hash(*self.hash());
+        let children = [repr.left, repr.right];
         let bytes = serialise(repr)?;
-        store.blob_set(tree_hash, bytes)?;
+        store.node_set(tree_hash, bytes)?;
+
+        // Recorded alongside the body, so that what refers to a node is known from the node's own
+        // side and its liveness can be decided without traversing every root. An empty tree is
+        // never stored, so there is nothing to point at.
+        for child in children {
+            if child != Tree::<Hash>::empty_hash() {
+                store.edge_set(child, tree_hash)?;
+            }
+        }
+
+        // Listed under the commit being made, so that a collection dropping that commit finds this
+        // node without having to consider every other one in the store.
+        store.node_written_at(options.commit_seq(), tree_hash)?;
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {
@@ -924,8 +1021,44 @@ where
         self.left.store(store, options)?;
         self.right.store(store, options)?;
 
+        // Recorded last: until the children are down, a later commit skipping this subtree would
+        // skip nodes that never reached the store.
+        self.stored_in.record(store_id, options.node_data());
+
         Ok(())
     }
+}
+
+/// Say why a node body could not be read.
+///
+/// A store that has collected reports an absent node as [`OperationalError::NodeCollected`], which
+/// is a different situation from an inconsistent store and is passed through rather than wrapped:
+/// wrapping it as missing commit data would lose exactly the distinction it was raised to make.
+fn missing_node(root: Hash, error: Error) -> OperationalError {
+    match error {
+        Error::Operational(collected @ OperationalError::NodeCollected { .. }) => collected,
+        error => OperationalError::CommitDataMissing {
+            root,
+            source: Box::new(error),
+        },
+    }
+}
+
+/// The tree hashes of the children recorded in a stored node body.
+///
+/// Empty children are left out: an empty tree is never stored, so nothing refers to one and no edge
+/// is recorded to one.
+///
+/// Used by the sweep, which only exists where the repository-wide Merkle store does.
+#[cfg(rocksdb)]
+pub(crate) fn stored_children(bytes: &[u8]) -> Result<Vec<Hash>, OperationalError> {
+    let StoredNode { left, right, .. } = deserialise(bytes)?;
+    let empty = Tree::<Hash>::empty_hash();
+
+    Ok([left, right]
+        .into_iter()
+        .filter(|child| *child != empty)
+        .collect())
 }
 
 /// Visit every node body reachable from the tree stored under `tree_hash`.
@@ -953,11 +1086,8 @@ pub(crate) fn walk_stored_tree(
         }
 
         let bytes = store
-            .blob_get(hash)
-            .map_err(|error| OperationalError::CommitDataMissing {
-                root: hash,
-                source: Box::new(error),
-            })?;
+            .node_get(hash)
+            .map_err(|error| missing_node(hash, error))?;
         let bytes = bytes.as_ref();
 
         visit(hash, bytes.len());
@@ -979,13 +1109,9 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
             right,
             data,
         } = {
-            let bytes =
-                store
-                    .blob_get(id)
-                    .map_err(|error| OperationalError::CommitDataMissing {
-                        root: id,
-                        source: Box::new(error),
-                    })?;
+            let bytes = store
+                .node_get(id)
+                .map_err(|error| missing_node(id, error))?;
             deserialise(bytes.as_ref())?
         };
 
@@ -998,6 +1124,12 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
         let left = TreeId::load(left, store)?;
         let right = TreeId::load(right, store)?;
 
+        // This node was just read out of `store`, so its body is there and so is its value data -
+        // whether the commit that wrote the tree carried it or the database wrote it directly.
+        // Recording that is what stops a checked-out tree from rewriting every node it touches.
+        let stored_in = StoredIn::default();
+        stored_in.record(store.store_id(), true);
+
         Ok(Self {
             balance_factor: Atom::new(balance_factor),
             key,
@@ -1005,6 +1137,7 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
             left,
             right,
             hash: OnceLock::new(),
+            stored_in,
         })
     }
 }

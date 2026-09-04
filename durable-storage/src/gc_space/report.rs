@@ -123,7 +123,7 @@ pub(super) fn summarise(out: &mut impl Write, samples: &[Sample]) -> io::Result<
         )?;
         writeln!(
             out,
-            "  blob column family grew by {:.1} MiB, {:.2} MiB per commit",
+            "  Merkle store grew by {:.1} MiB, {:.2} MiB per commit",
             mib(blob_growth),
             mib(blob_growth) / commits as f64,
         )?;
@@ -139,6 +139,26 @@ pub(super) fn summarise(out: &mut impl Write, samples: &[Sample]) -> io::Result<
                 node_growth,
                 node_growth / commits as u64,
                 blob_growth / node_growth,
+            )?;
+        }
+
+        // What the reverse edges cost, against the bodies they are recorded for. This is the price
+        // of being able to decide a node's liveness from the node upwards, and it is paid in the
+        // shared store rather than in every retained commit.
+        let edge_growth = last.blob.edge_bytes.saturating_sub(first.blob.edge_bytes);
+        let edges_added = last
+            .blob
+            .edge_entries
+            .saturating_sub(first.blob.edge_entries);
+
+        if edges_added > 0 {
+            writeln!(
+                out,
+                "  {} edge(s) written, {:.2} per node, {:.1} MiB, adding {:.1}% to the Merkle store",
+                edges_added,
+                edges_added as f64 / node_growth.max(1) as f64,
+                mib(edge_growth),
+                edge_growth as f64 / blob_growth.max(1) as f64 * 100.0,
             )?;
         }
 
@@ -162,8 +182,9 @@ pub(super) fn summarise(out: &mut impl Write, samples: &[Sample]) -> io::Result<
         if pinned.total() > 0 {
             writeln!(
                 out,
-                "  {:.1}% of what the history pins is Merkle node data, which a shared store would \
-                 stop duplicating per commit",
+                "  {:.1}% of what the history pins is Merkle node data; the rest is values. Nodes \
+                 live in the repository-wide store, outside the commit directories, so this is \
+                 whatever the blob column family still holds for other users of it",
                 pinned.blob as f64 / pinned.total() as f64 * 100.0,
             )?;
         }
@@ -230,7 +251,7 @@ pub(super) fn summarise(out: &mut impl Write, samples: &[Sample]) -> io::Result<
 
     writeln!(
         out,
-        "  {:.1}% of the blob column family is now dead ({:.1} MiB of {:.1} MiB)",
+        "  {:.1}% of the Merkle store is now dead ({:.1} MiB of {:.1} MiB)",
         last.blob.dead_fraction() * 100.0,
         mib(last.blob.dead_bytes()),
         mib(last.blob.stored_bytes),
@@ -261,8 +282,35 @@ pub(super) fn report_prune(
     writeln!(out)?;
     writeln!(
         out,
-        "simulated directory-level collection: removed {} database commit(s) and {} manifest(s)",
-        outcome.databases_removed, outcome.registries_removed,
+        "collection: removed {} database commit(s), {} manifest(s), and {} Merkle node(s) with {} edge(s)",
+        outcome.databases_removed,
+        outcome.registries_removed,
+        outcome.nodes_removed,
+        outcome.edges_removed,
+    )?;
+    writeln!(
+        out,
+        "  {:.1} MiB of node data deleted",
+        mib(outcome.node_bytes_removed),
+    )?;
+    writeln!(
+        out,
+        "  examined {} node(s) to find them",
+        outcome.nodes_examined,
+    )?;
+    writeln!(
+        out,
+        "  took {} ms: {} ms over the commits, {} ms sweeping nodes, {} ms compacting",
+        outcome.commits_ms + outcome.sweep_ms + outcome.compact_ms,
+        outcome.commits_ms,
+        outcome.sweep_ms,
+        outcome.compact_ms,
+    )?;
+    writeln!(
+        out,
+        "  peak memory {:.0} MiB, up {:.0} MiB over the sweep",
+        mib(outcome.peak_rss),
+        mib(outcome.peak_rss.saturating_sub(outcome.rss_before_sweep)),
     )?;
     writeln!(
         out,
@@ -281,12 +329,16 @@ pub(super) fn report_prune(
         return Ok(());
     };
 
+    // Against what the store held before, not against a live figure: the base state is pinned as
+    // well as the last commit, so nodes only the base reaches are retained on purpose and counting
+    // them as dead - which the per-sample figure does, measuring against the sampled commit alone -
+    // would report them as a leak.
     writeln!(
         out,
-        "  still dead and now unreachable by any directory deletion: {:.1} MiB of node data \
-         ({:.1}% of the surviving blob column family)",
-        mib(last.blob.dead_bytes()),
-        last.blob.dead_fraction() * 100.0,
+        "  Merkle store held {:.1} MiB before collecting, of which {:.1} MiB was reachable from \
+         the last commit",
+        mib(last.blob.stored_bytes),
+        mib(last.blob.live_bytes),
     )?;
 
     Ok(())

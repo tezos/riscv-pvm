@@ -20,12 +20,10 @@ use std::num::NonZeroUsize;
 
 use anyhow::Context;
 use anyhow::Result;
-use octez_riscv_data::mode::Normal;
 
 use crate::commit::CommitId;
-use crate::persistence_layer::PersistenceLayer;
-use crate::registry::Registry;
 use crate::repo::DirectoryManager;
+use crate::repo::RegistryRepo;
 use crate::storage::in_memory::InMemoryRepo;
 
 /// Drop epoch snapshots older than the `keep` most-recent, garbage-collecting
@@ -59,16 +57,15 @@ fn prune_registry_commit(
 ) -> Result<()> {
     let mut reachable: HashSet<CommitId> = HashSet::new();
     for commit in retained {
-        for db in Registry::<PersistenceLayer, Normal>::database_commits(persistent_repo, commit)
+        for db in crate::registry::database_commits(persistent_repo, commit)
             .context("reading a retained registry manifest")?
         {
             reachable.insert(db);
         }
     }
 
-    let old_databases =
-        Registry::<PersistenceLayer, Normal>::database_commits(persistent_repo, old)
-            .context("reading the evicted registry manifest")?;
+    let old_databases = crate::registry::database_commits(persistent_repo, old)
+        .context("reading the evicted registry manifest")?;
     for db in old_databases {
         if reachable.contains(&db) {
             continue;
@@ -98,12 +95,15 @@ fn prune_registry_commit(
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use octez_riscv_data::mode::Normal;
     use octez_riscv_test_utils::TestableTmpdir;
 
     use super::*;
     use crate::key::Key;
     use crate::long_test::registry::run_case::advance_base;
     use crate::long_test::registry::run_case::initial_base;
+    use crate::persistence_layer::PersistenceLayer;
+    use crate::registry::Registry;
     use crate::storage::in_memory::InMemoryKeyValueStore;
     use crate::test_helpers::database::DatabaseOperation;
     use crate::test_helpers::registry::RegistryOperation;

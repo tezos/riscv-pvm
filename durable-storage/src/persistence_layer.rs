@@ -31,6 +31,7 @@
 
 use std::mem::ManuallyDrop;
 use std::path::Path;
+use std::sync::Arc;
 
 use bincode::BorrowDecode;
 use bincode::Encode;
@@ -43,12 +44,14 @@ use crate::commit::CommitId;
 use crate::errors::Error;
 use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
+use crate::merkle_store::MerkleStore;
 use crate::merkle_worker::CommittedRoot;
 use crate::merkle_worker::MerkleWorker;
 use crate::repo::DirectoryManager;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::ReadOnlyKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
+use crate::storage::StoreId;
 use crate::storage::WriteableKeyValueStore;
 
 /// The name of the column family used for storing blob-keyed data.
@@ -194,9 +197,9 @@ fn add_creation_options(options: &mut rocksdb::Options) {
 /// the new durable storage is not the RISC-V PVM's alone, and is meant to serve the WASM PVM
 /// too.
 ///
-/// - `OCTEZ_NDS_ROCKSDB_L0_TRIGGER`: files at level zero before compaction runs. The default of 4,
-///   combined with the flush every commit forces, means compaction runs every four commits whatever
-///   they contain.
+/// - `OCTEZ_NDS_ROCKSDB_L0_TRIGGER`: files at level zero before compaction runs, overriding the
+///   default of twenty set below. At RocksDB's own default of four, combined with the flush every
+///   commit forces, compaction runs every four commits whatever they contain.
 /// - `OCTEZ_NDS_ROCKSDB_DISABLE_AUTO_COMPACTION`: stop compacting the working database at all.
 ///   Presence is what is read rather than the value, so anything enables it, `0` included. Level
 ///   zero is then free to grow for as long as the sweep runs: RocksDB conditions each of its
@@ -217,9 +220,41 @@ fn add_measurement_tuning(options: &mut rocksdb::Options) {
     }
 }
 
+/// Number of level-zero files to accumulate before compacting them downwards.
+///
+/// Compaction is unusually expensive here because commits are retained: a checkpoint hard-links the
+/// files live when it was taken, so rewriting a file ends sharing for every checkpoint taken before
+/// it. Keys are spread by hash, so a level-zero file spans the whole key space and overlaps
+/// everything below, which makes each compaction a rewrite of the whole base level.
+///
+/// The trigger counts *files*, and creating a checkpoint flushes the memtable, so one file appears
+/// per commit however little it contains. Left at RocksDB's default of four, compaction therefore
+/// runs every four commits regardless of how much was written. Raising it makes the cadence coarser,
+/// which is paid for by the bloom filters below: more files at level zero means more of them to
+/// search on a lookup that finds nothing.
+const LEVEL_ZERO_COMPACTION_TRIGGER: i32 = 20;
+
+/// Bits per key for the bloom filters, giving roughly a 1% false positive rate.
+const BLOOM_FILTER_BITS_PER_KEY: f64 = 10.0;
+
+/// Add bloom filters, so a lookup can skip files that cannot hold the key.
+///
+/// Both column families are looked up by whole key and never scanned by range - blobs by content
+/// hash, values by their key - which is exactly the shape bloom filters serve. Without them a
+/// lookup consults the index of every file whose key range covers the key, which for hash-spread
+/// keys is most of them.
+fn add_bloom_filters(options: &mut rocksdb::Options) {
+    let mut table_options = rocksdb::BlockBasedOptions::default();
+    table_options.set_bloom_filter(BLOOM_FILTER_BITS_PER_KEY, false);
+
+    options.set_block_based_table_factory(&table_options);
+}
+
 fn rocksdb_default_options() -> rocksdb::Options {
     let mut options = rocksdb::Options::default();
     set_memtable_to_hash_link_list(&mut options);
+    add_bloom_filters(&mut options);
+    options.set_level_zero_file_num_compaction_trigger(LEVEL_ZERO_COMPACTION_TRIGGER);
 
     #[cfg(rocksdb_test_utils)]
     add_measurement_tuning(&mut options);
@@ -245,6 +280,20 @@ fn rocksdb_creation_options() -> rocksdb::Options {
 fn rocksdb_blob_cf_creation_options() -> rocksdb::Options {
     let mut options = rocksdb_default_options();
     add_creation_options(&mut options);
+    options
+}
+
+/// Options for the repository-wide Merkle node store.
+///
+/// Created on first use and reopened on every use after that, so unlike a database instance it must
+/// tolerate already existing - a repository outlives any one run against it.
+///
+/// No merge operator: nodes are written whole and never appended to, unlike values, which take
+/// offset writes. Otherwise the same as everything else here - the store is looked up by content
+/// hash, so it wants the same filters and the same compaction cadence.
+pub(crate) fn rocksdb_node_store_options() -> rocksdb::Options {
+    let mut options = rocksdb_default_options();
+    options.create_if_missing(true);
     options
 }
 
@@ -391,6 +440,12 @@ pub struct PersistenceLayer {
     /// We need to own this in order to keep alive the temporary directory for the lifetime of the
     /// persistence layer.
     _tempdir: TempDir,
+
+    /// Where Merkle node bodies are read from and written to.
+    ///
+    /// Shared by every database of the repository, so a node reached from several of them is stored
+    /// once. See [`MerkleStore`].
+    merkle: Arc<MerkleStore>,
 }
 
 impl PersistenceLayer {
@@ -421,16 +476,30 @@ impl PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(temp_db),
             _tempdir: tempdir,
+            merkle: repo.merkle_store().clone(),
         })
     }
 
     fn blob_cf(&self) -> &rocksdb::ColumnFamily {
         blob_cf_of(&self.db_instance)
     }
+
+    /// The repository-wide store holding this database's Merkle node bodies.
+    pub fn merkle_store(&self) -> &Arc<MerkleStore> {
+        &self.merkle
+    }
 }
 
 impl ReadableKeyValueStore for PersistenceLayer {
     type Repo = DirectoryManager;
+
+    fn store_id(&self) -> StoreId {
+        self.merkle.store_id()
+    }
+
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        self.merkle.get(key.as_ref())
+    }
 
     type Merkle = MerkleWorker<Self>;
 
@@ -453,12 +522,25 @@ pub struct ReadOnlyPersistenceLayer {
     /// Unlike [`PersistenceLayer`], no manual-drop is needed: dropping this closes the handle
     /// and there is nothing to destroy afterwards.
     db_instance: rocksdb::DB,
+
+    /// Where Merkle node bodies are read from.
+    ///
+    /// The commit directory holds this database's values; its nodes live in the repository's store,
+    /// which is why reading a commit in place still needs the repository.
+    merkle: Arc<MerkleStore>,
 }
 
 impl ReadableKeyValueStore for ReadOnlyPersistenceLayer {
     type Repo = DirectoryManager;
 
     type Merkle = CommittedRoot;
+    fn store_id(&self) -> StoreId {
+        self.merkle.store_id()
+    }
+
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        self.merkle.get(key.as_ref())
+    }
 
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         blob_get_from(&self.db_instance, key.as_ref())
@@ -473,10 +555,13 @@ impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
     type Writeable = PersistenceLayer;
 
     fn checkout_read_only(repo: &Self::Repo, id: &CommitId) -> Result<Self, OperationalError> {
-        Self::checkout_read_only_from_path(&repo.database_commit_dir(id))
+        Self::checkout_read_only_from_path(repo, &repo.database_commit_dir(id))
     }
 
-    fn checkout_read_only_from_path(commit_path: &Path) -> Result<Self, OperationalError> {
+    fn checkout_read_only_from_path(
+        repo: &Self::Repo,
+        commit_path: &Path,
+    ) -> Result<Self, OperationalError> {
         // A directory that is not a published commit is no commit at all - an interrupted removal
         // by an older version of `commit` can leave one behind, and opening it would fail further
         // in, with an error about the database rather than about the commit.
@@ -486,6 +571,7 @@ impl ReadOnlyKeyValueStore for ReadOnlyPersistenceLayer {
 
         Ok(Self {
             db_instance: open_committed_read_only(commit_path)?,
+            merkle: repo.merkle_store().clone(),
         })
     }
 
@@ -515,11 +601,40 @@ impl WriteableKeyValueStore for PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(db),
             _tempdir: tempdir,
+            merkle: repo.merkle_store().clone(),
         })
     }
 
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError> {
         Self::clone_as_checkpoint(&self.db_instance, repo)
+    }
+
+    fn node_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        self.merkle.set(key.as_ref(), data.as_ref())
+    }
+
+    fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+        self.merkle.delete(key.as_ref())
+    }
+
+    fn edge_set(
+        &self,
+        child: impl AsRef<[u8]>,
+        parent: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        self.merkle.set_edge(child.as_ref(), parent.as_ref())
+    }
+
+    fn node_written_at(
+        &self,
+        seq: crate::journal::Seq,
+        key: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError> {
+        self.merkle.log_written(seq, key.as_ref())
     }
 
     fn blob_set(
@@ -637,6 +752,12 @@ impl PersistentKeyValueStore for PersistenceLayer {
             return Ok(());
         }
 
+        // The checkpoint below captures this database's values. The Merkle nodes they are indexed
+        // by live in the repository's store, which the checkpoint does not touch, so they are put
+        // beyond reach of a crash first - otherwise a commit could survive while the nodes it
+        // refers to did not.
+        self.merkle.sync()?;
+
         // Stage the checkpoint in a directory of its own and move it into place, rather than
         // checkpointing straight into `commit_path`: RocksDB stages a checkpoint at
         // `<destination>.tmp`, so two commits of one id would otherwise share - and clobber - a
@@ -706,7 +827,15 @@ impl PersistentKeyValueStore for PersistenceLayer {
         }
     }
 
+    fn next_commit_seq(
+        &self,
+        repo: &DirectoryManager,
+    ) -> Result<crate::journal::Seq, OperationalError> {
+        crate::repo::RegistryRepo::next_commit_seq(repo)
+    }
+
     fn checkout_from_path(
+        repo: &DirectoryManager,
         commit_path: &Path,
         working_path: TempDir,
     ) -> Result<Self, OperationalError> {
@@ -741,6 +870,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
         Ok(Self {
             db_instance: ManuallyDrop::new(database),
             _tempdir: working_path,
+            merkle: repo.merkle_store().clone(),
         })
     }
 
@@ -748,7 +878,7 @@ impl PersistentKeyValueStore for PersistenceLayer {
         let commit_path = repo.database_commit_dir(id);
         let working_path = repo.temp_database_dir()?;
 
-        Self::checkout_from_path(&commit_path, working_path)
+        Self::checkout_from_path(repo, &commit_path, working_path)
     }
 }
 

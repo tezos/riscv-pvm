@@ -27,11 +27,9 @@ use super::sample::LevelSummary;
 use super::sample::PinnedBytes;
 use super::sample::Sample;
 use super::sample::Sharing;
-use super::scenario::Reg;
 use crate::avl::node::walk_stored_tree;
 use crate::commit::CommitId;
 use crate::persistence_layer::ReadOnlyPersistenceLayer;
-use crate::persistence_layer::measurement::CfTotals;
 use crate::persistence_layer::measurement::SstOwner;
 use crate::repo::DirectoryManager;
 use crate::storage::ReadOnlyKeyValueStore;
@@ -47,14 +45,19 @@ pub(super) fn measure(
 ) -> Result<(Sample, FileSet)> {
     let started = Instant::now();
 
-    let database_commits = Reg::database_commits(repo, registry_commit)
+    let database_commits = crate::registry::database_commits(repo, registry_commit)
         .context("reading the registry manifest being measured")?;
 
-    let mut blob = BlobBreakdown::default();
     let mut value_entries = 0;
     let mut value_stored_bytes = 0;
     let mut sst_bytes = 0;
     let mut files: FileSet = HashMap::new();
+
+    // One live set for the whole registry commit, not one per database. Nodes live in a store
+    // shared by the repository, so a body reachable from two databases is one body, and counting it
+    // twice would overstate what is live and understate what is dead.
+    let mut live: HashSet<Hash> = HashSet::new();
+    let mut live_bytes = 0;
 
     for (db_index, database_commit) in database_commits.iter().enumerate() {
         let committed = ReadOnlyPersistenceLayer::checkout_read_only(repo, database_commit)
@@ -65,7 +68,7 @@ pub(super) fn measure(
                 )
             })?;
 
-        blob.add(&measure_blob(&committed, database_commit)?);
+        walk_live_nodes(&committed, database_commit, &mut live, &mut live_bytes)?;
 
         let values = committed
             .value_totals()
@@ -85,6 +88,31 @@ pub(super) fn measure(
         }
     }
 
+    // Read once for the repository, since the store is the repository's rather than any one
+    // database's. Its SSTs are counted separately from the commit directories' for the same reason:
+    // they are not hard-linked into any of them.
+    let merkle = repo.merkle_store();
+    let totals = merkle
+        .totals()
+        .map_err(|error| anyhow::anyhow!("scanning the Merkle store: {error}"))?;
+
+    let edges = merkle
+        .edge_totals()
+        .map_err(|error| anyhow::anyhow!("scanning the Merkle store edges: {error}"))?;
+
+    let blob = BlobBreakdown {
+        entries: totals.entries,
+        stored_bytes: totals.stored_bytes(),
+        live_entries: live.len() as u64,
+        live_bytes,
+        edge_entries: edges.entries,
+        edge_bytes: edges.stored_bytes(),
+    };
+
+    sst_bytes += merkle
+        .sst_bytes()
+        .map_err(|error| anyhow::anyhow!("reading Merkle store SST sizes: {error}"))?;
+
     let sample = Sample {
         commit: commit_index,
         registry_commit: registry_commit.hex_encode(),
@@ -94,7 +122,8 @@ pub(super) fn measure(
         sst_bytes,
         disk: disk_usage(repo_path).context("measuring repository disk usage")?,
         disk_commits: commits_disk_usage(repo_path).context("measuring committed history usage")?,
-        pinned: pinned_by_cf(repo_path).context("attributing pinned bytes to column families")?,
+        pinned: pinned_by_cf(repo, repo_path)
+            .context("attributing pinned bytes to column families")?,
         sharing: previous.map(|previous| sharing_between(previous, &files)),
         levels: level_summary(&files),
         commit_dirs: count_commit_dirs(repo_path)?,
@@ -153,23 +182,20 @@ fn level_summary(files: &FileSet) -> Vec<LevelSummary> {
     levels
 }
 
-/// Split one committed database's blob column family into live and dead.
-fn measure_blob(
+/// Add the nodes reachable from one committed database to `live`.
+///
+/// Bodies are deduplicated against what is already there: content-addressed subtrees can be reached
+/// by more than one path, and now that the store is shared, by more than one database.
+fn walk_live_nodes(
     committed: &ReadOnlyPersistenceLayer,
     database_commit: &CommitId,
-) -> Result<BlobBreakdown> {
-    let totals: CfTotals = committed
-        .blob_totals()
-        .map_err(|error| anyhow::anyhow!("scanning the blob column family: {error}"))?;
-
-    // Deduplicated, because content-addressed subtrees can be reachable by more than one path and
-    // would otherwise be counted once per reference.
-    let mut live: HashSet<Hash> = HashSet::new();
-    let mut live_body_bytes = 0;
-
+    live: &mut HashSet<Hash>,
+    live_bytes: &mut u64,
+) -> Result<()> {
     walk_stored_tree(committed, *database_commit.as_hash(), |hash, len| {
         if live.insert(hash) {
-            live_body_bytes += len as u64;
+            // Each body is stored under its hash, so a live node costs a digest for its key too.
+            *live_bytes += len as u64 + Hash::DIGEST_SIZE as u64;
         }
     })
     .with_context(|| {
@@ -177,16 +203,6 @@ fn measure_blob(
             "walking the tree committed at {}",
             database_commit.hex_encode()
         )
-    })?;
-
-    let live_entries = live.len() as u64;
-
-    Ok(BlobBreakdown {
-        entries: totals.entries,
-        stored_bytes: totals.stored_bytes(),
-        live_entries,
-        // Each body is stored under a hash, so the live keys cost a digest apiece.
-        live_bytes: live_body_bytes + live_entries * Hash::DIGEST_SIZE as u64,
     })
 }
 
@@ -206,7 +222,7 @@ pub(crate) fn disk_usage(root: &Path) -> Result<DiskUsage> {
 ///
 /// Note this is what the history *references*, not what deleting it would free: commits hard-link
 /// the working database's files, so blocks counted here can be held by the working database too.
-/// Use [`SpaceConfig::simulate_dir_gc`] for what deletion actually reclaims.
+/// Use [`SpaceConfig::collect`] for what deletion actually reclaims.
 pub(super) fn commits_disk_usage(repo_path: &Path) -> Result<DiskUsage> {
     let mut usage = DiskUsage::default();
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
@@ -268,7 +284,7 @@ fn accumulate_disk_usage(
 /// which. Inodes are deduplicated across all commits, so a file hard-linked into twenty checkpoints
 /// counts once: the result is what retaining this history actually costs the filesystem, split by
 /// what it is holding.
-fn pinned_by_cf(repo_path: &Path) -> Result<PinnedBytes> {
+fn pinned_by_cf(repo: &DirectoryManager, repo_path: &Path) -> Result<PinnedBytes> {
     let commits_dir = repo_path.join("databases").join("commits");
     let mut pinned = PinnedBytes::default();
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
@@ -288,7 +304,7 @@ fn pinned_by_cf(repo_path: &Path) -> Result<PinnedBytes> {
         // Read the attribution before walking, and close the instance straight after: a sample can
         // visit many commits and there is no reason to hold them all open at once.
         let owners = {
-            let committed = ReadOnlyPersistenceLayer::checkout_read_only_from_path(&dir)
+            let committed = ReadOnlyPersistenceLayer::checkout_read_only_from_path(repo, &dir)
                 .with_context(|| format!("opening {} read-only", dir.display()))?;
 
             committed
@@ -320,6 +336,23 @@ fn pinned_by_cf(repo_path: &Path) -> Result<PinnedBytes> {
     }
 
     Ok(pinned)
+}
+
+/// This process's high-water resident set size, in bytes.
+///
+/// Read from the kernel's own accounting rather than an allocator's idea of it.
+pub(super) fn peak_rss_bytes() -> u64 {
+    let Ok(status) = fs::read_to_string("/proc/self/status") else {
+        return 0;
+    };
+
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("VmHWM:"))
+        .and_then(|value| value.split_whitespace().next())
+        .and_then(|kib| kib.parse::<u64>().ok())
+        .map(|kib| kib * 1024)
+        .unwrap_or(0)
 }
 
 /// Count the database commit directories in the repository.

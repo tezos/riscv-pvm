@@ -42,10 +42,12 @@ use crate::database::Database;
 use crate::key::Key;
 use crate::persistence_layer::PersistenceLayer;
 use crate::registry::Registry;
+use crate::registry::database_commits;
 use crate::repo::DirectoryManager;
+use crate::repo::RegistryRepo;
 
 /// The registry type this harness measures.
-pub(super) type Reg = Registry<PersistenceLayer, Normal>;
+type Reg = Registry<PersistenceLayer, Normal>;
 
 /// Name of the file recording a reusable base state in the repository directory.
 const BASE_STATE_FILE: &str = "gc_space_base.json";
@@ -104,13 +106,19 @@ pub struct SpaceConfig {
     /// Write one JSON object per sample to this path.
     pub json_out: Option<PathBuf>,
 
-    /// After the last commit, delete every commit not reachable from it and measure again.
+    /// How far behind the tip to collect, in commits.
     ///
-    /// This is what collecting at directory granularity would reclaim, so running with it splits
-    /// the storage into three parts: what a directory-level collection frees, what remains and is
-    /// still needed, and what remains but is dead. The last part is the dead node data, which sits
-    /// in files the surviving commit still references and which no directory deletion can reach.
-    pub simulate_dir_gc: bool,
+    /// A rollup node collects at the last commit it has cemented rather than at the newest one, and
+    /// the gap matters: it is what keeps a node settled by one round out of the next round's range.
+    pub collect_window: usize,
+
+    /// After the last commit, collect at it and measure again.
+    ///
+    /// This is what collecting at directory granularity reclaims, so running with it splits the
+    /// storage into three parts: what collection frees, what remains and is still needed, and what
+    /// remains but is dead. The last part is the dead node data, which sits in files the surviving
+    /// commit still references and which no directory deletion can reach.
+    pub collect: bool,
 }
 
 impl SpaceConfig {
@@ -207,7 +215,7 @@ impl SpaceConfig {
 
         let mut rng = StdRng::seed_from_u64(self.seed);
 
-        let mut last_commit = base_commit;
+        let mut commits: Vec<CommitId> = Vec::new();
 
         for commit_index in 1..=self.commits {
             modify(&mut registry, &self, &mut rng, commit_index)
@@ -218,7 +226,7 @@ impl SpaceConfig {
                 .commit()
                 .with_context(|| format!("committing at commit {commit_index}"))?;
             let commit_time = started.elapsed();
-            last_commit = commit;
+            commits.push(commit);
 
             if commit_index % self.sample_every != 0 && commit_index != self.commits {
                 continue;
@@ -245,15 +253,59 @@ impl SpaceConfig {
 
         summarise(&mut out, &samples)?;
 
-        if self.simulate_dir_gc {
-            // The base state is retained alongside the last commit, not because a collection would
-            // keep it, but because a persistent `--repo-dir` records it for later runs to check out.
-            // Pruning it would leave `gc_space_base.json` naming a commit whose directory is gone, and
-            // the next run of the same shape would fail instead of reusing the base.
-            let retained = [last_commit, base_commit];
-            let outcome = prune_unreachable(&repo, &repo_path, &retained)
-                .context("simulating a directory-level collection")?;
+        if self.collect {
+            // The base state is retained alongside the last commit, not because collecting at the last
+            // commit would keep it, but because a persistent `--repo-dir` records it for later runs to
+            // check out. Dropping it would leave `gc_space_base.json` naming a commit whose directory
+            // is gone, and the next run of the same shape would fail instead of reusing the base.
+            //
+            // Recording it again is how a root is pinned: retention goes by the order commits were
+            // recorded in, and a root keeps its highest position, so re-recording moves the base above
+            // the floor without committing anything or touching its identity.
+            repo.record_commit(&base_commit)
+                .context("pinning the base state before collecting")?;
+
+            // A rollup node collects behind its tip, at the last commit it has cemented, not at the
+            // newest one. That gap is what lets a node settled by one round stay settled: it is relisted
+            // under the newest retained root, which is above the floor of every round until the floor
+            // passes it. Collecting exactly at the tip leaves no such gap.
+            let window = self.collect_window.min(commits.len().saturating_sub(1));
+            let target = commits[commits.len() - 1 - window];
+
+            writeln!(
+                out,
+                "\ncatching up: collecting {window} commit(s) behind the tip, over a store nothing has \
+                 collected before"
+            )?;
+            let outcome = prune_unreachable(&repo, &repo_path, &target)
+                .context("collecting at directory level")?;
             report_prune(&mut out, &outcome, samples.last())?;
+
+            // A settled store, then the churn of one more window, then a round over that churn. This is
+            // the steady state - what a repository that is collected regularly actually pays.
+            if window > 0 {
+                let settled_tip = commits.len();
+
+                for extra in 1..=window {
+                    modify(&mut registry, &self, &mut rng, self.commits + extra)
+                        .context("applying steady-state modifications")?;
+                    commits.push(
+                        registry
+                            .commit()
+                            .context("committing during the steady-state phase")?,
+                    );
+                }
+
+                let target = commits[settled_tip - 1];
+
+                writeln!(
+                    out,
+                    "\nsteady state: {window} commit(s) of churn over a settled store"
+                )?;
+                let outcome = prune_unreachable(&repo, &repo_path, &target)
+                    .context("collecting in the steady state")?;
+                report_prune(&mut out, &outcome, None)?;
+            }
         }
 
         Ok(())
@@ -364,7 +416,7 @@ fn reset_to_base(
     base: &CommitId,
 ) -> Result<()> {
     let reachable =
-        Reg::database_commits(repo, base).context("reading the base state's registry manifest")?;
+        database_commits(repo, base).context("reading the base state's registry manifest")?;
 
     let mut removed = 0;
 
@@ -649,7 +701,7 @@ mod tests {
     /// A run small enough for the test suite, still covering every measurement the harness makes:
     /// more than one database, a large-value tail, and enough commits for a sample to be a delta of
     /// the one before it.
-    fn restricted_config(repo_dir: &Path, simulate_dir_gc: bool) -> SpaceConfig {
+    fn restricted_config(repo_dir: &Path, collect: bool) -> SpaceConfig {
         SpaceConfig {
             databases: 2,
             keys_per_database: 100,
@@ -665,7 +717,10 @@ mod tests {
             seed: 0,
             repo_dir: Some(repo_dir.to_path_buf()),
             json_out: None,
-            simulate_dir_gc,
+            // Collect at the tip: the restricted runs are too short for a window to leave
+            // anything behind it.
+            collect_window: 0,
+            collect,
         }
     }
 

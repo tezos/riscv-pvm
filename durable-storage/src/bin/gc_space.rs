@@ -75,11 +75,18 @@ struct Cli {
     #[arg(long)]
     json_out: Option<PathBuf>,
 
-    /// After the last commit, delete every commit not reachable from it and measure again.
+    /// How far behind the tip to collect, in commits.
+    ///
+    /// A rollup node collects at the commit it has cemented, not the newest one. With a window,
+    /// the run also measures a second round over a settled store, which is the steady state.
+    #[arg(long, default_value_t = 0)]
+    collect_window: usize,
+
+    /// After the last commit, collect at it and measure again.
     ///
     /// Shows what collecting at directory granularity reclaims, and what dead node data survives it.
     #[arg(long)]
-    simulate_dir_gc: bool,
+    collect: bool,
 }
 
 fn main() -> Result<()> {
@@ -114,7 +121,8 @@ fn main() -> Result<()> {
         seed: cli.seed,
         repo_dir: cli.repo_dir,
         json_out: cli.json_out,
-        simulate_dir_gc: cli.simulate_dir_gc,
+        collect: cli.collect,
+        collect_window: cli.collect_window,
     }
     .run()
 }

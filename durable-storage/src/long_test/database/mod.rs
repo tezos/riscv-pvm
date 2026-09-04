@@ -274,6 +274,10 @@ fn write_failure(
         .commit_to_path(&failure_dir.join(PERSISTENT_BASE))
         .context("writing the persistent base snapshot")?;
 
+    // The snapshot above holds the base's values. Its Merkle nodes live in the repository's store,
+    // so they are copied out too - otherwise the artifact could not be replayed anywhere but here.
+    super::save_merkle_base(&failure_dir, persistent_repo)?;
+
     eprintln!(
         "failure artifacts written to {failure}\n\
          replay with:\n\
@@ -299,6 +303,10 @@ pub fn replay_failure(dir: &Path) -> Result<()> {
     let repo_dir = out_dir.join("repo");
     fs::create_dir_all(&repo_dir)
         .with_context(|| format!("creating repo dir {}", repo_dir.display()))?;
+    // Before the handle is constructed, since that opens the Merkle store and the base's values
+    // refer to the nodes saved with the artifact.
+    super::restore_merkle_base(dir, &repo_dir)?;
+
     let persistent_repo =
         DirectoryManager::new(&repo_dir).context("creating the directory manager")?;
     let in_memory_repo = InMemoryRepo::default();
@@ -314,9 +322,12 @@ pub fn replay_failure(dir: &Path) -> Result<()> {
     let working_dir = persistent_repo
         .temp_database_dir()
         .context("creating a scratch directory")?;
-    let persistent_store =
-        PersistenceLayer::checkout_from_path(&dir.join(PERSISTENT_BASE), working_dir)
-            .context("loading the persistent base snapshot")?;
+    let persistent_store = PersistenceLayer::checkout_from_path(
+        &persistent_repo,
+        &dir.join(PERSISTENT_BASE),
+        working_dir,
+    )
+    .context("loading the persistent base snapshot")?;
     persistent_store
         .commit(&persistent_repo, &meta.base_commit)
         .context("registering the persistent base")?;
@@ -325,9 +336,12 @@ pub fn replay_failure(dir: &Path) -> Result<()> {
     let working_dir = persistent_repo
         .temp_database_dir()
         .context("creating a scratch directory")?;
-    let in_memory_store =
-        InMemoryKeyValueStore::checkout_from_path(&dir.join(IN_MEMORY_BASE), working_dir)
-            .context("loading the in-memory base snapshot")?;
+    let in_memory_store = InMemoryKeyValueStore::checkout_from_path(
+        &in_memory_repo,
+        &dir.join(IN_MEMORY_BASE),
+        working_dir,
+    )
+    .context("loading the in-memory base snapshot")?;
     in_memory_store
         .commit(&in_memory_repo, &meta.base_commit)
         .context("registering the in-memory base")?;

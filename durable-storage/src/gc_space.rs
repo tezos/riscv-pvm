@@ -13,9 +13,9 @@
 //!   version that compaction discards. The value column family stays proportional to the key space
 //!   that is live in it.
 //! - Merkle node bodies are keyed by content hash, so every version of every node is a distinct
-//!   key that nothing ever deletes. The blob column family accumulates every node ever written.
+//!   key that nothing ever deletes. The Merkle store accumulates every node ever written.
 //!
-//! So for the blob column family this harness reports a **live** figure (the bodies reachable from
+//! So for the Merkle store this harness reports a **live** figure (the bodies reachable from
 //! the committed root, found by walking the stored representation) and a **dead** figure
 //! (everything else in it). Dead bytes are what garbage collection could reclaim and what nothing
 //! reclaims today.

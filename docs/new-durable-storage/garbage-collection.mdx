@@ -3,14 +3,11 @@ title: "Garbage collection"
 description: "What the durable storage reclaims, what it does not, and why values and Merkle nodes need different mechanisms"
 ---
 
-The durable storage keeps every state it has ever committed.
-Nothing removes a commit, so disk use only ever grows.
+The durable storage drops states older than a chosen one, reclaiming both halves of the commits it drops.
+That is what `octez-smart-rollup-node` expects of its context: keep only the history it still needs.
 
-A rollup node cannot run that way.
-`octez-smart-rollup-node` expects its context to drop states older than a chosen one, so that a node keeps only the history it still needs.
-
-This page describes how commits occupy disk today, which parts of them the storage already reclaims, and which parts it cannot reclaim at all.
-The two halves of a commit behave completely differently, and the difference is what the garbage collection design follows from.
+This page describes how commits occupy disk and how each half of one is reclaimed.
+The two halves behave completely differently, and that difference is why they need two mechanisms rather than one.
 
 ## How commits occupy disk
 
@@ -22,23 +19,86 @@ A repository is a directory tree of databases and commits:
     temporary/db_<random>/checkpoint/   working databases
     commits/<commit_id>/                database commits
   registries/commits/<commit_id>        registry manifests
+  registries/journal                    the order commits were made in
+  merkle/                               Merkle node bodies and the log of what wrote them
+  merkle-commits/<n>/                   recoverable images of that store
+  merkle-commits/<n>.lease              what a reader of one holds
 ```
 
-Each database is a RocksDB instance holding two column families:
+Each database is a RocksDB instance holding the values you store, keyed by your key.
+Merkle (AVL) node and tree bodies are keyed by content hash and live in one store shared by the whole repository, not in the databases.
 
-| Column family | Contents | Keyed by |
-|---|---|---|
-| `default` | Values you store | Your key |
-| `blob` | Merkle (AVL) node bodies | Hash of the tree that holds the node |
-
-A database commit is a RocksDB checkpoint, taken with `Checkpoint::create_checkpoint`.
-A checkpoint flushes both column families' memtables and then **hard-links** the SST files, so a commit shares its data with the working database instead of copying it.
+A database commit is a RocksDB checkpoint of that database, taken with `Checkpoint::create_checkpoint`.
+A checkpoint flushes the memtable and then **hard-links** the SST files, so a commit shares its data with the working database instead of copying it.
 That makes committing cheap, and it leaves a directory another process can open read-only without disturbing it: a checkpoint is a complete database in its own right - its own `CURRENT` and `MANIFEST`, alongside hard links to the SST files - and a read-only open writes nothing whatsoever into what it reads, not even a log.
+
+A commit directory therefore holds that database's values, and the nodes indexing them are found through the repository.
+Committing syncs the Merkle store before taking the checkpoint, so a commit never refers to a node that a crash could take with it.
 
 A registry commit is a single file naming the database commits that make up that registry.
 Database commits are content-addressed, so several registry commits can name the same database commit.
 
+### Why nodes are shared
+
+A node reachable from several databases used to be stored once per database, and every commit directory hard-linked the files holding every node its database had ever written.
+Node data is the large majority of what a retained commit pins, so that cost was paid again for each commit kept.
+
+Sharing removes it at a stroke: nodes are content-addressed, so the same node written from anywhere is the same key and is stored once.
+The store sits outside the per-commit checkpoints, so its compaction churn is paid once instead of once per retained commit, and it gives one place from which a node can actually be deleted.
+
+What a retained commit pins is now values alone.
+
+<Note>
+RocksDB allows one writer per directory, so a repository has one instance of this store however many handles are open onto it.
+Constructing a `DirectoryManager` opens it and holds it, and handles for the same path share it.
+</Note>
+
+### Reading a repository someone else is writing
+
+A single writer per directory also means a second process cannot open a repository the ordinary way at all, and reading a running node's storage from outside is something external tooling has to do.
+
+`DirectoryManager::open_read_only` opens the store for reading instead, which any number of processes may do at once.
+Reading a commit through it works as it does anywhere; writing through it is refused rather than failing somewhere further down.
+
+<Warning>
+The view is of the store as it stood when it was opened, and it is not protected from collection: nodes it can reach may be deleted while it holds them.
+Reading one then fails rather than returning something wrong.
+</Warning>
+
 ## What the storage reclaims today
+
+
+### Collecting at a root
+
+A *root* here is a registry commit id: the hash of an entire registry state, and so the root of the Merkle tree over it.
+
+Collecting at a root drops the registry commits recorded before it, together with the database commits that none of the surviving registry commits still reference.
+
+A repository records the order in which commits were made, as a sequence number per root, in a journal beside the manifests.
+Collection retains by that order: every root recorded at or after the target survives, and the rest are dropped.
+Retaining by insertion order rather than by ancestry keeps states whose provenance is unclear, such as one committed without a parent.
+Where a root has been committed more than once, the storage keeps its highest position, so re-committing a state can only extend how long it is retained — which is also how you pin a root you want kept.
+
+```text
+                                   floor: the target's position
+                                   |
+  position     1      4      7     |    10      12      15
+  root        r1     r2     r3     |     T      r5      r6
+              +------ dropped -----+     +------ retained ------+
+```
+
+A commit id stays the registry root hash, so committing the same state twice remains idempotent.
+Sequence numbers are recorded beside a root, not folded into its identity.
+
+Database commits are content-addressed and therefore shared: unrelated registry commits name the same database commit whenever their states agree.
+Removal follows reachability rather than recorded order, so a database commit survives for as long as any retained registry commit still names it.
+
+Collection is safe to interrupt and repeat.
+It prunes the journal to the retained roots, removes the manifests of the registry commits it dropped, then removes the database commits no retained manifest reaches.
+Everything retained is intact at each point in between, and each step after the first enumerates what is present rather than what the journal says should be, so a round left unfinished is picked up by the next one.
+Pruning first is also what makes a stale target safe: a root an earlier round already collected past is no longer in the journal, so collecting at it is refused rather than taken as a floor that would retain commits whose data has already gone.
+
+The two sections below are what that removal means for each half of a commit.
 
 ### Values are reclaimed
 
@@ -50,67 +110,204 @@ A working database therefore stays proportional in size to the key space that is
 Commit directories hold the same data through hard links, so the blocks behind an SST are freed once no directory references it any more.
 Deleting the commit directories that are no longer reachable from any retained registry manifest is therefore enough to reclaim the value data those commits were pinning.
 
-### Merkle nodes are not
+### Merkle nodes need deleting outright
 
-Node bodies are content-addressed.
-Every version of every node is a distinct key, and nothing ever deletes one — `blob_delete` has no callers outside tests.
-RocksDB has no way to know that an old node is dead, so compaction preserves all of them.
+Node bodies are content-addressed, so every version of every node is a distinct *live* key.
+RocksDB has no way to know that an old node is dead, and compaction preserves all of them.
 
-The consequence is that the newest commit of a database hard-links SSTs that hold **every node ever written to it**.
-Deleting older commit directories frees nothing there, because the newest commit and the working database still reference the same files.
+Removing commit directories cannot reach them at all, plainly so now: the Merkle store is not a commit directory and no commit directory holds a link to it.
+Left alone the store would grow with the total number of node writes over a repository's lifetime rather than with the size of the state.
+
+So this half is reclaimed by deleting the node keys themselves, which needs a way to know which nodes are still held.
+That is what the next two sections are.
+
+### What refers to what is recorded
+
+As a node is stored, an edge is recorded from each of its children to it, in a `refs` column family of the Merkle store keyed by `child_hash || parent_hash`.
+Empty trees are never stored, so no edge points at one.
+
+Explicit reverse edges rather than reference counts, because they are idempotent: writing an edge twice, or removing it twice, leaves the same state, so a collection interrupted part-way can simply be run again.
+A count that is incremented twice after a crash is silently wrong for good.
+
+Recording them from the child's side is what will let a node's liveness be decided from the node upwards, rather than by traversing every retained root downwards.
+Each edge has room for a stamp saying how recently its child was known to be held; edges are written without one, since the sequence number of the commit being made is not settled while its nodes are being written.
+
+They cost a 64-byte key and an 8-byte stamp apiece, at a little under two edges per node.
+
+### Merkle nodes are collected too
+
+Collecting at a root deletes the node bodies that no retained root still reaches, and the edges that mentioned them.
+
+Each node is listed in a `written` column family of the Merkle store, keyed by the commit it was last known to be held by, with the sequence number first so that ordering by key is ordering by commit.
+A round reads **only the entries below its floor**: a node a retained commit wrote, or one an earlier round proved still held, sorts at or above the floor and is never looked at.
+
+That is what keeps a round proportional to the garbage rather than to the store.
+Considering every node instead costs the whole repository on every round however little there is to reclaim, which at hundreds of millions of entries is hours of work and tens of gigabytes of bookkeeping.
+
+Whether a candidate is still held is asked from the node upwards, by walking its reverse edges.
+A stamp at or above the floor ends the walk immediately: a retained root already holds the child.
+Otherwise the walk climbs, and what it learns is written back onto the edges that led to a live root.
+
+With a floor of 10, node `X` is settled without walking to a root at all: the edge to `B` is stamped at or above it, so `X` is still held.
+
+```mermaid
+flowchart BT
+    X["node X<br/>collection candidate"]
+    A["parent A"]
+    B["parent B"]
+    RA["root, position 7<br/>dropped"]
+    RB["root, position 12<br/>retained"]
+
+    X -->|"stamp 7: stale, walk up"| A
+    X -->|"stamp 12: at or above the floor, stop"| B
+    A --> RA
+    B --> RB
+```
+
+A candidate that turns out to be live is relisted under the newest retained root, which lifts it out of the range future rounds scan until the floor passes that root.
+Candidates are read in batches and settled as they are reached, so a round holds a batch rather than a store.
 
 <Warning>
-The `blob` column family grows with the total number of node writes over the lifetime of a database, not with the size of the state.
-No amount of commit deletion reclaims it, because the dead nodes sit in files that live commits still need.
-Reclaiming them requires deleting the node keys themselves and letting compaction rewrite the files.
+This depends on collecting **behind** the tip.
+Collect at the newest commit and the floor equals the newest retained root, so everything relisted falls below the next round's floor and the whole live set is examined again.
+A rollup node collecting at the commit it has cemented has that gap; anything collecting at its own tip does not.
 </Warning>
 
-### There is no entry point
+A stamp is only ever written where the node is provably reachable from the stamped root.
+Nodes are content-addressed and therefore immutable, so if a parent is reachable from a root and that parent refers to a child, the child is reachable from that root too, permanently.
+A stale stamp costs a walk and an over-generous one retains garbage; neither can drop something still live.
 
-Nothing in the crate exposes a garbage collection operation.
-The only reachability logic that exists is `long_test/registry/gc.rs`, which the long-running test uses to bound its own disk use: it computes the database commits reachable from the registry manifests it retains, and removes the rest.
+The graph has no cycles to guard against: a node's hash is derived from its children's, so a node can never be its own ancestor.
+
+### Reclaiming the disk
+
+Deleting a node writes a tombstone; the bytes come back when compaction rewrites the files without it.
+That rewrite costs the whole store rather than the garbage, and takes far longer than anything that would want to trigger it.
+
+So it is a background task of its own, started explicitly and neither part of collecting nor part of taking a full commit.
+A full commit is a flush and a rename; pairing it with a rewrite of the store would make the cheap operation as slow as the expensive one.
+Starting a reclaim returns at once, and a second request while one is running is a no-op rather than a queued rewrite.
+
+Reads, writes and commits carry on throughout.
+The rewrite does not exclude RocksDB's own compaction either, which it would by default — holding everything else off for the length of a full-store rewrite would stall writes behind it to no purpose.
+
+### Committing after a collection
+
+A node is skipped at commit time when it records that it is already in the store.
+After a round has deleted anything, that record is no longer evidence the body is still there, so the store takes a **new identity** and every such record stops matching.
+The next commit writes what it touches instead of skipping it.
+
+Without that, a working state whose lineage a round had dropped would skip writing nodes the round had just deleted, and commit something referring to bodies that are gone.
+A read into a collected node says so; a commit over one would not, which is why this is closed by construction rather than by convention.
+
+It costs one commit's worth of rewriting after a round that deleted something, and nothing after a round that did not.
 
 ## Why retaining a commit costs more than its changes
 
 Checkpoints hard-link the files that were live when they were taken, so retaining a commit should cost only what that commit changed: the next checkpoint links the same files for everything untouched.
-Measured, it costs far more than that, and the reason is not the design but two things about how commits are written.
+It costs more than that, and the reason is not the design but how commits reach the store.
 
 Sharing is not all-or-nothing.
-On an ordinary commit, consecutive checkpoints share 90-98% of their bytes, exactly as the layout intends.
-The cost comes from two effects that break that sharing, and they are independent of each other.
+On an ordinary commit, consecutive checkpoints share around 98% of their bytes, which is what the layout intends.
+What breaks it now is compaction, and only compaction — a second cause, commits rewriting nodes that had not changed, has been fixed.
 
-### Commits rewrite every resolved node
+### Commits store only the nodes they changed
 
-`Storable for Node` writes a node's body and then recurses into both children unconditionally.
-The only thing that stops the recursion is a child that has never been resolved into memory: `LazyNodeId::store` returns early when its node is absent, assuming it was persisted before.
+A node records which store it is already in.
+Committing skips such a node and, with it, the whole subtree beneath: nodes are content-addressed, so changing a descendant changes every hash above it, and an unchanged node cannot have a changed descendant.
 
-Nothing tracks whether a resolved node is *dirty*, so committing rewrites every node that has been resolved, changed or not.
-The bodies are byte-identical to what is already stored, but RocksDB has no way to know that: each one is a fresh write that lands in the memtable and is flushed into new files.
+The record is dropped by the same thing that invalidates a node's cached hash, so it survives exactly the mutations that leave the stored copy still correct.
+It names the store rather than being a plain flag, because a tree can be shared between stores: copying a database hands the destination a copy of the source's store and the same in-memory nodes, so a node not yet written owes a copy to each of them.
+A flag would let the first commit satisfy that obligation and the second skip it, leaving a commit that refers to nodes which never reached its store.
 
-Two consequences follow.
-A state that has just been built has its whole tree resolved, so every commit rewrites the whole tree.
-A state that was checked out starts with nothing resolved, but the resolved set only grows — modifying a key resolves its whole path to the root, and nothing ever un-resolves it — so the volume a commit rewrites climbs with every commit since the checkout, converging on the whole tree.
+One cost remains from this: a node written before its tree was shared is not recognised as being in the store that was copied, even though the copy holds it, so it is written again once.
+Distinguishing writes made before the two stores diverged from writes made after would need more than a single identity.
 
-Neither consequence applies to committing the same state twice: a commit id is the hash of the state, so the second call finds the commit already published and takes no checkpoint.
-It still rewrites the resolved tree into the memtable, but it pins nothing new.
+Committing the same state twice now does nothing at either end: the nodes are already recorded as being in this store, and a commit id is the hash of the state, so the publish step finds it already published and takes no checkpoint.
 
-Checking out lazily therefore delays this rather than avoiding it.
-Keeping the rewrite proportional to what changed needs dirty tracking.
+Without this, committing rewrote every node resolved in memory, changed or not — the whole tree for a state just built, and a growing share of it for a state checked out, since the resolved set only ever grows.
 
 ### Compaction rewrites whole levels
 
 A checkpoint is created with `Checkpoint::create_checkpoint`, which flushes the memtables of both column families first — `rust-rocksdb` passes a `log_size_for_flush` of zero, which RocksDB defines as *always flush*.
 So every commit produces one new level-zero file per column family, whatever it holds.
 
-Level-zero compaction triggers on the *number* of files, four by default, so it runs every four commits however little each commit wrote.
+Level-zero compaction triggers on the *number* of files, so it runs however little each commit wrote.
 Keys are spread by hash, so a level-zero file spans the whole key space and overlaps everything below it.
 Each compaction therefore rewrites the entire base level into new files, and every checkpoint taken before it stops sharing them.
 
 <Warning>
-Dirty tracking does not fix this second effect, and neither does writing less per commit.
-The trigger counts files, and a forced flush produces a file per commit regardless of size.
-Reducing it means flushing less often, raising the trigger, or not compacting the working database automatically at all.
+Writing less per commit does not reduce this.
+The trigger counts files, and a forced flush produces one per commit regardless of what it holds, so compaction runs on a cadence set by how often you commit rather than by how much you write.
 </Warning>
+
+The trigger is therefore set to twenty rather than RocksDB's default of four, which makes that cadence five times coarser and cuts the cost of retaining a commit by most of what compaction was adding to it.
+
+Everything here also carries whole-key bloom filters.
+Lookups are by whole key throughout — nodes by content hash, values by their key — so a filter lets a lookup skip a file outright, where otherwise it consults the index of every file whose range covers the key, which for hash-spread keys is most of them.
+Filters matter more as level zero holds more files, but the coarser trigger does not in fact cost reads: compacting often does not keep level zero small, because each compaction rewrites the whole base level, and flushes accumulate behind it while it runs.
+
+What remains of the gap is the flush.
+A commit still forces a level-zero file for the database it commits, whatever that holds, so cadence still drives compaction — five times less often, but by the same mechanism.
+The Merkle store is not checkpointed per commit, so nothing forces a flush there and its compaction follows how much is written rather than how often.
+
+## Durability and recovery
+
+### Full commits
+
+Committing puts a database's values in a commit directory and syncs the nodes they refer to, so a commit never outlives its nodes.
+It leaves the Merkle store as the only copy of them.
+
+A **full commit** takes another: a checkpoint of the store into a numbered slot under `merkle-commits/`.
+Recovery opens the most recent slot.
+Because a slot is made by a checkpoint it is self-contained and needs no write-ahead log, and because a checkpoint hard-links rather than copies, taking one costs almost nothing.
+The live store carries on unchanged; whether to check anything out again afterwards is the caller's decision.
+
+Slots are numbered so that each name is fresh, and a slot is created by renaming a finished directory to a name that does not exist yet, which is atomic and cannot half-happen.
+A fixed name plus a `CURRENT` pointer would need the pointer swapped separately, and renaming over an existing directory is not available anyway: `rename(2)` fails with `ENOTEMPTY` on a non-empty target.
+A directory left behind by an interrupted full commit is not a slot, and the next attempt replaces it.
+
+<Warning>
+A slot's hard links hold the files that were live when it was taken, so compaction rewriting those files does not free them until the slot is reaped.
+The high-water mark is the live set plus roughly one full-commit period of garbage, which makes the full-commit cadence the reclamation cadence.
+Reaping never removes the last slot, so a repository always has something to recover from.
+</Warning>
+
+### Leases for other processes
+
+Full commits are what other processes read, since the live store cannot be opened by a second writer.
+A reader takes a lease on the one it opens, and reaping leaves a leased slot where it is for a later round to take.
+
+Leases are `flock`s, so the kernel releases one held by a process that dies and a crashed reader cannot pin a slot forever.
+Several readers may hold the same slot at once; only reaping needs it to itself, and it never waits for a reader.
+
+<Warning>
+A lease is taken on a file beside the slot, not inside it.
+A reader that takes one just as a reap removes the slot can therefore be granted a lease on a slot that is no longer there, so opening it can still fail.
+</Warning>
+
+## Interrupting a collection
+
+Collection is the longest thing the storage does, and a full commit or a reap should not wait for one to finish.
+A collection can be asked to stop, and both halves check often enough to stop promptly.
+
+Stopping is safe at any point.
+What was removed stays removed, each step leaves everything retained intact, and every step enumerates what is present rather than what it expected — so the next round finishes what the last one left.
+A round that stopped says so, and stops before the Merkle sweep rather than sweeping against a commit set that is still half-collected.
+
+## When a state is read after its nodes go
+
+Collection must not run while the repository is being committed to, and two collections must not overlap.
+Neither is enforced; the caller serialises them.
+
+A reader holding a state across a collection is a different matter, and one the storage can say something useful about.
+Once anything has been collected from a Merkle store, the store records it, and an absent node is then reported as collected rather than as missing commit data.
+The two mean different things: missing commit data means the storage is inconsistent and there is nothing to be done, while a collected node means a state was read while the nodes behind it were reclaimed, which checking the state out again resolves.
+
+<Note>
+A store cannot know which of its absent keys it deleted, so this is reported wherever a collection has ever run.
+It says a collection is the likely explanation, not a certain one.
+</Note>
 
 ## Planned mechanism
 
@@ -120,105 +317,16 @@ Everything above describes how the storage behaves today.
 Sections move out of here as the work lands.
 </Note>
 
-The two halves of a commit are reclaimed by two different mechanisms, for the reasons above.
+### Where the flush belongs
 
-### Retained roots
-
-A *root* here is a registry commit id: the hash of an entire registry state, and so the root of the Merkle tree over it.
-A repository records the order in which commits were made, as a sequence number per root.
-Collecting at a root `H` retains every root whose sequence number is at least that of `H`, and drops the rest.
-
-```text
-                                   floor: the sequence number of H
-                                   |
-  sequence     1      4      7     |    10      12      15
-  root        r1     r2     r3     |     H      r5      r6
-              +------ dropped -----+     +------ retained ------+
-```
-
-Retaining by insertion order rather than by ancestry keeps states whose provenance is unclear, such as a state committed without a parent.
-Where a root has been committed more than once, the storage keeps the highest sequence number for it.
-
-Parents and sequence numbers are recorded beside a root, not folded into its identity.
-A commit id therefore stays the registry root hash, so committing the same state twice stays the no-op it already is.
-
-### Key-value side: directory reachability
-
-Values keep their current layout of one checkpoint directory per database commit.
-Collection computes the database commits reachable from the retained registry manifests, then removes the unreachable commit directories and manifests.
-The work is crash-safe and resumable, because removing an already-removed directory is not an error.
-
-This also keeps commit directories openable read-only by other processes, which is how external tooling reads a running node's storage.
-
-### Merkle side: one shared store
-
-Node bodies move out of the per-database instances into a single store shared by the whole repository.
-Sharing gives deduplication between commits and between the databases of a registry, and it gives one place from which nodes can actually be deleted.
-
-It also takes node bodies out of the retention problem described above.
-Node data is the large majority of what retained commits pin, so a store outside the per-commit checkpoints pays its own compaction churn once rather than once per retained commit.
-
-A commit directory then holds only the values, so it is self-contained in the sense above but no longer holds the nodes those values are indexed by.
-Reading a commit's tree from another process therefore means reading the shared store as well, which is what the slots below are for.
-
-Liveness is tracked with explicit reverse edges rather than reference counts, in a column family keyed by `child_hash || parent_hash`.
-Explicit edges are idempotent: writing an edge twice, or removing it twice, leaves the same state, so an interrupted collection can simply be repeated.
-Reference counts cannot offer that, because a count that is incremented twice after a crash is silently wrong.
-
-Each edge carries the sequence number of the most recent root known to contain the child.
-Collection reads that first: a stamp at or above the collection floor means the child is still held by a retained root, so the sweep stops there instead of walking up to a root.
-A stamp below the floor is stale, so the sweep walks up, then rewrites the stamp with what it learned.
-
-With a floor of 10, node `X` is settled without walking to a root at all: the edge to `B` is stamped at or above it, so `X` is still held.
-
-```mermaid
-flowchart BT
-    X["node X<br/>collection candidate"]
-    A["parent A"]
-    B["parent B"]
-    RA["root, sequence 7<br/>dropped"]
-    RB["root, sequence 12<br/>retained"]
-
-    X -->|"stamp 7: stale, walk up"| A
-    X -->|"stamp 12: at or above the floor, stop"| B
-    A --> RA
-    B --> RB
-```
-
-A stamp is only ever written where the node is provably reachable from the stamped root.
-At commit time that holds by construction.
-During a sweep it holds because nodes are content-addressed and therefore immutable: if a parent is reachable from a root, and that parent references a child, then the child is reachable from that root too, permanently.
-A stale stamp only costs a walk, and an over-generous stamp only retains garbage, so neither can delete something that is still live.
-
-<Warning>
-The stamp rule depends on a root being dropped only when its sequence number falls below the floor.
-A future mode that drops individual newer roots, such as collecting abandoned branches, would break the inference that a stamp at or above the floor implies a surviving root, and would need per-root liveness instead.
-</Warning>
-
-### Durability and recovery
-
-Committing separates into two operations.
-
-A **partial commit** writes the value checkpoint, the registry manifest and the root record.
-A **full commit** additionally checkpoints the shared Merkle store into a numbered slot.
-The rollup node chooses when to take a full commit, and distinguishes the two.
-
-Slots are named by an increasing counter, so a new slot is created by renaming a completed directory to a name that does not exist yet, which is atomic.
-Recovery opens the highest slot present.
-Because a slot is created by a checkpoint, it is self-contained and needs no write-ahead log.
-
-Slots are also what other processes read, since the live store cannot be opened by a second writer.
-A reader takes a lease on the slot it opens, and slot reaping respects leases.
-Leases use `flock`, so the kernel releases a lease held by a process that dies.
-
-Space is reclaimed at full-commit granularity: the previous slot hard-links the files that compaction has since rewritten, so those files are freed when that slot is reaped.
-
-The split also gives the Merkle store's flush a natural home.
-A partial commit still checkpoints the value database, so that database's memtable is still flushed and still produces a level-zero file per commit; compacting values is work worth doing anyway, since that is what discards the obsolete versions overwriting leaves behind.
-What the split removes is the Merkle store's flush from every commit: the store is checkpointed only at a full commit, so how often its files are rewritten stops being set by how often you commit and starts being set by how much has been written to it.
+A partial commit does not need the Merkle store's memtable on disk, so it does not need the flush that forces a level-zero file there; a full commit does.
+The value database is still checkpointed by a partial commit and so still flushed, and its own level-zero file per commit remains - compacting values is what discards the obsolete versions that overwriting leaves behind, so that work is worth doing.
+Putting the durability boundary and the flush boundary in the same place is what stops the store's compaction from being driven by commit cadence.
 
 ### Interface
 
-The storage exposes collection as an operation that starts in the background, together with the operations a rollup node needs to observe and control it: whether a collection has finished, cancelling one, and waiting for one to complete.
+Collection runs in the caller's thread today, and stopping one is a request the caller makes and then waits on by returning.
+The storage instead exposes it as an operation that starts in the background, together with the operations a rollup node needs to observe and control it: whether a collection has finished, cancelling one, and waiting for one to complete.
+Serialising it against committing, which the caller is currently responsible for, belongs with those.
 
 Exporting a snapshot copies everything reachable from one root into a fresh store, which is the same traversal collection performs, so the two share an implementation.

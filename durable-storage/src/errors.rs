@@ -44,6 +44,12 @@ pub enum OperationalError {
         error: std::io::Error,
     },
 
+    #[error("Failed to remove directory {path}: {error}")]
+    DirRemovalFailed {
+        path: PathBuf,
+        error: std::io::Error,
+    },
+
     #[error("Failed to publish the commit staged at {staged} as {commit}: {error}")]
     CommitPublishFailed {
         staged: PathBuf,
@@ -118,6 +124,26 @@ pub enum OperationalError {
 
     #[error("The root hash of restored registry does not match the commit id.")]
     RegistryCommitMismatch,
+
+    #[error("No commit was recorded for the collection target {target}")]
+    CollectionTargetNotRecorded { target: String },
+
+    #[error("This repository was opened for reading only")]
+    RepositoryIsReadOnly,
+
+    /// A node is absent from a store that has collected, so collection is the likely reason.
+    ///
+    /// Distinct from [`OperationalError::CommitDataMissing`] on purpose. That one means the storage
+    /// is inconsistent and there is nothing to be done about it. This one means a state was being
+    /// read while the nodes behind it were reclaimed, which is a hazard of holding a checkout across
+    /// a collection rather than a corrupt store: checking the state out again resolves it.
+    ///
+    /// It cannot be told apart from a genuinely missing node with certainty - a store cannot know
+    /// which of its absent keys it deleted - so this is reported wherever a collection has ever run.
+    #[error(
+        "Node {root:?} is absent from a store that has collected; a state was likely read while its nodes were being reclaimed"
+    )]
+    NodeCollected { root: Hash },
 
     /// The lazy resolver encountered an internally inconsistent identifier state.
     ///

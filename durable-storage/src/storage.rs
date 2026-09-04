@@ -22,6 +22,52 @@ use crate::merkle_worker::CommittedRoot;
 use crate::merkle_worker::MerkleHandle;
 use crate::merkle_worker::MerkleWorker;
 
+/// Identifies one key-value store, so that data can be known to be in *this* store rather than
+/// merely in some store.
+///
+/// A tree is shared between stores by cloning - [`crate::registry::Registry::copy_database`] hands
+/// the destination a copy of the source's store and the same in-memory nodes. Whether a node still
+/// needs storing therefore cannot be a single flag on the node: the same node owes a copy to each
+/// store, and one store satisfying its obligation says nothing about the others.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreId(u64);
+
+impl StoreId {
+    /// The id no store has, meaning "not in any store".
+    pub const NONE: Self = Self(0);
+
+    /// Allocate an id no other store holds.
+    pub fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+
+    /// The raw value, for recording compactly.
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for StoreId {
+    fn from(raw: u64) -> Self {
+        Self(raw)
+    }
+}
+
+/// A freshly allocated id, not [`StoreId::NONE`].
+///
+/// Reached through `#[derive(Default)]` on stores that hold a [`StoreId`], such as
+/// [`in_memory::InMemoryKeyValueStore`] - a defaulted store is empty and genuinely its own, so a
+/// fresh identity is the right answer rather than [`StoreId::NONE`]. It is also the safe direction:
+/// a store that wrongly believed it shared an identity would skip storing data it does not have,
+/// where one with an identity of its own merely stores something again.
+impl Default for StoreId {
+    fn default() -> Self {
+        Self::next()
+    }
+}
+
 /// Types that implement this trait can serve reads from a key-value store.
 ///
 /// This is the half of the store interface that requires no ability to modify the stored data.
@@ -32,14 +78,28 @@ pub trait ReadableKeyValueStore: Sized {
     /// Type of repository required to initialise a key value store.
     type Repo;
 
+    /// The identity of the store that Merkle node bodies are written to.
+    ///
+    /// Recorded on a node so that committing can tell it is already stored and skip writing it
+    /// again. It identifies wherever [`ReadableKeyValueStore::node_get`] reads from, which is not
+    /// necessarily this instance: a backend may keep nodes in a store shared by the whole
+    /// repository, in which case every database of that repository reports the same identity and a
+    /// node written through one is recognised by all of them. See [`StoreId`].
+    fn store_id(&self) -> StoreId;
+
     /// How a Normal-mode database over this store tracks its Merkle root.
     ///
     /// Writeable stores are pinned to a live tree in a [`MerkleWorker`] by
     /// [`WriteableKeyValueStore`]; read-only stores are pinned to a [`CommittedRoot`] by
     /// [`ReadOnlyKeyValueStore`], and so have no tree and no worker thread at all.
     type Merkle: MerkleHandle<Self>;
+    /// Retrieves the Merkle node body associated with the given hash.
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
     /// Retrieves the data associated with the given blob key.
+    ///
+    /// Blobs belong to whoever is using this store as one; the Merkle layer does not keep its nodes
+    /// here. See [`ReadableKeyValueStore::node_get`].
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error>;
 
     /// Retrieves a value associated with the given key.
@@ -58,6 +118,37 @@ pub trait WriteableKeyValueStore: ReadableKeyValueStore<Merkle = MerkleWorker<Se
 
     /// Attempt to make a copy of the key-value store.
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError>;
+
+    /// Register a Merkle node body under its hash.
+    fn node_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError>;
+
+    /// Deletes the Merkle node body associated with the given hash.
+    fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError>;
+
+    /// Record that the node stored under `parent` refers to the one stored under `child`.
+    ///
+    /// Written as each node is stored, so that liveness can later be decided from a node upwards
+    /// rather than by traversing every retained root downwards. Nodes are immutable, so an edge
+    /// once true stays true until the parent itself is collected.
+    fn edge_set(
+        &self,
+        child: impl AsRef<[u8]>,
+        parent: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError>;
+
+    /// Record the node under `key` as belonging to the commit at `seq`.
+    ///
+    /// What makes collection proportional to the garbage rather than to the store: a round scans
+    /// only the nodes whose commit it is dropping, and never looks at one a retained commit wrote.
+    fn node_written_at(
+        &self,
+        seq: crate::journal::Seq,
+        key: impl AsRef<[u8]>,
+    ) -> Result<(), OperationalError>;
 
     /// Register data under a blob key.
     fn blob_set(
@@ -94,9 +185,21 @@ pub trait PersistentKeyValueStore: WriteableKeyValueStore + Sized {
     /// Write the current key-value state to the repository.
     fn commit(&self, repo: &Self::Repo, id: &CommitId) -> Result<(), OperationalError>;
 
+    /// The position the commit about to be made will be recorded at.
+    ///
+    /// Asked of the store rather than the repository so that a backend which records nothing can
+    /// say so without every caller having to know which kind of repository it has. Read before the
+    /// nodes are written, since each is recorded as belonging to that commit.
+    fn next_commit_seq(&self, repo: &Self::Repo) -> Result<crate::journal::Seq, OperationalError>;
+
     /// Checkout the state from `source_path` but leave it untouched. Modifications to the
     /// resulting state will be reflected in `working_path`.
+    ///
+    /// The repository is needed as well as the path because a commit directory need not hold
+    /// everything the state is made of: a backend keeping Merkle node bodies in a store shared by
+    /// the repository reaches them through `repo`, not through `source_path`.
     fn checkout_from_path(
+        repo: &Self::Repo,
         source_path: &Path,
         working_path: TempDir,
     ) -> Result<Self, OperationalError>;
@@ -121,7 +224,12 @@ pub trait ReadOnlyKeyValueStore: ReadableKeyValueStore<Merkle = CommittedRoot> {
     fn checkout_read_only(repo: &Self::Repo, id: &CommitId) -> Result<Self, OperationalError>;
 
     /// Read the state committed at `source_path`, without making a working copy.
-    fn checkout_read_only_from_path(source_path: &Path) -> Result<Self, OperationalError>;
+    ///
+    /// Takes the repository for the same reason as [`PersistentKeyValueStore::checkout_from_path`].
+    fn checkout_read_only_from_path(
+        repo: &Self::Repo,
+        source_path: &Path,
+    ) -> Result<Self, OperationalError>;
 
     /// Copy the committed state into a fresh working state, which can then be modified.
     fn to_writeable(&self, repo: &Self::Repo) -> Result<Self::Writeable, OperationalError>;
@@ -398,6 +506,14 @@ cfg_if::cfg_if! {
 pub struct StoreOptions {
     /// Persist the key-value pairs from MAVL nodes
     node_data: bool,
+
+    /// Which commit the nodes being stored belong to.
+    ///
+    /// Recorded against each node so that collection can find, without looking at the rest of the
+    /// store, the nodes whose commit has since been dropped. Defaults to the very first position,
+    /// which is the conservative answer: a node recorded there is examined by any collection rather
+    /// than being skipped by one.
+    written_at: crate::journal::Seq,
 }
 
 impl StoreOptions {
@@ -407,7 +523,10 @@ impl StoreOptions {
     /// [`crate::merkle_layer::MerkleLayer`] in isolation, this is necessary as there is no other
     /// component that will be writing the key-value data to the store.
     pub fn with_node_data(self) -> Self {
-        Self { node_data: true }
+        Self {
+            node_data: true,
+            ..self
+        }
     }
 
     /// Do not persist key-value data of nodes.
@@ -417,12 +536,28 @@ impl StoreOptions {
     /// mutates the store directly ahead of commitments. At commitment time, you only need to
     /// persist the remaining tree and node structures.
     pub fn without_node_data(self) -> Self {
-        Self { node_data: false }
+        Self {
+            node_data: false,
+            ..self
+        }
     }
 
     /// Returns whether node key-value data should be persisted.
     pub fn node_data(&self) -> bool {
         self.node_data
+    }
+
+    /// Record the nodes being stored as belonging to the commit at `seq`.
+    pub fn written_at(self, seq: crate::journal::Seq) -> Self {
+        Self {
+            written_at: seq,
+            ..self
+        }
+    }
+
+    /// Which commit the nodes being stored belong to.
+    pub fn commit_seq(&self) -> crate::journal::Seq {
+        self.written_at
     }
 }
 
