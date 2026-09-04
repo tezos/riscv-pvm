@@ -733,7 +733,6 @@ pub(crate) mod test {
             });
         }
     }
-    pub(crate) use test_atomic_loadstore;
 
     macro_rules! test_atomic {
         ($(#[$m:meta])* $name: ident, $instr: path, $f: expr, $align: expr, $t: ty) => {

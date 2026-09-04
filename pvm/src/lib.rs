@@ -3,7 +3,6 @@
 //
 // SPDX-License-Identifier: MIT
 
-mod array_utils;
 mod bits;
 mod default;
 mod exceptions;

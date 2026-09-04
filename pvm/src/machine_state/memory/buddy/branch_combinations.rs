@@ -7,6 +7,11 @@
 //! Introducing more types instead of composing [`BuddyBranch2`]/[`BuddyBranch2Config`] makes type
 //! checking much faster.
 
+#![allow(
+    clippy::allow_attributes,
+    reason = "The macro generates a whole type family regardless of which branch sizes are used, so some items need to silence `dead_code`"
+)]
+
 use bincode::Decode;
 use bincode::Encode;
 use bincode::de::Decoder;
@@ -39,6 +44,7 @@ macro_rules! combined_buddy_branch {
     ($name:ident = $buddy1:ident * $buddy2:ident) => {
         paste::paste! {
             /// Allocated combined Buddy branch
+            #[allow(dead_code, reason = "This is generated in a macro and is not guaranteed to be used")]
             #[perfect_derive::perfect_derive(PartialEq, Eq)]
             pub struct [<$name Alloc>]<B: BuddyConfig, M: Mode>(
                 <[<$buddy1 Config>]<[<$buddy2 Config>]<B>> as BuddyConfig>::Buddy<M>
@@ -69,6 +75,7 @@ macro_rules! combined_buddy_branch {
             }
 
             /// Config for a combined Buddy branch
+            #[allow(dead_code, reason = "This is generated in a macro and is not guaranteed to be used")]
             pub struct [<$name Config>]<B>(B);
 
             impl<B: BuddyConfig> BuddyConfig for [<$name Config>]<B> {
@@ -91,6 +98,7 @@ macro_rules! combined_buddy_branch {
         }
 
         /// Combined Buddy branch
+        #[allow(dead_code, reason = "This is generated in a macro and is not guaranteed to be used")]
         #[perfect_derive::perfect_derive(PartialEq, Eq)]
         pub struct $name<B, M: Mode>($buddy1<$buddy2<B, M>, M>);
 

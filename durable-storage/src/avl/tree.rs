@@ -727,10 +727,10 @@ mod tests {
         type Item = Result<&'tree Node<TreeId, DataId, M>, OperationalError>;
 
         fn next(&mut self) -> Option<Self::Item> {
-            if let Some(root_id) = self.current.root() {
-                if let Err(err) = self.advance_to_leftmost_in_subtree(root_id) {
-                    return Some(Err(err));
-                }
+            if let Some(root_id) = self.current.root()
+                && let Err(err) = self.advance_to_leftmost_in_subtree(root_id)
+            {
+                return Some(Err(err));
             }
 
             match self.pop_and_prepare_right_subtree() {

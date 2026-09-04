@@ -136,6 +136,7 @@ impl_store_load_int!(64, LoadStoreWidth::Double);
 /// Types loaded and stored as floating-point values using [`super::ICB`].
 pub trait StoreLoadFloat: Typed + Stackable + Elem + 'static {
     /// The width of the value in memory.
+    #[expect(unused, reason = "Direct loading of float/double not implemented")]
     const WIDTH: LoadStoreWidth;
 
     /// Convert the value to an [`FValue`], applying NaN-boxing for 32-bit values.

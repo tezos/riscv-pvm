@@ -8,6 +8,7 @@ use bincode::de::Decoder;
 use bincode::enc::Encoder;
 use bincode::error::DecodeError;
 use bincode::error::EncodeError;
+use octez_riscv_data::array_utils;
 use octez_riscv_data::clone::CloneState;
 use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
@@ -66,7 +67,7 @@ impl<'normal> Provable<'normal> for RevealRequest<Normal> {
 impl<M: AtomMode> Default for RevealRequest<M> {
     fn default() -> Self {
         Self {
-            bytes: Atom::new(crate::array_utils::boxed_from_fn(|| 0)),
+            bytes: Atom::new(array_utils::boxed_from_fn(|| 0)),
             size: Atom::default(),
         }
     }

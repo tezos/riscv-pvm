@@ -54,16 +54,16 @@ impl LongTestConfig {
         let start = Instant::now();
 
         loop {
-            if let Some(max) = self.epochs {
-                if epoch >= max {
-                    break;
-                }
+            if let Some(max) = self.epochs
+                && epoch >= max
+            {
+                break;
             }
-            if let Some(budget) = self.time_budget {
-                if start.elapsed() >= budget {
-                    eprintln!("time budget reached after {epoch} epochs");
-                    break;
-                }
+            if let Some(budget) = self.time_budget
+                && start.elapsed() >= budget
+            {
+                eprintln!("time budget reached after {epoch} epochs");
+                break;
             }
 
             do_epoch(epoch)?;

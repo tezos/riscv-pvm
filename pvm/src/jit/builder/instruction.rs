@@ -214,7 +214,7 @@ impl<'seq, 'jit, MC: MemoryConfig> InstructionBuilder<'seq, 'jit, MC> {
     }
 
     /// Obtain an instruction inserter.
-    pub(super) fn ins(&mut self) -> impl InstBuilder {
+    pub(super) fn ins(&mut self) -> impl InstBuilder<'_> {
         self.builder.ins()
     }
 

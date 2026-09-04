@@ -85,7 +85,9 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> DispatchTarget<D, MC> {
 impl<D: DispatchCompiler<MC>, MC: MemoryConfig> Default for DispatchTarget<D, MC> {
     fn default() -> Self {
         Self {
-            fun: AtomicUsize::new(Entrypoint::<D, MC>::run_entrypoint_interpreted as usize),
+            fun: AtomicUsize::new(
+                Entrypoint::<D, MC>::run_entrypoint_interpreted as *const () as usize,
+            ),
             remaining_calls: AtomicUsize::new(1000),
             #[cfg(test)]
             jit_counters: JitTestCounters::new(),
@@ -105,9 +107,13 @@ impl<D: DispatchCompiler<MC>, MC: MemoryConfig> std::fmt::Debug for DispatchTarg
             Compiled,
         }
 
-        let status = if fun as usize == Entrypoint::<D, MC>::run_entrypoint_interpreted as usize {
+        let status = if fun as usize
+            == Entrypoint::<D, MC>::run_entrypoint_interpreted as *const () as usize
+        {
             Status::Interpreted
-        } else if fun as usize == Entrypoint::<D, MC>::run_entrypoint_not_compiled as usize {
+        } else if fun as usize
+            == Entrypoint::<D, MC>::run_entrypoint_not_compiled as *const () as usize
+        {
             Status::NotCompiled
         } else {
             Status::Compiled
@@ -263,7 +269,8 @@ impl<MC: MemoryConfig + Send> Default for OutlineCompilerContext<MC> {
 
                         debug_assert_eq!(
                             dispatch.fun.load(Ordering::Acquire),
-                            Entrypoint::<Self, MC>::run_entrypoint_not_compiled as usize,
+                            Entrypoint::<Self, MC>::run_entrypoint_not_compiled as *const ()
+                                as usize,
                             "Unexpected function pointer in dispatch target"
                         );
 

@@ -267,10 +267,10 @@ impl StoreAccessBuilder {
 /// - `OwnedPath { inner: "/path" }` -> "/path"
 fn extract_path(path_str: &str) -> String {
     // Handle: RefPath { inner: "/path" } or OwnedPath { inner: "/path" }
-    if let Some(start) = path_str.find('"') {
-        if let Some(end) = path_str.rfind('"') {
-            return path_str[start + 1..end].to_string();
-        }
+    if let Some(start) = path_str.find('"')
+        && let Some(end) = path_str.rfind('"')
+    {
+        return path_str[start + 1..end].to_string();
     }
     path_str.to_string()
 }
