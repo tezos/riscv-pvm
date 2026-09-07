@@ -18,6 +18,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use anyhow::Result;
 
+use crate::collect::Suspend;
 use crate::collect::collect;
 use crate::commit::CommitId;
 use crate::repo::DirectoryManager;
@@ -43,8 +44,10 @@ pub(super) fn prune(
         return Ok(());
     };
 
-    collect(persistent_repo, oldest).context("collecting the persistent repository")?;
-    collect(in_memory_repo, oldest).context("collecting the in-memory repository")?;
+    collect(persistent_repo, oldest, &Suspend::new())
+        .context("collecting the persistent repository")?;
+    collect(in_memory_repo, oldest, &Suspend::new())
+        .context("collecting the in-memory repository")?;
 
     Ok(())
 }
@@ -120,11 +123,11 @@ mod tests {
         // again - which is what a repeated round relies on to refuse a target whose data has
         // already gone.
         assert!(
-            collect(&persistent_repo, &base0.commit).is_err(),
+            collect(&persistent_repo, &base0.commit, &Suspend::new()).is_err(),
             "the evicted base should no longer be a persistent collection target"
         );
         assert!(
-            collect(&in_memory_repo, &base0.commit).is_err(),
+            collect(&in_memory_repo, &base0.commit, &Suspend::new()).is_err(),
             "the evicted base should no longer be an in-memory collection target"
         );
 
