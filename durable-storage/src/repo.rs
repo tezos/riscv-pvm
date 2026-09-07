@@ -242,9 +242,23 @@ impl DirectoryManager {
     }
 
     /// Drop all but the `keep` most recent full commits, returning how many went.
+    ///
+    /// A full commit someone holds a lease on is left where it is, for a later round to take.
     #[cfg(rocksdb)]
     pub fn reap_full_commits(&self, keep: usize) -> Result<usize, OperationalError> {
         crate::merkle_store::slots::reap_slots(&self.merkle_slots_dir(), keep)
+    }
+
+    /// Claim a full commit for reading, so that reaping leaves it alone while the lease is held.
+    ///
+    /// How another process reads a repository's Merkle nodes: the live store cannot be opened by a
+    /// second writer, but a full commit is an immutable image that any number of readers may open.
+    #[cfg(rocksdb)]
+    pub fn lease_full_commit(
+        &self,
+        slot: crate::merkle_store::slots::SlotId,
+    ) -> Result<crate::merkle_store::slots::SlotLease, OperationalError> {
+        crate::merkle_store::slots::lease_slot(&self.merkle_slots_dir(), slot)
     }
 
     /// The most recently recorded journal entry, if the repository has committed anything.
