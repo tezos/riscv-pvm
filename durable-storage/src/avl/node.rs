@@ -1025,6 +1025,21 @@ where
     }
 }
 
+/// Say why a node body could not be read.
+///
+/// A store that has collected reports an absent node as [`OperationalError::NodeCollected`], which
+/// is a different situation from an inconsistent store and is passed through rather than wrapped:
+/// wrapping it as missing commit data would lose exactly the distinction it was raised to make.
+fn missing_node(root: Hash, error: Error) -> OperationalError {
+    match error {
+        Error::Operational(collected @ OperationalError::NodeCollected { .. }) => collected,
+        error => OperationalError::CommitDataMissing {
+            root,
+            source: Box::new(error),
+        },
+    }
+}
+
 /// The tree hashes of the children recorded in a stored node body.
 ///
 /// Empty children are left out: an empty tree is never stored, so nothing refers to one and no edge
@@ -1068,10 +1083,7 @@ pub(crate) fn walk_stored_tree(
 
         let bytes = store
             .node_get(hash)
-            .map_err(|error| OperationalError::CommitDataMissing {
-                root: hash,
-                source: Box::new(error),
-            })?;
+            .map_err(|error| missing_node(hash, error))?;
         let bytes = bytes.as_ref();
 
         visit(hash, bytes.len());
@@ -1093,13 +1105,9 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
             right,
             data,
         } = {
-            let bytes =
-                store
-                    .node_get(id)
-                    .map_err(|error| OperationalError::CommitDataMissing {
-                        root: id,
-                        source: Box::new(error),
-                    })?;
+            let bytes = store
+                .node_get(id)
+                .map_err(|error| missing_node(id, error))?;
             deserialise(bytes.as_ref())?
         };
 
