@@ -2625,6 +2625,7 @@ dependencies = [
  "derive_more",
  "goldenfile",
  "hex",
+ "libc",
  "log",
  "octez-riscv-data",
  "octez-riscv-durable-storage",

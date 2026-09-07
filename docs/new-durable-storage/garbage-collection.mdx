@@ -25,6 +25,7 @@ A repository is a directory tree of databases and commits:
   registries/journal                    the order commits were made in
   merkle/                               Merkle node bodies, shared by the repository
   merkle-commits/<n>/                   recoverable images of that store
+  merkle-commits/<n>.lease              what a reader of one holds
 ```
 
 Each database is a RocksDB instance holding the values you store, keyed by your key.
@@ -217,6 +218,19 @@ The high-water mark is the live set plus roughly one full-commit period of garba
 Reaping never removes the last slot, so a repository always has something to recover from.
 </Warning>
 
+### Leases for other processes
+
+Full commits are what other processes read, since the live store cannot be opened by a second writer.
+A reader takes a lease on the one it opens, and reaping leaves a leased slot where it is for a later round to take.
+
+Leases are `flock`s, so the kernel releases one held by a process that dies and a crashed reader cannot pin a slot forever.
+Several readers may hold the same slot at once; only reaping needs it to itself, and it never waits for a reader.
+
+<Warning>
+A lease is taken on a file beside the slot, not inside it.
+A reader that takes one just as a reap removes the slot can therefore be granted a lease on a slot that is no longer there, so opening it can still fail.
+</Warning>
+
 ## Planned mechanism
 
 <Note>
@@ -261,12 +275,6 @@ A stale stamp only costs a walk, and an over-generous stamp only retains garbage
 The stamp rule depends on a root being dropped only when its sequence number falls below the floor.
 A future mode that drops individual newer roots, such as collecting abandoned branches, would break the inference that a stamp at or above the floor implies a surviving root, and would need per-root liveness instead.
 </Warning>
-
-### Leases for other processes
-
-Slots are what other processes read, since the live store cannot be opened by a second writer.
-A reader takes a lease on the slot it opens, and reaping respects leases.
-Leases use `flock`, so the kernel releases one held by a process that dies.
 
 ### Where the flush belongs
 
