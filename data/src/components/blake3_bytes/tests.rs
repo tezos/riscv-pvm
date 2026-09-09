@@ -34,11 +34,15 @@ use super::present_ranges;
 use super::proof_read;
 use super::prove;
 use super::verify_root;
+use crate::codec::Bincode;
 use crate::foldable::Foldable;
 use crate::foldable::Unfoldable;
 use crate::hash::Hash;
 use crate::hash::HashedData;
 use crate::hash::PartialHash;
+use crate::merkle_proof::proof_binary;
+use crate::merkle_proof::proof_tree;
+use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::Prove;
@@ -862,4 +866,158 @@ fn store_fold_unfold_roundtrip() {
 
     let unfolded = Blake3Bytes::<Normal>::unfold(BlobStoreUnfold::new(store, root)).unwrap();
     assert_eq!(unfolded.as_bytes(), data.as_slice());
+}
+
+proptest! {
+    /// The whole path through the AVL wire: prove into a Merkle proof, serialise, parse with the
+    /// stream deserialiser, and fold the reconstructed value. The proof's root hash is the
+    /// value's committed hash, so the leaf slots into an enclosing node unchanged.
+    #[test]
+    fn avl_wire_stream_roundtrip((data, access) in data_and_access()) {
+        let normal = Blake3Bytes::<Normal>::from(data.as_slice());
+        let normal_root = Hash::from_foldable(&normal);
+
+        let prover = normal.start_proof();
+        for range in &access {
+            let mut buf = vec![0u8; range.len()];
+            prover.read(range.start, &mut buf);
+        }
+
+        let proof_tree = MerkleProof::from_foldable(&prover);
+        prop_assert_eq!(proof_tree.root_hash(), normal_root);
+
+        let bytes = serialise(&proof_tree).unwrap();
+        let (verify, parsed) =
+            proof_binary::deserialise::<Bincode, Blake3Bytes<Verify>>(&bytes).unwrap();
+
+        let verify_hash = PartialHash::from_foldable(parsed.into_present(), &verify)
+            .to_hash()
+            .expect("the reconstructed value folds to a present hash");
+        prop_assert_eq!(verify_hash, normal_root);
+
+        for range in &access {
+            let got = verify_read(&verify, range.clone()).expect("accessed range present");
+            prop_assert_eq!(got.as_slice(), &data[range.clone()]);
+        }
+    }
+
+    /// The same through the in-memory proof-tree deserialiser. The two parse the same bytes by
+    /// different routes, so they have to agree.
+    #[test]
+    fn avl_wire_in_memory_roundtrip((data, access) in data_and_access()) {
+        let normal = Blake3Bytes::<Normal>::from(data.as_slice());
+        let normal_root = Hash::from_foldable(&normal);
+
+        let prover = normal.start_proof();
+        for range in &access {
+            let mut buf = vec![0u8; range.len()];
+            prover.read(range.start, &mut buf);
+        }
+        let proof_tree = MerkleProof::from_foldable(&prover);
+
+        let (verify, parsed) = proof_tree::deserialise::<Bincode, Blake3Bytes<Verify>>(
+            crate::merkle_proof::proof_tree::ProofTree::present(&proof_tree),
+        )
+        .unwrap();
+        let verify_hash = PartialHash::from_foldable(parsed.into_present(), &verify)
+            .to_hash()
+            .unwrap();
+        prop_assert_eq!(verify_hash, normal_root);
+    }
+}
+
+/// A value the transition never touched is blinded to its committed hash, so the enclosing node
+/// carries one hash rather than a proof.
+#[test]
+fn avl_wire_untouched_value_is_blinded() {
+    let data = vec![7u8; 5 * CHUNK_LEN + 3];
+    let committed = hash_value(&data);
+
+    let normal = Blake3Bytes::<Normal>::from(data.as_slice());
+    let prover = normal.start_proof();
+    let proof_tree = MerkleProof::from_foldable(&prover);
+    assert!(proof_tree.is_blind());
+    assert_eq!(proof_tree.root_hash(), committed);
+
+    let bytes = serialise(&proof_tree).unwrap();
+    let (verify, parsed) =
+        proof_binary::deserialise::<Bincode, Blake3Bytes<Verify>>(&bytes).unwrap();
+    let verify_hash = PartialHash::from_foldable(parsed.into_present(), &verify)
+        .to_hash()
+        .unwrap();
+    assert_eq!(verify_hash, committed);
+}
+
+/// Reading only the length keeps the value present, because verify mode has to be able to
+/// recover the length, while the bytes stay blinded.
+#[test]
+fn avl_wire_length_only_access_keeps_the_length() {
+    let data = vec![9u8; 4 * CHUNK_LEN + 10];
+    let committed = hash_value(&data);
+
+    let normal = Blake3Bytes::<Normal>::from(data.as_slice());
+    let prover = normal.start_proof();
+    let _ = prover.len();
+
+    let proof_tree = MerkleProof::from_foldable(&prover);
+    assert!(!proof_tree.is_blind());
+    assert_eq!(proof_tree.root_hash(), committed);
+
+    let bytes = serialise(&proof_tree).unwrap();
+    let (verify, parsed) =
+        proof_binary::deserialise::<Bincode, Blake3Bytes<Verify>>(&bytes).unwrap();
+    assert_eq!(verify.len(), data.len());
+    let verify_hash = PartialHash::from_foldable(parsed.into_present(), &verify)
+        .to_hash()
+        .unwrap();
+    assert_eq!(verify_hash, committed);
+    assert!(verify_read(&verify, 0..1).is_none());
+}
+
+/// A value written under a node, with an untouched sibling: the written child is a present
+/// BLAKE3 leaf, the sibling is blinded, and the pre- and post-transition roots agree across all
+/// three modes. This is the shape the AVL layer actually produces.
+#[test]
+fn avl_wire_node_write_with_blinded_sibling() {
+    let a0 = vec![1u8; 3 * CHUNK_LEN];
+    let b0 = vec![2u8; 2 * CHUNK_LEN + 5];
+    let patch = vec![0xEEu8; 16];
+    let at = CHUNK_LEN;
+
+    let pre_root = Hash::from_foldable(&(
+        Blake3Bytes::<Normal>::from(a0.as_slice()),
+        Blake3Bytes::<Normal>::from(b0.as_slice()),
+    ));
+
+    let mut prover = (
+        Blake3Bytes::<Prove>::from_raw_source(&a0),
+        Blake3Bytes::<Prove>::from_raw_source(&b0),
+    );
+    prover.0.write(at, &patch);
+
+    let post_prove_root = Hash::from_foldable(&prover);
+    let proof_tree = MerkleProof::from_foldable(&prover);
+    assert_eq!(proof_tree.root_hash(), pre_root);
+
+    let bytes = serialise(&proof_tree).unwrap();
+    let (mut verify, parsed) =
+        proof_binary::deserialise::<Bincode, (Blake3Bytes<Verify>, Blake3Bytes<Verify>)>(&bytes)
+            .unwrap();
+    let parsed = parsed.into_present();
+
+    let pre_verify = PartialHash::from_foldable(parsed.clone(), &verify)
+        .to_hash()
+        .unwrap();
+    assert_eq!(pre_verify, pre_root);
+
+    verify.0.write(at, &patch);
+    let post_verify = PartialHash::from_foldable(parsed, &verify)
+        .to_hash()
+        .unwrap();
+    assert_eq!(post_verify, post_prove_root);
+
+    let mut a_post = Blake3Bytes::<Normal>::from(a0.as_slice());
+    a_post.write(at, &patch);
+    let post_normal = Hash::from_foldable(&(a_post, Blake3Bytes::<Normal>::from(b0.as_slice())));
+    assert_eq!(post_verify, post_normal);
 }

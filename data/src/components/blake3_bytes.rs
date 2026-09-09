@@ -33,6 +33,10 @@
 //! The folds carry it through the state pipelines: [`HashFold`] for Normal and Prove,
 //! [`PartialHashFold`] for Verify (which recomputes the root from the partial proof), and
 //! [`BlobStoreFold`] / [`Unfoldable`] for PVM-state persistence.
+//!
+//! On the AVL proof wire the value occupies a node's `data` slot as a dedicated
+//! [`MerkleProofLeaf::Blake3`](crate::merkle_proof::proof_tree::MerkleProofLeaf::Blake3) leaf
+//! carrying the [`Blake3Proof`], whose Merkle `root_hash` is the committed value hash.
 
 use std::borrow::Borrow;
 use std::cell::Cell;
@@ -66,6 +70,13 @@ use crate::hash::Hash;
 use crate::hash::HashFold;
 use crate::hash::PartialHash;
 use crate::hash::PartialHashFold;
+use crate::merkle_proof::Deserialiser;
+use crate::merkle_proof::FromProof;
+use crate::merkle_proof::Partial;
+use crate::merkle_proof::Suspended;
+use crate::merkle_proof::SuspendedResult;
+use crate::merkle_proof::proof_tree::MerkleProofFold;
+use crate::merkle_proof::proof_tree::MinimumPresence;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
@@ -1293,6 +1304,58 @@ impl Foldable<PartialHashFold> for Blake3Bytes<Verify> {
             Some(hash) => builder.present(hash),
             None => builder.previous(),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// AVL proof wire (Prove: MerkleProofFold; Verify: FromProof)
+// ---------------------------------------------------------------------------------------
+//
+// A byte value occupies a single child slot (the `data` slot) of an AVL node. In a proof it is a
+// single BLAKE3 within-value leaf (`MerkleProofLeaf::Blake3`) carrying the length-committed
+// `Blake3Proof`, whose Merkle-proof `root_hash` is the committed value hash
+// `combine(H_len, blake3::hash(bytes))` — matching the `HashFold` value hash exactly. This keeps
+// the value-proof encoding structurally disjoint from the generic Read/Blind node encoding
+// (invariant I7): the wire tag `LeafTag::Blake3` selects the decoder, and only `Blake3Bytes` ever
+// emits or parses it. See `docs/state-framework/blake3-bytes.mdx`.
+
+impl Foldable<MerkleProofFold> for Blake3Bytes<Prove<'_>> {
+    /// Emit the value's AVL-wire proof, capturing the *pre-transition* state (proofs always
+    /// describe the state at the start of proof recording).
+    ///
+    /// If any byte range was accessed, or the length was read, the value is [`MinimumPresence::Present`]
+    /// and carries a [`Blake3Proof`] with the accessed chunks present and every untouched subtree
+    /// blinded. If nothing was touched, it is blinded to the pre-transition value hash so the parent
+    /// node can omit it.
+    fn fold(&self, builder: MerkleProofFold) -> <MerkleProofFold as Fold>::Folded {
+        let accessed = self.accessed_ranges();
+        let needs_present = self.repr.did_access_length.get() || !accessed.is_empty();
+
+        if !needs_present {
+            // Whole value untouched: blind to the pre-transition committed value hash.
+            return builder.into_blind(hash_value(&self.repr.previous));
+        }
+
+        builder.into_blake3_leaf(MinimumPresence::Present, self.value_proof())
+    }
+}
+
+impl FromProof for Blake3Bytes<Verify> {
+    /// Reconstruct a verify-mode value from the AVL-wire proof's `data` slot.
+    ///
+    /// A present [`MerkleProofLeaf::Blake3`] populates the sparse view from its proven chunks (reads
+    /// of blinded/absent regions fault, invariant I4); a blinded or absent value node yields a
+    /// completely-absent value whose [`PartialHashFold`] defers to the previous (blinded) hash.
+    fn from_proof<Proof: Deserialiser>(proof: Proof) -> SuspendedResult<Proof, Self> {
+        let suspended = proof.into_blake3_leaf()?;
+        Ok(suspended.map(|partial| match partial {
+            Partial::Present(value_proof) => {
+                Blake3Bytes::<Verify>::from_proof_unchecked(value_proof)
+            }
+            Partial::Blinded(_) | Partial::Absent => Blake3Bytes {
+                repr: VerifyRepr::default(),
+            },
+        }))
     }
 }
 
