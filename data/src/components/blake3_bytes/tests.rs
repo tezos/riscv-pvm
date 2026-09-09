@@ -20,6 +20,7 @@ use blake3::hazmat::merge_subtrees_root;
 use proptest::prelude::*;
 
 use super::Blake3Proof;
+use super::MAX_PROOF_TREE_DEPTH;
 use super::ProofError;
 use super::ProofTree;
 use super::canonical_cv;
@@ -30,6 +31,8 @@ use super::proof_read;
 use super::prove;
 use super::verify_root;
 use crate::hash::Hash;
+use crate::serialisation::deserialise;
+use crate::serialisation::serialise;
 
 /// Sizes chosen to exercise the empty value, a sub-chunk value, an exact chunk, a chunk plus
 /// one byte, multi-chunk values, exact powers of two, and ragged right spines.
@@ -438,5 +441,109 @@ proptest! {
             let got = proof_read(&proof, range.clone()).unwrap();
             prop_assert_eq!(got.as_slice(), &data[range]);
         }
+    }
+}
+
+proptest! {
+    /// A proof survives the wire: what comes back verifies to the same committed hash.
+    #[test]
+    fn proof_roundtrips_through_the_wire((data, access) in data_and_access()) {
+        let proof = prove(&data, &access);
+        let bytes = serialise(&proof).expect("proof serialises");
+        let decoded = deserialise::<Blake3Proof>(&bytes).expect("proof decodes");
+        prop_assert_eq!(&decoded, &proof);
+        prop_assert_eq!(verify_root(&decoded).unwrap(), hash_value(&data));
+    }
+}
+
+/// I5: a present chunk larger than `CHUNK_LEN` is refused by the decoder, before the bytes are
+/// allocated rather than after.
+#[test]
+fn decode_rejects_oversized_chunk() {
+    let proof = Blake3Proof {
+        total_len: CHUNK_LEN + 5,
+        data: ProofTree::Chunk(vec![0u8; CHUNK_LEN + 5]),
+    };
+    let encoded = serialise(&proof).unwrap();
+    assert!(deserialise::<Blake3Proof>(&encoded).is_err());
+}
+
+/// A proof nested beyond the depth bound is rejected by the decoder rather than overflowing
+/// the stack. The tree is built and serialised iteratively, so only the decode side is under
+/// test.
+#[test]
+fn overly_deep_proof_tree_rejected() {
+    let mut tree = ProofTree::Blind([0u8; 32]);
+    for _ in 0..(MAX_PROOF_TREE_DEPTH + 50) {
+        tree = ProofTree::Node(Box::new(tree), Box::new(ProofTree::Blind([0u8; 32])));
+    }
+    let proof = Blake3Proof {
+        total_len: 4 * CHUNK_LEN,
+        data: tree,
+    };
+    let bytes = serialise(&proof).expect("encode is iterative, so it does not overflow");
+    assert!(
+        deserialise::<Blake3Proof>(&bytes).is_err(),
+        "decoder accepted an over-deep proof tree instead of rejecting it"
+    );
+}
+
+/// The depth bound does not reject well-formed proofs: a fully present multi-level value still
+/// round-trips.
+#[test]
+fn deep_but_canonical_proof_roundtrips() {
+    let data = vec![0x33u8; 64 * CHUNK_LEN];
+    let proof = prove(&data, &[0..data.len()]);
+    let bytes = serialise(&proof).expect("serialises");
+    let decoded = deserialise::<Blake3Proof>(&bytes).expect("well-formed proof decodes");
+    assert_eq!(verify_root(&decoded).unwrap(), hash_value(&data));
+}
+
+/// The serialised size of a proof for a 2 KiB access is `O(depth)` and does not depend on
+/// where in the value the access falls. Position independence is what unrestricted blinding
+/// buys: there is no spine or boundary that has to be materialised.
+#[test]
+fn proof_size_is_o_depth_and_position_independent() {
+    /// Present-chunk and blinded-chaining-value counts in a proof tree.
+    fn counts(tree: &ProofTree) -> (usize, usize) {
+        match tree {
+            ProofTree::Chunk(_) => (1, 0),
+            ProofTree::Blind(_) => (0, 1),
+            ProofTree::Node(l, r) => {
+                let (a, b) = counts(l);
+                let (c, d) = counts(r);
+                (a + c, b + d)
+            }
+        }
+    }
+
+    for mib in [1usize, 16, 64] {
+        let n = mib << 20;
+        let depth = (n / CHUNK_LEN).next_power_of_two().trailing_zeros() as usize;
+        let data = vec![0x5Au8; n];
+
+        let mut wires = Vec::new();
+        for access in [0..2048, n / 2..n / 2 + 2048, n - 2048..n] {
+            let proof = prove(&data, &[access]);
+            assert_eq!(
+                verify_root(&proof).expect("honest proof verifies"),
+                hash_value(&data)
+            );
+            let wire = serialise(&proof).expect("proof serialises").len();
+            let (present, blinds) = counts(&proof.data);
+
+            // A 2 KiB access spans at most three chunks, and the blinds are the
+            // authentication-path siblings, one per level plus a small constant.
+            assert!(present <= 4, "present {present} at {mib} MiB");
+            assert!(blinds <= 2 * depth + 4, "blinds {blinds} (depth {depth})");
+            wires.push(wire);
+        }
+
+        let min = *wires.iter().min().unwrap();
+        let max = *wires.iter().max().unwrap();
+        assert!(
+            max - min <= 2 * CHUNK_LEN,
+            "position-dependent wire size at {mib} MiB: min {min} max {max}"
+        );
     }
 }

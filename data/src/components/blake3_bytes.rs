@@ -20,10 +20,21 @@
 //! - [`verify_root`] — recompute the committed value hash canonically from the claimed length,
 //!   rejecting non-canonical shapes and oversized chunks (I2, I3, I5).
 //!
+//! The proof also has its own self-contained wire format ([`Blake3Proof`]'s [`Encode`] and
+//! [`Decode`]), kept structurally disjoint from the generic Merkle-proof encoding (I7).
+//!
 //! The modal component that folds these into the state pipelines follows.
 
 use std::ops::Range;
 
+use bincode::Decode;
+use bincode::Encode;
+use bincode::de::Decoder;
+use bincode::de::read::Reader;
+use bincode::enc::Encoder;
+use bincode::enc::write::Writer;
+use bincode::error::DecodeError;
+use bincode::error::EncodeError;
 use blake3::hazmat::HasherExt;
 use blake3::hazmat::Mode as B3Mode;
 use blake3::hazmat::left_subtree_len;
@@ -373,6 +384,124 @@ pub fn present_ranges(proof: &Blake3Proof) -> Vec<Range<usize>> {
         }
     }
     ranges
+}
+
+// ---------------------------------------------------------------------------------------
+// Proof serialisation (within-value proof wire format)
+// ---------------------------------------------------------------------------------------
+//
+// The value proof is encoded structurally disjointly from the AVL-node encoding (invariant
+// I7): it is a self-contained format, decided by the parse position (only the `data` slot of
+// an AVL node is ever parsed as a `Blake3Proof`). It is *never* merged into the generic
+// `crate::merkle_proof` Node/Read/Blind wire, whose node-combine (`combine_hashes`) and
+// leaf-hash (`hash_bytes`) do not match BLAKE3's internal `merge_subtrees` / raw-`blake3::hash`
+// scheme. See the module docs, and invariant I7 in `docs/state-framework/blake3-bytes.mdx`.
+
+/// Wire tag for a [`ProofTree::Chunk`] node.
+const TREE_TAG_CHUNK: u8 = 0;
+
+/// Wire tag for a [`ProofTree::Blind`] node.
+const TREE_TAG_BLIND: u8 = 1;
+
+/// Wire tag for a [`ProofTree::Node`] node.
+const TREE_TAG_NODE: u8 = 2;
+
+impl Encode for ProofTree {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        // Encoded iteratively to avoid unbounded recursion on adversarial depth.
+        let mut stack = vec![self];
+        while let Some(node) = stack.pop() {
+            match node {
+                ProofTree::Chunk(bytes) => {
+                    TREE_TAG_CHUNK.encode(encoder)?;
+                    // Length-prefixed so the decoder can bound-check before allocating (I6).
+                    (bytes.len() as u64).encode(encoder)?;
+                    encoder.writer().write(bytes)?;
+                }
+                ProofTree::Blind(cv) => {
+                    TREE_TAG_BLIND.encode(encoder)?;
+                    encoder.writer().write(cv)?;
+                }
+                ProofTree::Node(left, right) => {
+                    TREE_TAG_NODE.encode(encoder)?;
+                    // Push right first so left is popped (and thus decoded) first.
+                    stack.push(right);
+                    stack.push(left);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Maximum `ProofTree` nesting the decoder accepts. The canonical BLAKE3 tree for a value of up to
+/// `usize::MAX` (≤ `u64::MAX`) bytes has depth `ceil(log2(ceil(len / CHUNK_LEN))) <= 54`, so this
+/// bound never rejects a well-formed proof. It exists solely to stop an adversarially deeply-nested
+/// decoded proof from overflowing the verifier's stack (a DoS) before the shape is validated: any
+/// tree this deep is non-canonical and would be rejected by [`verify_root`] anyway. This guards
+/// both the standalone `Blake3Proof` wire and the AVL-node `Blake3` leaf (which decodes via the
+/// same path).
+const MAX_PROOF_TREE_DEPTH: usize = 64;
+
+impl<Context> Decode<Context> for ProofTree {
+    fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        decode_proof_tree(decoder, 0)
+    }
+}
+
+/// Depth-bounded recursive decode of a [`ProofTree`] (see [`MAX_PROOF_TREE_DEPTH`]).
+fn decode_proof_tree<Context, D: Decoder<Context = Context>>(
+    decoder: &mut D,
+    depth: usize,
+) -> Result<ProofTree, DecodeError> {
+    if depth > MAX_PROOF_TREE_DEPTH {
+        return Err(DecodeError::OtherString(format!(
+            "BLAKE3 proof-tree nesting exceeds max depth {MAX_PROOF_TREE_DEPTH}"
+        )));
+    }
+    let tag = u8::decode(decoder)?;
+    match tag {
+        TREE_TAG_CHUNK => {
+            let len = u64::decode(decoder)?;
+            // Bound-check the present-chunk length before allocating (invariant I6).
+            if len > CHUNK_LEN as u64 {
+                return Err(DecodeError::OtherString(format!(
+                    "BLAKE3 proof chunk length {len} exceeds CHUNK_LEN {CHUNK_LEN}"
+                )));
+            }
+            let mut bytes = vec![0u8; len as usize];
+            decoder.reader().read(&mut bytes)?;
+            Ok(ProofTree::Chunk(bytes))
+        }
+        TREE_TAG_BLIND => {
+            let mut cv = [0u8; 32];
+            decoder.reader().read(&mut cv)?;
+            Ok(ProofTree::Blind(cv))
+        }
+        TREE_TAG_NODE => {
+            let left = decode_proof_tree(decoder, depth + 1)?;
+            let right = decode_proof_tree(decoder, depth + 1)?;
+            Ok(ProofTree::Node(Box::new(left), Box::new(right)))
+        }
+        other => Err(DecodeError::OtherString(format!(
+            "invalid BLAKE3 proof-tree tag {other}"
+        ))),
+    }
+}
+
+impl Encode for Blake3Proof {
+    fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+        (self.total_len as u64).encode(encoder)?;
+        self.data.encode(encoder)
+    }
+}
+
+impl<Context> Decode<Context> for Blake3Proof {
+    fn decode<D: Decoder<Context = Context>>(decoder: &mut D) -> Result<Self, DecodeError> {
+        let total_len = u64::decode(decoder)? as usize;
+        let data = ProofTree::decode(decoder)?;
+        Ok(Blake3Proof { total_len, data })
+    }
 }
 
 #[cfg(test)]
