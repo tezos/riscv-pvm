@@ -195,6 +195,10 @@ authentication path, plus the length and a little framing. The cost is `O(a·102
 **position-independent** — an access at the start, the middle and the end of a value all cost the
 same.
 
+The length hash is a pure function of the length, so the single-chunk range - which is almost
+every value - is served from a precomputed table. That removes one of the three compressions a
+small value pays, and being a cache of a pure function it cannot change a hash.
+
 <Note>
 The dominant cost of hashing a value is the single `blake3::hash` over its bytes; the length hash
 and the final combine are two fixed compressions on top. Large values could be hashed across a

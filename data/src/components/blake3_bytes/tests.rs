@@ -1021,3 +1021,17 @@ fn avl_wire_node_write_with_blinded_sibling() {
     let post_normal = Hash::from_foldable(&(a_post, Blake3Bytes::<Normal>::from(b0.as_slice())));
     assert_eq!(post_verify, post_normal);
 }
+
+/// The cache must return exactly what a fresh hash of the little-endian length would, across the
+/// whole cached range, its boundary, and beyond it. A drift here would silently change every
+/// value hash, which is a consensus break rather than a slow path.
+#[test]
+fn hash_len_cache_matches_direct() {
+    for len in (0..=CHUNK_LEN + 2)
+        .chain([4096, 65536, 1_000_000, usize::MAX])
+        .collect::<Vec<_>>()
+    {
+        let direct = Hash::hash_bytes(&(len as u64).to_le_bytes());
+        assert_eq!(hash_len(len), direct, "hash_len cache drift at len {len}");
+    }
+}

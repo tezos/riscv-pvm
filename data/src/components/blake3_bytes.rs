@@ -92,14 +92,39 @@ use crate::store::fold::BlobStoreFold;
 /// BLAKE3 chunk length: the leaf granularity of the internal chunk tree (1024 bytes).
 pub const CHUNK_LEN: usize = blake3::CHUNK_LEN;
 
+// ---------------------------------------------------------------------------------------
+// Normal-mode hash
+// ---------------------------------------------------------------------------------------
+
+/// Precomputed [`hash_len`] for every length that fits in a single BLAKE3 chunk
+/// (`0..=CHUNK_LEN`), which is the overwhelmingly common value size. `hash_len` is a pure function
+/// of the length, so this is a transparent cache: a table hit returns the identical hash a fresh
+/// `blake3` call would, but skips one 8-byte BLAKE3 compression — a meaningful fraction of the
+/// fixed cost of hashing a small value (`combine(H_len, H_data)` over ≤64 B is dominated by the
+/// three compressions; this removes one). Built once, lazily, on first use (1025 hashes, ~tens of
+/// µs). `Box`ed to keep the 32 KiB table off the stack during initialisation.
+static SMALL_LEN_HASHES: std::sync::LazyLock<Box<[Hash; CHUNK_LEN + 1]>> =
+    std::sync::LazyLock::new(|| {
+        Box::new(std::array::from_fn(|len| {
+            Hash::hash_bytes(&(len as u64).to_le_bytes())
+        }))
+    });
+
 /// Commit a value's length as its own leaf: `H_len = blake3(len_le_bytes)`.
 ///
 /// The length is hashed as its `u64` little-endian encoding (no bincode framing) so it is a
 /// fixed, consensus-relevant preimage. This is the leaf that pins the value's length in the
 /// committed hash (see [`hash_value`]); dropping it is what let the predecessor length-free
 /// scheme be forged by a cross-span graft (invariant I3).
+///
+/// Single-chunk lengths, which are the overwhelmingly common case, are served from the
+/// [`SMALL_LEN_HASHES`] cache; larger lengths are computed directly, since there the hash of the
+/// value's bytes dominates anyway.
 fn hash_len(len: usize) -> Hash {
-    Hash::hash_bytes(&(len as u64).to_le_bytes())
+    match SMALL_LEN_HASHES.get(len) {
+        Some(hash) => *hash,
+        None => Hash::hash_bytes(&(len as u64).to_le_bytes()),
+    }
 }
 
 /// Normal-mode hash of a byte array under the length-committed BLAKE3 scheme.
