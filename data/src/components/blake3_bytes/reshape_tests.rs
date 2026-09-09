@@ -313,6 +313,74 @@ fn tamper_first_blind(tree: &mut ProofTree) -> bool {
     }
 }
 
+/// The part of a proof that scales with the value rather than with its depth.
+fn chunk_bytes(tree: &ProofTree) -> usize {
+    match tree {
+        ProofTree::Chunk(b) => b.len(),
+        ProofTree::Node(l, r) => chunk_bytes(l) + chunk_bytes(r),
+        ProofTree::Blind(_) => 0,
+    }
+}
+
+/// A reshape whose low-water mark is chunk-aligned needs no pre bytes: the prefix is recovered from
+/// length-independent aligned subtree CVs and the changed region from the verifier's own replay. It
+/// must therefore carry no present chunk - only O(depth) blinds.
+#[test]
+fn aligned_reshape_carries_no_value_bytes() {
+    for ops in [
+        vec![Op::Resize(20 * CHUNK_LEN)],
+        vec![Op::Resize(4 * CHUNK_LEN)],
+        vec![Op::Resize(20 * CHUNK_LEN), Op::Resize(8 * CHUNK_LEN)],
+    ] {
+        let pre = filled(16 * CHUNK_LEN);
+        let (_, _, proof) = run(&pre, &ops);
+        assert_eq!(
+            chunk_bytes(&proof.data),
+            0,
+            "aligned reshape carried value bytes for {ops:?}"
+        );
+    }
+}
+
+/// A write that covers a whole chunk needs no pre-image: the verifier replays the same write, so it
+/// hashes that chunk itself. A full overwrite therefore carries no value bytes either, in place or
+/// combined with a reshape.
+#[test]
+fn full_overwrite_carries_no_pre_image() {
+    for (pre_len, ops) in [
+        // In place, chunk-aligned and ragged.
+        (4 * CHUNK_LEN, vec![Op::Write(0, filled(4 * CHUNK_LEN))]),
+        (
+            4 * CHUNK_LEN + 7,
+            vec![Op::Write(0, filled(4 * CHUNK_LEN + 7))],
+        ),
+        // Grown, then written in full - the shape a `set` of a longer value takes.
+        (
+            4 * CHUNK_LEN,
+            vec![
+                Op::Resize(6 * CHUNK_LEN + 9),
+                Op::Write(0, filled(6 * CHUNK_LEN + 9)),
+            ],
+        ),
+        // Shrunk, then written in full.
+        (
+            8 * CHUNK_LEN,
+            vec![
+                Op::Resize(3 * CHUNK_LEN + 5),
+                Op::Write(0, filled(3 * CHUNK_LEN + 5)),
+            ],
+        ),
+    ] {
+        let pre = filled(pre_len);
+        let (_, _, proof) = run(&pre, &ops);
+        assert_eq!(
+            chunk_bytes(&proof.data),
+            0,
+            "full overwrite carried a pre-image for pre={pre_len} {ops:?}"
+        );
+    }
+}
+
 fn tamper_first_chunk(tree: &mut ProofTree) -> bool {
     match tree {
         ProofTree::Chunk(b) if !b.is_empty() => {
@@ -475,6 +543,82 @@ proptest! {
             Err(_) => {}
             Ok(root) => prop_assert_ne!(root, pre_root),
         }
+    }
+}
+
+// A write covering whole chunks records no accessed range, so nothing marks those chunks as
+// changed when the proof shape is chosen. They must still not be swallowed by a coarser blind:
+// the verifier re-derives a blind only where it holds the whole span, and it holds exactly what
+// the replay wrote, so a blind straddling written and unwritten bytes leaves it with the pre
+// value and the write invisible in the root.
+//
+// The payload matters. `filled` repeats with period 256, so writing `filled(CHUNK_LEN)` at a
+// 1024-aligned offset writes the bytes already there and passes however the proof is built.
+mod written_chunks_reach_the_verifier {
+    use super::*;
+
+    fn payload(len: usize) -> Vec<u8> {
+        vec![0xABu8; len]
+    }
+
+    #[test]
+    fn one_aligned_chunk() {
+        let pre = filled(4 * CHUNK_LEN);
+        assert_ne!(
+            &pre[CHUNK_LEN..2 * CHUNK_LEN],
+            &payload(CHUNK_LEN)[..],
+            "the payload has to differ from what it overwrites, or this proves nothing"
+        );
+        assert_roundtrip(&pre, &[Op::Write(CHUNK_LEN, payload(CHUNK_LEN))]);
+    }
+
+    #[test]
+    fn an_aligned_pair() {
+        assert_roundtrip(
+            &filled(8 * CHUNK_LEN),
+            &[Op::Write(2 * CHUNK_LEN, payload(2 * CHUNK_LEN))],
+        );
+    }
+
+    // The whole value written needs no shape kept open: the verifier holds all of it and
+    // re-derives the root itself.
+    #[test]
+    fn the_whole_value() {
+        assert_roundtrip(
+            &filled(4 * CHUNK_LEN),
+            &[Op::Write(0, payload(4 * CHUNK_LEN))],
+        );
+    }
+
+    #[test]
+    fn then_a_grow() {
+        assert_roundtrip(
+            &filled(8 * CHUNK_LEN),
+            &[
+                Op::Write(CHUNK_LEN, payload(CHUNK_LEN)),
+                Op::Resize(9 * CHUNK_LEN),
+            ],
+        );
+    }
+
+    #[test]
+    fn then_a_shrink() {
+        assert_roundtrip(
+            &filled(8 * CHUNK_LEN),
+            &[
+                Op::Write(CHUNK_LEN, payload(CHUNK_LEN)),
+                Op::Resize(3 * CHUNK_LEN),
+            ],
+        );
+    }
+
+    // A partly covered chunk keeps its pre-image instead, which already worked.
+    #[test]
+    fn an_unaligned_write() {
+        assert_roundtrip(
+            &filled(4 * CHUNK_LEN),
+            &[Op::Write(CHUNK_LEN + 7, payload(100))],
+        );
     }
 }
 
