@@ -28,7 +28,11 @@
 //! [`Blake3Bytes`] is the mode-generic byte-array component built on those functions. Normal
 //! mode holds the bytes; Prove mode borrows the pre-transition bytes and records what the
 //! transition touched; Verify mode holds the sparse view a proof reconstructs, faulting on a
-//! read it cannot answer. The folds that carry it through the state pipelines follow.
+//! read it cannot answer.
+//!
+//! The folds carry it through the state pipelines: [`HashFold`] for Normal and Prove,
+//! [`PartialHashFold`] for Verify (which recomputes the root from the partial proof), and
+//! [`BlobStoreFold`] / [`Unfoldable`] for PVM-state persistence.
 
 use std::borrow::Borrow;
 use std::cell::Cell;
@@ -52,7 +56,16 @@ use blake3::hazmat::merge_subtrees_root;
 use perfect_derive::perfect_derive;
 
 use crate::clone::CloneState;
+use crate::foldable::Fold;
+use crate::foldable::FoldLeaf;
+use crate::foldable::Foldable;
+use crate::foldable::Unfold;
+use crate::foldable::UnfoldError;
+use crate::foldable::Unfoldable;
 use crate::hash::Hash;
+use crate::hash::HashFold;
+use crate::hash::PartialHash;
+use crate::hash::PartialHashFold;
 use crate::mode::Modal;
 use crate::mode::Mode;
 use crate::mode::Normal;
@@ -62,6 +75,8 @@ use crate::mode::Verify;
 use crate::mode::utils::Source;
 use crate::mode::utils::not_found;
 use crate::partial_vec::PartialVec;
+use crate::store::BlobStore;
+use crate::store::fold::BlobStoreFold;
 
 /// BLAKE3 chunk length: the leaf granularity of the internal chunk tree (1024 bytes).
 pub const CHUNK_LEN: usize = blake3::CHUNK_LEN;
@@ -933,6 +948,69 @@ impl Blake3Bytes<Verify> {
             None => unsafe { not_found() },
         }
     }
+
+    /// Recompute the current (post-transition) value root from the sparse verify view.
+    ///
+    /// Returns `None` only when the value is completely absent - its length unknown, because it
+    /// was blinded at the AVL layer - in which case the fold defers to the previous hash.
+    ///
+    /// With a retained proof and an unchanged length, the committed shape is rebuilt with the
+    /// current bytes substituted for the chunks the transition wrote, and the untouched blinds
+    /// kept. Otherwise the root is recomputed from the fully materialised bytes: that covers a
+    /// value freshly created or wholly set in verify mode, which has no retained proof at all,
+    /// and a length change, where the committed chaining values stand for spans the new shape
+    /// does not have.
+    fn current_root(&self) -> Option<Hash> {
+        let length = self.repr.length?;
+
+        // A present but empty value always hashes to `hash_value(&[])`, whatever proof or
+        // resize history it has: the sparse-view accessors below return `None` for the
+        // degenerate `0..0` range.
+        if length == 0 {
+            return Some(hash_value(&[]));
+        }
+
+        if let Some(proof) = self.repr.proof.as_ref()
+            && length == proof.total_len
+            && self.repr.low_water == length
+        {
+            // The length is unchanged and the value never shrank below it, so every blinded
+            // chunk is genuinely untouched and the committed shape can be reused. The
+            // low-water guard matters: a shrink and regrow back to the same length leaves the
+            // length equal but replaces those bytes with zeros.
+            let data = rebuild_tree(&proof.data, 0, length, &self.repr.data);
+            return verify_root(&Blake3Proof {
+                total_len: length,
+                data,
+            })
+            .ok();
+        }
+
+        let full = self.repr.data.contiguous_range(0..length)?;
+        Some(hash_value(full))
+    }
+}
+
+/// Rebuild a proof tree over `[offset, offset + len)` from the committed shape, substituting the
+/// current (possibly written) bytes wherever the sparse view has them.
+///
+/// A blinded span keeps its committed chaining value: it was untouched by the transition, so the
+/// bytes behind it are unchanged and the pre-transition value still stands for them.
+fn rebuild_tree(node: &ProofTree, offset: usize, len: usize, data: &PartialVec<u8>) -> ProofTree {
+    match node {
+        ProofTree::Chunk(original) => match data.contiguous_range(offset..offset + len) {
+            Some(current) => ProofTree::Chunk(current.to_vec()),
+            None => ProofTree::Chunk(original.clone()),
+        },
+        ProofTree::Blind(cv) => ProofTree::Blind(*cv),
+        ProofTree::Node(left, right) => {
+            let left_len = left_subtree_len(len as u64) as usize;
+            ProofTree::Node(
+                Box::new(rebuild_tree(left, offset, left_len, data)),
+                Box::new(rebuild_tree(right, offset + left_len, len - left_len, data)),
+            )
+        }
+    }
 }
 
 /// Construct `start..start+len` clamped so it does not extend beyond `total_len`.
@@ -1171,6 +1249,66 @@ impl Blake3BytesMode for Verify {
         Blake3Bytes {
             repr: this.repr.clone(),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Fold pipelines
+// ---------------------------------------------------------------------------------------
+
+impl Foldable<HashFold> for Blake3Bytes<Normal> {
+    /// Normal-mode value hash: `combine(H_len, blake3::hash(bytes))` (invariant I8).
+    fn fold(&self, _builder: HashFold) -> Hash {
+        hash_value(self.as_bytes())
+    }
+}
+
+impl Foldable<HashFold> for Blake3Bytes<Prove<'_>> {
+    /// Prove-mode value hash over the *post-transition* state (matches Normal mode after the
+    /// same writes — invariant I8).
+    fn fold(&self, _builder: HashFold) -> Hash {
+        self.hash()
+    }
+}
+
+impl Foldable<PartialHashFold> for Blake3Bytes<Verify> {
+    /// Verify-mode value hash recomputed from the partial proof (invariants I3, I8).
+    ///
+    /// Defers to the previous hash when the value is completely absent (blinded at the AVL
+    /// layer); otherwise recomputes the current root from present bytes + committed CVs.
+    fn fold(&self, builder: PartialHashFold) -> PartialHash {
+        match self.current_root() {
+            Some(hash) => builder.present(hash),
+            None => builder.previous(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Store fold / unfold (PVM state tree persistence)
+// ---------------------------------------------------------------------------------------
+//
+// NOTE: unlike [`super::bytes::Bytes`], the store representation here is a single
+// length-prefixed leaf rather than a page tree, so the *store* content hash is
+// `hash_bytes(bincode(bytes))`, which differs from the *value* hash `blake3::hash(bytes)`
+// used by `HashFold`. This is fine for the durable-storage AVL (which persists values via
+// `Storable`/`DataLoadable`, not this fold-store) but means a PVM-state switch-over would
+// want a variable-length raw-leaf store representation so store-hash == value-hash. See the
+// report / docs.
+
+impl<BS: BlobStore> Foldable<BlobStoreFold<BS>> for Blake3Bytes<Normal> {
+    fn fold(&self, builder: BlobStoreFold<BS>) -> <BlobStoreFold<BS> as Fold>::Folded {
+        let bytes = self.as_bytes().to_vec();
+        builder
+            .fold_leaf(&bytes)
+            .expect("Serialising bytes should not fail")
+    }
+}
+
+impl Unfoldable for Blake3Bytes<Normal> {
+    fn unfold<U: Unfold>(source: U) -> Result<Self, UnfoldError> {
+        let bytes = source.into_leaf::<Vec<u8>>()?;
+        Ok(Blake3Bytes::from(bytes.as_slice()))
     }
 }
 

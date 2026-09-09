@@ -9,7 +9,10 @@
     reason = "accessed ranges are passed as one-element slices throughout, which is what these tests mean; the lint reads them as a mistyped range"
 )]
 
+use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use blake3::CHUNK_LEN;
 use blake3::hazmat::HasherExt;
@@ -31,13 +34,22 @@ use super::present_ranges;
 use super::proof_read;
 use super::prove;
 use super::verify_root;
+use crate::foldable::Foldable;
+use crate::foldable::Unfoldable;
 use crate::hash::Hash;
+use crate::hash::HashedData;
+use crate::hash::PartialHash;
 use crate::mode::Normal;
+use crate::mode::Provable;
 use crate::mode::Prove;
 use crate::mode::Verify;
 use crate::mode::utils::catch_not_found;
 use crate::serialisation::deserialise;
 use crate::serialisation::serialise;
+use crate::store::BlobStore;
+use crate::store::BlobStoreError;
+use crate::store::fold::BlobStoreFold;
+use crate::store::unfold::BlobStoreUnfold;
 
 /// Sizes chosen to exercise the empty value, a sub-chunk value, an exact chunk, a chunk plus
 /// one byte, multi-chunk values, exact powers of two, and ragged right spines.
@@ -664,4 +676,190 @@ fn shrink_then_regrow_drops_the_old_bytes() {
 
     assert_eq!(prover.hash(), normal.hash());
     assert_eq!(prover.hash(), hash_value(&vec![0u8; 2 * CHUNK_LEN]));
+}
+
+/// A content-addressed store for the fold/unfold round-trip. The crate's own in-memory store
+/// is private to the `store` module.
+#[derive(Default)]
+struct TestStore(Mutex<HashMap<Hash, Vec<u8>>>);
+
+impl BlobStore for TestStore {
+    fn blob_get(&self, key: Hash) -> Result<impl AsRef<[u8]>, BlobStoreError> {
+        self.0
+            .lock()
+            .expect("lock poisoned")
+            .get(&key)
+            .cloned()
+            .ok_or(BlobStoreError::NotFound(key))
+    }
+
+    fn blob_set<Data: AsRef<[u8]>>(&self, blob: &HashedData<Data>) -> Result<(), BlobStoreError> {
+        self.0
+            .lock()
+            .expect("lock poisoned")
+            .insert(blob.hash(), blob.data().to_vec());
+        Ok(())
+    }
+
+    fn blob_delete(&self, key: Hash) -> Result<(), BlobStoreError> {
+        self.0.lock().expect("lock poisoned").remove(&key);
+        Ok(())
+    }
+}
+
+/// Folding a normal value yields the committed value hash, so the component contributes the
+/// scheme's hash to whatever state contains it.
+#[test]
+fn hash_fold_is_the_committed_value_hash() {
+    let data = vec![0xABu8; 3 * CHUNK_LEN + 17];
+    let value = Blake3Bytes::<Normal>::from(data.as_slice());
+    assert_eq!(Hash::from_foldable(&value), hash_value(&data));
+}
+
+/// As a child of a node, the value contributes exactly its committed hash: a `(key, value)`
+/// node hashes to the combine of the key hash and the value hash. This is the shape the AVL
+/// layer relies on.
+#[test]
+fn value_contributes_its_hash_to_a_node() {
+    let data = vec![7u8; 2 * CHUNK_LEN + 3];
+    let key_hash = Hash::hash_bytes(b"some-key");
+    let value = Blake3Bytes::<Normal>::from(data.as_slice());
+
+    let node_hash = Hash::from_foldable(&(key_hash, value));
+    assert_eq!(
+        node_hash,
+        Hash::combine_hashes([key_hash, hash_value(&data)])
+    );
+}
+
+proptest! {
+    /// I8: for a read-only transition the three modes fold to the same root — normal, prove
+    /// over the pre-transition bytes, and verify reconstructed from the resulting proof.
+    #[test]
+    fn all_three_modes_fold_alike((data, access) in data_and_access()) {
+        let normal = Blake3Bytes::<Normal>::from(data.as_slice());
+        let normal_root = Hash::from_foldable(&normal);
+
+        let prover = normal.start_proof();
+        for range in &access {
+            let mut buf = vec![0u8; range.len()];
+            prover.read(range.start, &mut buf);
+        }
+        prop_assert_eq!(Hash::from_foldable(&prover), normal_root);
+
+        let proof = prover.value_proof();
+        let verify = Blake3Bytes::<Verify>::from_proof_checked(proof, normal_root).unwrap();
+        let verify_root_hash = PartialHash::from_foldable(None, &verify)
+            .to_hash()
+            .expect("a fully reconstructed value folds to a present hash");
+        prop_assert_eq!(verify_root_hash, normal_root);
+    }
+
+    /// Tampering with a serialised proof either fails to decode or diverges from the root, so a
+    /// corrupted proof can never be folded into agreement.
+    #[test]
+    fn tampered_serialised_proof_detected(
+        data in bytes_of_len(4 * CHUNK_LEN),
+        idx in 0usize..64,
+    ) {
+        let committed = hash_value(&data);
+        let prover = Blake3Bytes::<Prove>::from_raw_source(&data);
+        let mut buf = [0u8; 8];
+        prover.read(0, &mut buf);
+        let proof = prover.value_proof();
+
+        let mut encoded = serialise(&proof).unwrap();
+        let pos = idx % encoded.len();
+        encoded[pos] ^= 0x80;
+
+        match deserialise::<Blake3Proof>(&encoded) {
+            Err(_) => {}
+            Ok(tampered) => match verify_root(&tampered) {
+                Err(_) => {}
+                Ok(got) => prop_assert_ne!(got, committed),
+            },
+        }
+    }
+}
+
+/// After a write, the verify-mode fold reaches the post-transition root by substituting the
+/// bytes it replayed into the committed shape — the case the retained proof exists for.
+#[test]
+fn verify_fold_recomputes_the_root_after_a_write() {
+    let original = vec![1u8; 3 * CHUNK_LEN];
+    let patch = vec![0xEEu8; 16];
+    let at = CHUNK_LEN;
+
+    let mut normal = Blake3Bytes::<Normal>::from(original.as_slice());
+    normal.write(at, &patch);
+    let post_root = Hash::from_foldable(&normal);
+
+    let mut prover = Blake3Bytes::<Prove>::from_raw_source(&original);
+    prover.write(at, &patch);
+    assert_eq!(Hash::from_foldable(&prover), post_root);
+
+    let pre_root = hash_value(&original);
+    let proof = prover.value_proof();
+    assert_eq!(verify_root(&proof).unwrap(), pre_root);
+
+    let mut verify = Blake3Bytes::<Verify>::from_proof_checked(proof, pre_root).unwrap();
+    assert_eq!(verify.write(at, &patch), patch.len());
+    let verify_post = PartialHash::from_foldable(None, &verify)
+        .to_hash()
+        .expect("the post-transition fold should be present");
+    assert_eq!(verify_post, post_root);
+}
+
+/// The same after a resize, which changes the shape rather than the contents of a chunk, so
+/// the verifier cannot reuse the committed chaining values and rehashes from the bytes.
+#[test]
+fn verify_fold_recomputes_the_root_after_a_resize() {
+    let original = vec![2u8; 2 * CHUNK_LEN];
+    let new_len = 3 * CHUNK_LEN;
+
+    let mut normal = Blake3Bytes::<Normal>::from(original.as_slice());
+    normal.resize(new_len);
+    let post_root = Hash::from_foldable(&normal);
+
+    let mut prover = Blake3Bytes::<Prove>::from_raw_source(&original);
+    prover.resize(new_len);
+    assert_eq!(Hash::from_foldable(&prover), post_root);
+
+    let pre_root = hash_value(&original);
+    let proof = prover.value_proof();
+    let mut verify = Blake3Bytes::<Verify>::from_proof_checked(proof, pre_root).unwrap();
+    verify.resize(new_len);
+    let verify_post = PartialHash::from_foldable(None, &verify)
+        .to_hash()
+        .expect("the post-transition fold should be present");
+    assert_eq!(verify_post, post_root);
+}
+
+/// A verify-mode read of a region the transition never touched faults, rather than returning
+/// the zeroes the sparse view holds for absent data.
+#[test]
+fn verify_blinded_read_faults() {
+    let data = vec![9u8; 4 * CHUNK_LEN];
+    let committed = hash_value(&data);
+    let prover = Blake3Bytes::<Prove>::from_raw_source(&data);
+    let mut buf = [0u8; 1];
+    prover.read(0, &mut buf);
+    let proof = prover.value_proof();
+
+    let verify = Blake3Bytes::<Verify>::from_proof_checked(proof, committed).unwrap();
+    assert!(verify_read(&verify, 0..1).is_some());
+    assert!(verify_read(&verify, (3 * CHUNK_LEN)..(4 * CHUNK_LEN)).is_none());
+}
+
+/// The store fold and unfold round-trip the bytes, which is the PVM-state persistence path.
+#[test]
+fn store_fold_unfold_roundtrip() {
+    let data = vec![0x33u8; 5 * CHUNK_LEN + 9];
+    let value = Blake3Bytes::<Normal>::from(data.as_slice());
+
+    let store = Arc::new(TestStore::default());
+    let root = value.fold(BlobStoreFold::from(Arc::clone(&store))).unwrap();
+
+    let unfolded = Blake3Bytes::<Normal>::unfold(BlobStoreUnfold::new(store, root)).unwrap();
+    assert_eq!(unfolded.as_bytes(), data.as_slice());
 }
