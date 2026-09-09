@@ -184,19 +184,85 @@ pub enum ProofError {
     OutOfBounds,
 }
 
+// ---------------------------------------------------------------------------------------
+// Prove / Verify contract
+// ---------------------------------------------------------------------------------------
+
 /// Build a proof for `data` that keeps exactly the chunks overlapping `accessed` present
 /// and blinds every other canonical subtree to its chaining value.
 ///
-/// Blinding is recursive and *unrestricted* (invariants I1, I6): an untouched canonical subtree
+/// Blinding is recursive and *unrestricted* (invariant I1, I6): an untouched canonical subtree
 /// of many chunks — at any offset or span — collapses to a single 32-byte CV. If nothing was
 /// accessed, the whole data tree collapses to a single top-level [`ProofTree::Blind`] carrying
 /// `H_data` (used when only the value's length was read; the length still travels in
 /// [`Blake3Proof::total_len`]).
 pub fn prove(data: &[u8], accessed: &[Range<usize>]) -> Blake3Proof {
+    prove_for_reshape(data, accessed, &[])
+}
+
+/// [`prove`], additionally keeping the shape open wherever a reshape verifier needs to reach into
+/// the unchanged prefix.
+///
+/// Presence of *bytes* and openness of *shape* are different requirements, and a bare [`prove`] can
+/// only express the first. A reshape verifier recovers the unchanged prefix from aligned
+/// power-of-two chunk subtree CVs, and can fetch one only by an exact descent - so no coarser blind
+/// may swallow it. `reused` lists those subtrees (see [`reused_prefix_subtrees`]); their ancestors
+/// are kept as nodes even when nothing in them was accessed, while the subtrees themselves stay
+/// blinded, which is precisely the reuse. The extra cost is one CV per level.
+///
+/// The root is kept open whenever `reused` is non-empty: a *top-level* blind carries the
+/// `ROOT`-finalised `H_data`, which is not a chaining value and so can never serve as one. Left
+/// open, its children recombine to the right non-root CV instead.
+///
+/// Pass an empty slice when the transition does not reshape the value.
+pub fn prove_for_reshape(
+    data: &[u8],
+    accessed: &[Range<usize>],
+    reused: &[(usize, usize)],
+) -> Blake3Proof {
+    let total_len = data.len();
+    let tree = build_proof_tree(data, 0, total_len, accessed, true, reused);
     Blake3Proof {
-        total_len: data.len(),
-        data: build_proof_tree(data, 0, data.len(), accessed, true),
+        total_len,
+        data: tree,
     }
+}
+
+fn reused_prefix_subtrees(lq: usize, safe_full: usize) -> Vec<(usize, usize)> {
+    fn collect(offset: usize, len: usize, safe_full: usize, out: &mut Vec<(usize, usize)>) {
+        if offset + len <= safe_full && is_aligned_subtree(offset, len) {
+            out.push((offset, len));
+            return;
+        }
+        // At or past the prefix the verifier hashes its own bytes; a leaf cannot be split further.
+        if offset >= safe_full || len <= CHUNK_LEN {
+            return;
+        }
+        let left_len = left_subtree_len(len as u64) as usize;
+        collect(offset, left_len, safe_full, out);
+        collect(offset + left_len, len - left_len, safe_full, out);
+    }
+
+    let mut out = Vec::new();
+    // A single-chunk post value is hashed live in full, and an empty prefix reuses nothing.
+    if safe_full == 0 || lq <= CHUNK_LEN {
+        return out;
+    }
+    let left_len = left_subtree_len(lq as u64) as usize;
+    collect(0, left_len, safe_full, &mut out);
+    collect(left_len, lq - left_len, safe_full, &mut out);
+    out
+}
+
+/// Must the subtree `[offset, offset + len)` stay open (a node) so a reshape verifier can reach the
+/// CVs it reuses, even though nothing in it was accessed?
+///
+/// Yes exactly when it *strictly* contains one of the reused subtrees. A node that is itself reused
+/// may stay blinded - that blind is the CV the verifier wants.
+fn must_stay_open(offset: usize, len: usize, reused: &[(usize, usize)]) -> bool {
+    reused
+        .iter()
+        .any(|&(po, pl)| po >= offset && po + pl <= offset + len && (po, pl) != (offset, len))
 }
 
 /// Non-root chaining value of the canonical BLAKE3 subtree covering `data`, which *starts*
@@ -241,11 +307,12 @@ fn build_proof_tree(
     len: usize,
     accessed: &[Range<usize>],
     is_root: bool,
+    reused: &[(usize, usize)],
 ) -> ProofTree {
     let touched = if is_root {
-        !accessed.is_empty()
+        !accessed.is_empty() || !reused.is_empty()
     } else {
-        range_is_accessed(offset, len, accessed)
+        range_is_accessed(offset, len, accessed) || must_stay_open(offset, len, reused)
     };
 
     if !touched {
@@ -259,11 +326,20 @@ fn build_proof_tree(
     }
 
     if len <= CHUNK_LEN {
+        // Reached by presence of bytes only: `must_stay_open` never fires at chunk granularity, so
+        // a chunk is present here because it really was accessed.
         ProofTree::Chunk(data[offset..offset + len].to_vec())
     } else {
         let left_len = left_subtree_len(len as u64) as usize;
-        let left = build_proof_tree(data, offset, left_len, accessed, false);
-        let right = build_proof_tree(data, offset + left_len, len - left_len, accessed, false);
+        let left = build_proof_tree(data, offset, left_len, accessed, false, reused);
+        let right = build_proof_tree(
+            data,
+            offset + left_len,
+            len - left_len,
+            accessed,
+            false,
+            reused,
+        );
         ProofTree::Node(Box::new(left), Box::new(right))
     }
 }
@@ -603,10 +679,10 @@ pub struct ProveRepr<'normal> {
     /// Whether the length was read during the transition.
     did_access_length: Cell<bool>,
     /// The lowest length the value ever had during the transition (the "low-water mark"). Bytes
-    /// at or above it were dropped by some resize, so if the value later regrew they must read
-    /// back as zero rather than as the pre-transition bytes `previous` still holds. Used by
-    /// [`Self::post_bytes`] to zero that region; the verifier tracks its own copy (see
-    /// [`VerifyRepr::low_water`]).
+    /// below it were never dropped by a resize, so they retain their pre-transition value — hence
+    /// `[0, low_water)` is exactly the prefix whose subtree CVs the verifier may reuse across a
+    /// reshape. Here it is used only by [`Self::post_bytes`] to zero the regrown region; the
+    /// verifier tracks its own copy (see [`VerifyRepr::low_water`]). See `resize`.
     low_water: Cell<usize>,
     /// Ranges that were read (may overlap; overlaps are harmless for proof generation).
     reads: RefCell<Vec<Range<usize>>>,
@@ -624,9 +700,9 @@ pub struct VerifyRepr {
     /// Current length, if known.
     length: Option<usize>,
     /// The lowest length the value has had since reconstruction (see [`ProveRepr::low_water`]).
-    /// The verifier replays the same resizes as the prover, so the two derive the same mark and
-    /// agree on whether the committed shape still describes the value. Meaningless while
-    /// `length` is `None` (an absent value).
+    /// The verifier replays the same resizes as the prover, so it derives the same low-water
+    /// mark and hence agrees on whether a reshape is "clean" (prefix reusable) or must fall back
+    /// to a full re-hash. Meaningless while `length` is `None` (absent value).
     low_water: usize,
     /// Present byte ranges recovered from the proof (and any writes).
     data: PartialVec<u8>,
@@ -839,14 +915,16 @@ impl<'a> Blake3Bytes<Prove<'a>> {
 
     /// The byte ranges of the pre-transition value the proof has to carry.
     ///
-    /// Reads need their bytes so the verifier can return the same ones. Writes need them too: the
-    /// verifier recomputes the post-transition root by substituting written bytes into the
-    /// committed shape, and a chunk it holds only part of cannot be hashed.
+    /// Reads need their bytes so the verifier can return the same ones, and writes need them so
+    /// it can substitute into a chunk it holds only part of.
     ///
-    /// A length change needs the whole pre-transition value, because the canonical shape is a
-    /// function of the length: at the new length the committed chaining values stand for spans
-    /// that no longer exist, so none of them can be reused and the root has to be recomputed from
-    /// the bytes. That makes a resize cost the size of the value, which a later commit reduces.
+    /// A reshape needs far less than the whole value. The verifier reuses aligned subtree
+    /// chaining values for `[0, safe_full)` and rebuilds `[low_water, length)` from its own
+    /// replay, so the only pre bytes left over are the prefix's partial boundary chunk,
+    /// `[safe_full, low_water)` - the one span neither mechanism covers. The exception is a post
+    /// value of a single chunk, which is hashed live in one piece and so needs every surviving
+    /// pre byte. Either way the requirement is derived from the *final* low-water mark, not from
+    /// each resize as it happens, because that is where the verifier actually reuses up to.
     fn accessed_ranges(&self) -> Vec<Range<usize>> {
         let prev_len = self.repr.previous.len();
         let clamp = |start: usize, end: usize| -> Option<Range<usize>> {
@@ -869,17 +947,48 @@ impl<'a> Blake3Bytes<Prove<'a>> {
             }
         }
 
-        if self.repr.length != prev_len || self.repr.low_water.get() != self.repr.length {
-            ranges.extend(clamp(0, prev_len));
+        if let Some((safe_full, low_water)) = self.reshape_prefix() {
+            let needed = if self.repr.length <= CHUNK_LEN {
+                0..self.repr.length.min(prev_len)
+            } else {
+                safe_full..low_water
+            };
+            ranges.extend(clamp(needed.start, needed.end));
         }
 
         ranges
     }
 
+    /// The reshape geometry, or `None` when the transition does not reshape the value.
+    ///
+    /// `low_water` is the lowest length the value held, clamped to the pre length: its bytes were
+    /// never dropped, so they are unchanged across the transition and their aligned subtree
+    /// chaining values are reusable. `safe_full` rounds that down to a whole chunk, since only
+    /// whole chunks have such chaining values.
+    fn reshape_prefix(&self) -> Option<(usize, usize)> {
+        let prev_len = self.repr.previous.len();
+        let low_water = self.repr.low_water.get().min(prev_len);
+        let reshaped = self.repr.length != prev_len || low_water != self.repr.length;
+        reshaped.then(|| ((low_water / CHUNK_LEN) * CHUNK_LEN, low_water))
+    }
+
     /// Build the within-value [`Blake3Proof`] capturing the pre-transition state, keeping the
     /// accessed ranges present and blinding every untouched canonical subtree.
+    ///
+    /// A reshape additionally needs the *shape* of the reused prefix subtrees left open, even
+    /// though none of their bytes are wanted: the verifier fetches their chaining values by an
+    /// exact descent, which a coarser blind would swallow.
     pub fn value_proof(&self) -> Blake3Proof {
-        prove(&self.repr.previous, &self.accessed_ranges())
+        let accessed = self.accessed_ranges();
+
+        let mut reused: Vec<_> = self
+            .reshape_prefix()
+            .map(|(safe_full, _)| reused_prefix_subtrees(self.repr.length, safe_full))
+            .unwrap_or_default();
+        reused.sort_unstable();
+        reused.dedup();
+
+        prove_for_reshape(&self.repr.previous, &accessed, &reused)
     }
 
     /// Reconstruct the post-transition bytes: the pre-transition data, resized to the current
@@ -978,39 +1087,209 @@ impl Blake3Bytes<Verify> {
     /// was blinded at the AVL layer - in which case the fold defers to the previous hash.
     ///
     /// With a retained proof and an unchanged length, the committed shape is rebuilt with the
-    /// current bytes substituted for the chunks the transition wrote, and the untouched blinds
-    /// kept. Otherwise the root is recomputed from the fully materialised bytes: that covers a
-    /// value freshly created or wholly set in verify mode, which has no retained proof at all,
-    /// and a length change, where the committed chaining values stand for spans the new shape
-    /// does not have.
+    /// current bytes substituted for the chunks the transition wrote. On a reshape the prefix
+    /// below the low-water mark is unchanged, so its aligned subtree chaining values are reused
+    /// at the new shape and only the changed region above it is hashed - from the verifier's own
+    /// replay, so the proof need not carry it. Failing both, the root is recomputed from the
+    /// fully materialised bytes, which is what a value freshly created in verify mode needs.
     fn current_root(&self) -> Option<Hash> {
         let length = self.repr.length?;
 
-        // A present but empty value always hashes to `hash_value(&[])`, whatever proof or
-        // resize history it has: the sparse-view accessors below return `None` for the
-        // degenerate `0..0` range.
+        // A present but empty value always hashes to `hash_value(&[])`, whatever proof or resize
+        // history it has: the sparse-view accessors below return `None` for the degenerate
+        // `0..0` range.
         if length == 0 {
             return Some(hash_value(&[]));
         }
 
-        if let Some(proof) = self.repr.proof.as_ref()
-            && length == proof.total_len
-            && self.repr.low_water == length
-        {
-            // The length is unchanged and the value never shrank below it, so every blinded
-            // chunk is genuinely untouched and the committed shape can be reused. The
-            // low-water guard matters: a shrink and regrow back to the same length leaves the
-            // length equal but replaces those bytes with zeros.
-            let data = rebuild_tree(&proof.data, 0, length, &self.repr.data);
-            return verify_root(&Blake3Proof {
-                total_len: length,
-                data,
-            })
-            .ok();
+        if let Some(proof) = self.repr.proof.as_ref() {
+            let lp = proof.total_len;
+
+            // The length is unchanged and the value never shrank below it, so every blinded chunk
+            // is genuinely untouched and the committed shape can be reused. The low-water guard
+            // is not implied by the length check: a shrink and regrow back to the same length
+            // leaves the length equal but replaces those bytes with zeros.
+            if length == lp && self.repr.low_water == length {
+                let data = rebuild_tree(&proof.data, 0, length, &self.repr.data);
+                return verify_root(&Blake3Proof {
+                    total_len: length,
+                    data,
+                })
+                .ok();
+            }
+
+            // A reshape. The reusable prefix is `[0, low_water)`: bytes below the mark were never
+            // dropped by a shrink, so they are byte-identical across the transition and their
+            // aligned subtree chaining values - which do not depend on the total length - are
+            // still correct at the new shape. The region above it was rebuilt by replaying the
+            // same transition, so it is materialised here and hashed live. The prover replays the
+            // identical resizes, so the two agree on the mark.
+            let prefix = self.repr.low_water.min(length).min(lp);
+            if let Some(h_data) =
+                reshape_data_root(&proof.data, lp, length, prefix, &self.repr.data)
+            {
+                return Some(Hash::combine_hashes([hash_len(length), Hash::from(h_data)]));
+            }
+            // The reshape recompute could not complete from the sparse view, which only an
+            // adversarial or malformed proof produces. Fall through to the full materialisation,
+            // which returns `None` and lets the fold's root check reject it.
         }
 
         let full = self.repr.data.contiguous_range(0..length)?;
         Some(hash_value(full))
+    }
+}
+
+/// Recompute `H_data` (the `ROOT`-finalised BLAKE3 root of the reshaped post value) for a **clean
+/// length reshape**, reusing the pre-proof's length-independent prefix subtree chaining values.
+///
+/// `pre` is the retained pre-transition proof tree (canonical shape for `lp`); `lq` is the new
+/// length; `common = min(lp, lq)` is the unchanged prefix. Only *whole chunks* below the prefix
+/// are reused (`safe_full = floor(common / CHUNK) * CHUNK`): an aligned power-of-two chunk subtree
+/// is a node of both `canonical(lp)` and `canonical(lq)` and carries the same (length-independent)
+/// CV (see `docs/state-framework/blake3-bytes.mdx`). The boundary chunk and the
+/// changed region `[safe_full, lq)` are hashed from the *current* materialised bytes. Returns
+/// `None` if the sparse view lacks bytes it needs (adversarial/malformed proof).
+fn reshape_data_root(
+    pre: &ProofTree,
+    lp: usize,
+    lq: usize,
+    common: usize,
+    data: &PartialVec<u8>,
+) -> Option<[u8; 32]> {
+    let safe_full = (common / CHUNK_LEN) * CHUNK_LEN;
+
+    if lq <= CHUNK_LEN {
+        // The whole post value is a single ROOT-finalised chunk; it is materialised (boundary or
+        // changed region), so hash it live.
+        let bytes = data.contiguous_range(0..lq)?;
+        return Some(*blake3::hash(bytes).as_bytes());
+    }
+
+    let left_len = left_subtree_len(lq as u64) as usize;
+    let left = reshape_cv(pre, lp, 0, left_len, safe_full, data)?;
+    let right = reshape_cv(pre, lp, left_len, lq - left_len, safe_full, data)?;
+    Some(*merge_subtrees_root(&left, &right, B3Mode::Hash).as_bytes())
+}
+
+/// Non-root CV of the `canonical(lq)` subtree `[offset, offset + len)` during a clean reshape.
+///
+/// Three cases, in order (offsets are always chunk-aligned in the canonical recursion, and
+/// `safe_full` is chunk-aligned, so a leaf is never split across `safe_full`):
+/// - **Entirely in the reusable aligned prefix** (`offset + len <= safe_full`): take the CV from
+///   the pre-proof via [`pre_subtree_cv`] — it is length-independent and thus valid at the new
+///   shape. This is the load-bearing R3 rule: reuse only fully within the unchanged prefix.
+/// - **At or beyond the prefix** (`offset >= safe_full`): the boundary chunk or the changed
+///   region — hash the current materialised bytes canonically.
+/// - **Straddling `safe_full`** (an internal node only): descend.
+fn reshape_cv(
+    pre: &ProofTree,
+    lp: usize,
+    offset: usize,
+    len: usize,
+    safe_full: usize,
+    data: &PartialVec<u8>,
+) -> Option<[u8; 32]> {
+    // Reuse only an *aligned power-of-two chunk* subtree that lies entirely in the unchanged
+    // prefix: such a node is common to `canonical(lp)` and `canonical(lq)` and carries the same
+    // (length-independent) CV (F2). A *ragged* subtree can lie within the prefix yet exist only in
+    // `canonical(lq)` (e.g. `[4,7)` is a node of `canonical(7)` but not `canonical(10)`), so it is
+    // NOT directly reusable — it is descended into its aligned pieces below.
+    if offset + len <= safe_full && is_aligned_subtree(offset, len) {
+        return pre_subtree_cv(pre, 0, lp, offset, len, data);
+    }
+    if offset >= safe_full {
+        let bytes = data.contiguous_range(offset..offset + len)?;
+        return Some(canonical_cv(bytes, offset as u64));
+    }
+    // Straddles `safe_full`, or is a ragged node within the prefix: descend. Left children of a
+    // canonical split are always aligned, so the aligned prefix pieces are reached at the first
+    // branch above.
+    let left_len = left_subtree_len(len as u64) as usize;
+    let left = reshape_cv(pre, lp, offset, left_len, safe_full, data)?;
+    let right = reshape_cv(pre, lp, offset + left_len, len - left_len, safe_full, data)?;
+    Some(merge_subtrees_non_root(&left, &right, B3Mode::Hash))
+}
+
+/// Is `[offset, offset + len)` an aligned power-of-two **chunk** subtree — i.e. a node that occurs
+/// in *every* canonical BLAKE3 tree large enough to contain it (F1/F2)? Requires `len` to be a
+/// power-of-two multiple of `CHUNK_LEN` and `offset` a multiple of `len`. (Within the reusable
+/// prefix every leaf is a full chunk, so `len` is always a whole number of chunks here.)
+fn is_aligned_subtree(offset: usize, len: usize) -> bool {
+    len.is_multiple_of(CHUNK_LEN) && {
+        let chunks = len / CHUNK_LEN;
+        chunks.is_power_of_two() && offset.is_multiple_of(len)
+    }
+}
+
+/// CV of the `canonical(lp)` subtree `(t_offset, t_len)`, navigating the pre-proof `pre` (whose
+/// shape over `[cur_offset, cur_offset + cur_len)` is `canonical(lp)`). The target is always a
+/// genuine canonical node (a set-bit-of-`safe_full` prefix piece), so the descent reaches it
+/// exactly. Its CV is then taken from the pre-proof by [`subtree_cv_from_view`]: a blind yields its
+/// stored CV, a present chunk/node is re-hashed from the *current* bytes (so prefix writes are
+/// reflected). Returns `None` if a coarser blind swallows the target (cannot happen for an honest
+/// pre-proof) — the caller then falls back to a full re-hash.
+fn pre_subtree_cv(
+    pre: &ProofTree,
+    cur_offset: usize,
+    cur_len: usize,
+    t_offset: usize,
+    t_len: usize,
+    data: &PartialVec<u8>,
+) -> Option<[u8; 32]> {
+    if cur_offset == t_offset && cur_len == t_len {
+        return subtree_cv_from_view(pre, cur_offset, cur_len, data);
+    }
+    match pre {
+        ProofTree::Node(left, right) => {
+            let left_len = left_subtree_len(cur_len as u64) as usize;
+            if t_offset < cur_offset + left_len {
+                pre_subtree_cv(left, cur_offset, left_len, t_offset, t_len, data)
+            } else {
+                pre_subtree_cv(
+                    right,
+                    cur_offset + left_len,
+                    cur_len - left_len,
+                    t_offset,
+                    t_len,
+                    data,
+                )
+            }
+        }
+        // The target sits inside a coarser blind, which cannot be decomposed. An honest proof
+        // never does this - `prove_for_reshape` keeps the path to every reused subtree open - so
+        // the caller falls back to a full re-hash, which then fails the root check.
+        _ => None,
+    }
+}
+
+/// CV of the subtree `pre` (canonically covering `[offset, offset + len)`), reading present chunks
+/// from the *current* materialised bytes so writes to the unchanged prefix are reflected. Mirrors
+/// [`compute_cv`] but sources present bytes from `data` rather than the (pre-transition) proof.
+fn subtree_cv_from_view(
+    pre: &ProofTree,
+    offset: usize,
+    len: usize,
+    data: &PartialVec<u8>,
+) -> Option<[u8; 32]> {
+    match pre {
+        // A blinded span was untouched, so the committed chaining value still stands for it.
+        ProofTree::Blind(cv) => Some(*cv),
+        ProofTree::Chunk(_) => {
+            let bytes = data.contiguous_range(offset..offset + len)?;
+            Some(
+                blake3::Hasher::new()
+                    .set_input_offset(offset as u64)
+                    .update(bytes)
+                    .finalize_non_root(),
+            )
+        }
+        ProofTree::Node(left, right) => {
+            let left_len = left_subtree_len(len as u64) as usize;
+            let l = subtree_cv_from_view(left, offset, left_len, data)?;
+            let r = subtree_cv_from_view(right, offset + left_len, len - left_len, data)?;
+            Some(merge_subtrees_non_root(&l, &r, B3Mode::Hash))
+        }
     }
 }
 
@@ -1179,8 +1458,14 @@ impl Blake3BytesMode for Prove<'_> {
         // resized value. Mirrors `super::bytes::Bytes`.
         let prev_len = Self::len(this);
 
-        // Drop the low-water mark. Everything at or above it was dropped by this resize, so a
-        // later regrow must read back zeros there rather than the pre-transition bytes.
+        // A length change reshapes BLAKE3's chunk tree, but the prefix that was never dropped is
+        // recoverable cheaply: its aligned power-of-two subtree chaining values are
+        // *length-independent*, so the verifier reuses the pre-proof's blinded prefix CVs at the
+        // new shape (see `reshape_data_root`, and `docs/state-framework/blake3-bytes.mdx`).
+        // All this call has to do is drop the low-water mark; `accessed_ranges` derives what the
+        // proof must carry from the *final* mark, which is where the verifier actually reuses up
+        // to. The changed region above it is rebuilt by the verifier's own replay and is never
+        // carried in the proof. This keeps *every* reshape O(depth), never O(value).
         if prev_len != new_len {
             this.repr
                 .low_water

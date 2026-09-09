@@ -203,7 +203,6 @@ fn clean_multi_resize_reuses_prefix() {
 /// now O(depth): the reusable prefix is `[0, low_water)` and the regrown region is rebuilt by the
 /// verifier's replay, so the proof carries only boundary chunks — not the value.
 #[test]
-#[ignore = "a reshape still costs a proof the size of the value; the next commit makes it O(depth)"]
 fn non_clean_reshape_is_o_depth() {
     let len = 4 * 1024 * 1024; // 4 MiB, depth 12
     let pre = filled(len);
@@ -272,7 +271,6 @@ fn shrink_below_then_regrow_is_correct() {
 // ---------------------------------------------------------------------------------------------
 
 #[test]
-#[ignore = "a reshape still costs a proof the size of the value; the next commit makes it O(depth)"]
 fn reshape_proof_is_o_depth_not_o_value() {
     for &kib in &[64usize, 256, 1024] {
         let len = kib * 1024;
@@ -331,7 +329,6 @@ fn tamper_first_chunk(tree: &mut ProofTree) -> bool {
 /// longer reconstructs the committed pre root (so a real verifier rejects it up-front), and if one
 /// were to force the reshape recompute with it, the post root diverges from the honest one.
 #[test]
-#[ignore = "a reshape proof carries no prefix blind to tamper with until the next commit reuses one"]
 fn tampered_prefix_blind_is_rejected_on_reshape() {
     let pre = filled(16 * CHUNK_LEN);
     let ops = vec![
@@ -485,7 +482,6 @@ proptest! {
 /// a regression that reintroduces O(value) reshape proofs shows up as a number rather than as a
 /// slow test.
 #[test]
-#[ignore = "a reshape still costs a proof the size of the value; the next commit makes it O(depth)"]
 fn reshape_costs_no_more_than_an_in_place_write() {
     fn proof_bytes(
         len: usize,
