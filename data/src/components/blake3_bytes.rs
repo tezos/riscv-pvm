@@ -1389,3 +1389,9 @@ impl Unfoldable for Blake3Bytes<Normal> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod reshape_model;
+
+#[cfg(test)]
+mod reshape_tests;
