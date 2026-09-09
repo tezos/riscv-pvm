@@ -27,7 +27,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use octez_riscv_data::codec;
-use octez_riscv_data::components::bytes::Bytes;
+// AVL value type: the length-committed BLAKE3 byte component.
+use octez_riscv_data::components::blake3_bytes::Blake3Bytes as Bytes;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;
@@ -834,8 +835,9 @@ fn new_merkle_layer<KV: WriteableKeyValueStore>(repo: &KV::Repo) -> MerkleLayer<
 mod tests {
     use std::sync::Arc;
 
-    use octez_riscv_data::components::bytes::Bytes;
-    use octez_riscv_data::components::bytes::BytesMode;
+    // AVL value type: the length-committed BLAKE3 byte component.
+    use octez_riscv_data::components::blake3_bytes::Blake3Bytes as Bytes;
+    use octez_riscv_data::components::blake3_bytes::Blake3BytesMode as BytesMode;
     use octez_riscv_data::merkle_proof::FromProof;
     use octez_riscv_data::merkle_proof::ProofError;
     use octez_riscv_data::merkle_proof::proof_tree::MerkleProof;
@@ -1067,12 +1069,15 @@ mod tests {
     kv_test!(test_reading_a_copy_does_not_change_the_source_root, KV: PersistentKeyValueStore, {
         use std::ops::Deref;
 
-        use octez_riscv_data::components::bytes::Bytes;
+        use octez_riscv_data::components::blake3_bytes::Blake3Bytes as Bytes;
         use octez_riscv_data::hash::Hash;
         use octez_riscv_data::mode::Normal;
 
         use crate::errors::OperationalError;
 
+        // The same component the AVL stores. This folds a value by hand to compare against the
+        // hash the node committed, so reaching for the page-tree component here would compare
+        // two different hashing schemes.
         let hash_of = |bytes: &[u8]| Hash::from_foldable(&Bytes::<Normal>::from(bytes));
 
         let keys =
