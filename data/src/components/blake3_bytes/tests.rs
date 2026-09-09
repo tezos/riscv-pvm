@@ -19,6 +19,7 @@ use blake3::hazmat::merge_subtrees_non_root;
 use blake3::hazmat::merge_subtrees_root;
 use proptest::prelude::*;
 
+use super::Blake3Bytes;
 use super::Blake3Proof;
 use super::MAX_PROOF_TREE_DEPTH;
 use super::ProofError;
@@ -31,6 +32,10 @@ use super::proof_read;
 use super::prove;
 use super::verify_root;
 use crate::hash::Hash;
+use crate::mode::Normal;
+use crate::mode::Prove;
+use crate::mode::Verify;
+use crate::mode::utils::catch_not_found;
 use crate::serialisation::deserialise;
 use crate::serialisation::serialise;
 
@@ -546,4 +551,117 @@ fn proof_size_is_o_depth_and_position_independent() {
             "position-dependent wire size at {mib} MiB: min {min} max {max}"
         );
     }
+}
+
+/// Read a range through a verify-mode value, returning `None` where the read faults.
+fn verify_read(value: &Blake3Bytes<Verify>, range: Range<usize>) -> Option<Vec<u8>> {
+    catch_not_found(|| {
+        let mut buf = vec![0u8; range.len()];
+        let read = value.read(range.start, &mut buf);
+        buf.truncate(read);
+        buf
+    })
+    .ok()
+}
+
+/// The mode-generic operations behave the same way a plain byte buffer would, including that
+/// bytes exposed by a grow read back as zero.
+#[test]
+fn mode_ops_basic() {
+    let mut value = Blake3Bytes::<Normal>::new(10);
+    assert_eq!(value.len(), 10);
+    assert_eq!(value.write(2, &[1, 2, 3]), 3);
+    let mut buf = [0u8; 3];
+    assert_eq!(value.read(2, &mut buf), 3);
+    assert_eq!(buf, [1, 2, 3]);
+
+    value.resize(4);
+    assert_eq!(value.len(), 4);
+    value.resize(6);
+    assert_eq!(value.len(), 6);
+    let mut tail = [9u8; 2];
+    value.read(4, &mut tail);
+    assert_eq!(tail, [0, 0]);
+}
+
+proptest! {
+    /// A read-only transition: the proof the prover emits verifies to the value's committed
+    /// hash, and every range the transition read is readable through the reconstructed verify
+    /// view. This is the whole prove/verify contract at the level a caller sees it.
+    #[test]
+    fn read_transition_reconstructs_the_view((data, access) in data_and_access()) {
+        let committed = hash_value(&data);
+        let prover = Blake3Bytes::<Prove>::from_raw_source(&data);
+        for range in &access {
+            let mut buf = vec![0u8; range.len()];
+            let read = prover.read(range.start, &mut buf);
+            prop_assert_eq!(read, range.len());
+            prop_assert_eq!(&buf[..], &data[range.clone()]);
+        }
+
+        let proof = prover.value_proof();
+        prop_assert_eq!(verify_root(&proof).unwrap(), committed);
+        prop_assert_eq!(prover.hash(), committed);
+
+        let verify = Blake3Bytes::<Verify>::from_proof_checked(proof, committed).unwrap();
+        for range in &access {
+            let got = verify_read(&verify, range.clone())
+                .expect("a range the transition read must be present");
+            prop_assert_eq!(got.as_slice(), &data[range.clone()]);
+        }
+    }
+
+    /// A writing transition reaches the same post-transition hash in prove mode as a normal
+    /// value written the same way. Prove mode never materialises the post value for the caller,
+    /// so this is what pins that its bookkeeping reconstructs it correctly.
+    #[test]
+    fn write_transition_hashes_like_a_normal_value(
+        data in bytes_of_len(3 * CHUNK_LEN),
+        at in 0usize..(3 * CHUNK_LEN - 16),
+    ) {
+        let patch = [0xEEu8; 16];
+
+        let mut normal = Blake3Bytes::<Normal>::from(data.as_slice());
+        normal.write(at, &patch);
+
+        let mut prover = Blake3Bytes::<Prove>::from_raw_source(&data);
+        prover.write(at, &patch);
+
+        prop_assert_eq!(prover.hash(), normal.hash());
+    }
+
+    /// A transition that resizes reaches the same post-transition hash as a normal value
+    /// resized the same way, whether it grows or shrinks.
+    #[test]
+    fn resize_transition_hashes_like_a_normal_value(
+        data in bytes_of_len(2 * CHUNK_LEN),
+        new_len in 0usize..(4 * CHUNK_LEN),
+    ) {
+        let mut normal = Blake3Bytes::<Normal>::from(data.as_slice());
+        normal.resize(new_len);
+
+        let mut prover = Blake3Bytes::<Prove>::from_raw_source(&data);
+        prover.resize(new_len);
+
+        prop_assert_eq!(prover.hash(), normal.hash());
+    }
+}
+
+/// A value that shrinks and then regrows must read back zeros in the regrown region, not the
+/// bytes that were there before. Prove mode still holds the pre-transition bytes, so without
+/// the low-water mark it would hash the stale ones and disagree with a normal value.
+#[test]
+fn shrink_then_regrow_drops_the_old_bytes() {
+    let data = vec![0xAAu8; 2 * CHUNK_LEN];
+
+    let mut normal = Blake3Bytes::<Normal>::from(data.as_slice());
+    normal.resize(0);
+    normal.resize(2 * CHUNK_LEN);
+
+    let mut prover = Blake3Bytes::<Prove>::from_raw_source(&data);
+    prover.resize(0);
+    prover.resize(2 * CHUNK_LEN);
+
+    assert_eq!(prover.hash(), normal.hash());
+    assert_eq!(prover.hash(), hash_value(&vec![0u8; 2 * CHUNK_LEN]));
 }

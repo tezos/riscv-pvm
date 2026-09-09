@@ -23,8 +23,17 @@
 //! The proof also has its own self-contained wire format ([`Blake3Proof`]'s [`Encode`] and
 //! [`Decode`]), kept structurally disjoint from the generic Merkle-proof encoding (I7).
 //!
-//! The modal component that folds these into the state pipelines follows.
+//! ## The component
+//!
+//! [`Blake3Bytes`] is the mode-generic byte-array component built on those functions. Normal
+//! mode holds the bytes; Prove mode borrows the pre-transition bytes and records what the
+//! transition touched; Verify mode holds the sparse view a proof reconstructs, faulting on a
+//! read it cannot answer. The folds that carry it through the state pipelines follow.
 
+use std::borrow::Borrow;
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::ops::Index;
 use std::ops::Range;
 
 use bincode::Decode;
@@ -40,8 +49,19 @@ use blake3::hazmat::Mode as B3Mode;
 use blake3::hazmat::left_subtree_len;
 use blake3::hazmat::merge_subtrees_non_root;
 use blake3::hazmat::merge_subtrees_root;
+use perfect_derive::perfect_derive;
 
+use crate::clone::CloneState;
 use crate::hash::Hash;
+use crate::mode::Modal;
+use crate::mode::Mode;
+use crate::mode::Normal;
+use crate::mode::Provable;
+use crate::mode::Prove;
+use crate::mode::Verify;
+use crate::mode::utils::Source;
+use crate::mode::utils::not_found;
+use crate::partial_vec::PartialVec;
 
 /// BLAKE3 chunk length: the leaf granularity of the internal chunk tree (1024 bytes).
 pub const CHUNK_LEN: usize = blake3::CHUNK_LEN;
@@ -501,6 +521,656 @@ impl<Context> Decode<Context> for Blake3Proof {
         let total_len = u64::decode(decoder)? as usize;
         let data = ProofTree::decode(decoder)?;
         Ok(Blake3Proof { total_len, data })
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Mode-generic component
+// ---------------------------------------------------------------------------------------
+
+/// Modal template for [`Blake3Bytes`].
+pub enum Blake3BytesTemplate {}
+
+impl Modal for Blake3BytesTemplate {
+    type Normal = NormalRepr;
+    type Prove<'normal> = ProveRepr<'normal>;
+    type Verify = VerifyRepr;
+}
+
+/// Normal-mode representation: the full byte array.
+#[derive(Clone, Debug, Default)]
+pub struct NormalRepr {
+    /// Backing bytes.
+    pub bytes: Vec<u8>,
+}
+
+impl Borrow<[u8]> for NormalRepr {
+    fn borrow(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+/// Prove-mode representation: borrows (or owns) the pre-transition bytes and records the byte
+/// ranges accessed during the transition.
+///
+/// Mirrors [`super::bytes`]'s `ProveImpl`. The `previous` bytes are the pre-transition state
+/// captured for proof generation; `reads`/`writes` record the accessed regions that must stay
+/// present in the value proof (docs §4).
+#[perfect_derive(Clone, Debug)]
+pub struct ProveRepr<'normal> {
+    /// Pre-transition source data.
+    previous: Source<'normal, Blake3Bytes<Normal>, [u8]>,
+    /// Current (post-transition) length.
+    length: usize,
+    /// Whether the length was read during the transition.
+    did_access_length: Cell<bool>,
+    /// The lowest length the value ever had during the transition (the "low-water mark"). Bytes
+    /// at or above it were dropped by some resize, so if the value later regrew they must read
+    /// back as zero rather than as the pre-transition bytes `previous` still holds. Used by
+    /// [`Self::post_bytes`] to zero that region; the verifier tracks its own copy (see
+    /// [`VerifyRepr::low_water`]).
+    low_water: Cell<usize>,
+    /// Ranges that were read (may overlap; overlaps are harmless for proof generation).
+    reads: RefCell<Vec<Range<usize>>>,
+    /// Writes recorded against the pre-transition state.
+    writes: PartialVec<u8>,
+}
+
+/// Verify-mode representation: a sparse view populated from a [`Blake3Proof`].
+///
+/// `data` holds the present (proven) byte ranges; reads of absent/blinded regions fault via
+/// [`not_found`] (invariant I4). `proof` retains the committed pre-transition proof so the
+/// post-transition root can be recomputed after writes.
+#[derive(Clone, Debug, Default)]
+pub struct VerifyRepr {
+    /// Current length, if known.
+    length: Option<usize>,
+    /// The lowest length the value has had since reconstruction (see [`ProveRepr::low_water`]).
+    /// The verifier replays the same resizes as the prover, so the two derive the same mark and
+    /// agree on whether the committed shape still describes the value. Meaningless while
+    /// `length` is `None` (an absent value).
+    low_water: usize,
+    /// Present byte ranges recovered from the proof (and any writes).
+    data: PartialVec<u8>,
+    /// The committed within-value proof, if the value participated in the proof.
+    proof: Option<Blake3Proof>,
+}
+
+/// Byte-array state component under the BLAKE3-direct hashing scheme.
+///
+/// Public surface mirrors [`super::bytes::Bytes`]. The value hash is `hash_value(bytes)`
+/// (see [`hash_value`]); within-value partial proofs ride BLAKE3's internal chunk tree via
+/// [`prove`] / [`verify_root`].
+#[perfect_derive(Debug)]
+pub struct Blake3Bytes<M: Mode> {
+    repr: M::Select<Blake3BytesTemplate>,
+}
+
+impl<M: Blake3BytesMode> Clone for Blake3Bytes<M> {
+    fn clone(&self) -> Self {
+        M::clone(self)
+    }
+}
+
+impl<M: Blake3BytesMode> Blake3Bytes<M> {
+    /// Create a zero-initialised byte array of the given length.
+    pub fn new(len: usize) -> Self {
+        M::new(len)
+    }
+
+    /// Read into `buffer` starting at `start`; returns bytes read.
+    pub fn read(&self, start: usize, buffer: &mut [u8]) -> usize {
+        M::read(self, start, buffer)
+    }
+
+    /// Write from `buffer` starting at `start`; returns bytes written.
+    pub fn write(&mut self, start: usize, buffer: &[u8]) -> usize {
+        M::write(self, start, buffer)
+    }
+
+    /// Number of bytes held.
+    pub fn len(&self) -> usize {
+        M::len(self)
+    }
+
+    /// Is the length zero?
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Change the length, zero-filling growth and truncating shrinkage.
+    pub fn resize(&mut self, new_len: usize) {
+        M::resize(self, new_len)
+    }
+
+    /// Overwrite the entire contents.
+    pub fn set(&mut self, buffer: &[u8]) {
+        self.resize(buffer.len());
+        self.write(0, buffer);
+    }
+}
+
+impl<M: Blake3BytesMode> Default for Blake3Bytes<M> {
+    fn default() -> Self {
+        M::new(0)
+    }
+}
+
+impl<M: Blake3BytesMode> CloneState for Blake3Bytes<M> {
+    fn clone_state(&self) -> Self {
+        M::clone(self)
+    }
+}
+
+impl Blake3Bytes<Normal> {
+    /// Normal-mode hash of this value. Equals `hash_value(self.as_bytes())` (invariant I8).
+    pub fn hash(&self) -> Hash {
+        hash_value(self.as_bytes())
+    }
+
+    /// Borrow the backing bytes.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.repr.bytes
+    }
+
+    /// Convert this value into [`Prove`] mode, taking ownership of the pre-transition data.
+    pub fn into_proof(self) -> Blake3Bytes<Prove<'static>> {
+        let length = self.repr.bytes.len();
+        Blake3Bytes {
+            repr: ProveRepr {
+                previous: Source::owned(self),
+                length,
+                did_access_length: Cell::new(false),
+                low_water: Cell::new(length),
+                reads: RefCell::new(Vec::new()),
+                writes: PartialVec::default(),
+            },
+        }
+    }
+}
+
+impl Borrow<[u8]> for Blake3Bytes<Normal> {
+    fn borrow(&self) -> &[u8] {
+        &self.repr.bytes
+    }
+}
+
+impl Index<Range<usize>> for Blake3Bytes<Normal> {
+    type Output = [u8];
+
+    fn index(&self, range: Range<usize>) -> &[u8] {
+        &self.repr.bytes[range]
+    }
+}
+
+impl From<&[u8]> for Blake3Bytes<Normal> {
+    fn from(slice: &[u8]) -> Self {
+        Blake3Bytes {
+            repr: NormalRepr {
+                bytes: slice.to_vec(),
+            },
+        }
+    }
+}
+
+impl From<bytes::Bytes> for Blake3Bytes<Normal> {
+    fn from(bytes: bytes::Bytes) -> Self {
+        Blake3Bytes::from(bytes.as_ref())
+    }
+}
+
+impl<T: AsRef<[u8]>, M: Blake3BytesMode> PartialEq<T> for Blake3Bytes<M> {
+    fn eq(&self, other: &T) -> bool {
+        let other = other.as_ref();
+        let len = self.len();
+
+        if len != other.len() {
+            return false;
+        }
+
+        let mut chunk = vec![0u8; 4096];
+        for start in (0..len).step_by(chunk.len()) {
+            let read = self.read(start, &mut chunk);
+            if chunk[..read] != other[start..][..read] {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl<M: Blake3BytesMode, N: Blake3BytesMode> PartialEq<Blake3Bytes<N>> for Blake3Bytes<M> {
+    fn eq(&self, other: &Blake3Bytes<N>) -> bool {
+        let len = self.len();
+
+        if len != other.len() {
+            return false;
+        }
+
+        let mut chunk_lhs = vec![0u8; 4096];
+        let mut chunk_rhs = chunk_lhs.clone();
+
+        for offset in (0..len).step_by(chunk_lhs.len()) {
+            let read = self.read(offset, &mut chunk_lhs);
+            if read != other.read(offset, &mut chunk_rhs) {
+                return false;
+            }
+            if chunk_lhs[..read] != chunk_rhs[..read] {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl<M: Blake3BytesMode> Eq for Blake3Bytes<M> {}
+
+impl<'normal> Provable<'normal> for Blake3Bytes<Normal> {
+    type Prover = Blake3Bytes<Prove<'normal>>;
+
+    fn start_proof(&'normal self) -> Self::Prover {
+        Blake3Bytes {
+            repr: ProveRepr {
+                previous: Source::borrowed(&self.repr.bytes),
+                length: self.repr.bytes.len(),
+                did_access_length: Cell::new(false),
+                low_water: Cell::new(self.repr.bytes.len()),
+                reads: RefCell::new(Vec::new()),
+                writes: PartialVec::default(),
+            },
+        }
+    }
+}
+
+impl<'a> Blake3Bytes<Prove<'a>> {
+    /// Construct the component in [`Prove`] mode from raw pre-transition source data.
+    pub fn from_raw_source(source: &'a [u8]) -> Self {
+        Blake3Bytes {
+            repr: ProveRepr {
+                previous: Source::borrowed(source),
+                length: source.len(),
+                did_access_length: Cell::new(false),
+                low_water: Cell::new(source.len()),
+                reads: RefCell::new(Vec::new()),
+                writes: PartialVec::default(),
+            },
+        }
+    }
+
+    /// The byte ranges of the pre-transition value the proof has to carry.
+    ///
+    /// Reads need their bytes so the verifier can return the same ones. Writes need them too: the
+    /// verifier recomputes the post-transition root by substituting written bytes into the
+    /// committed shape, and a chunk it holds only part of cannot be hashed.
+    ///
+    /// A length change needs the whole pre-transition value, because the canonical shape is a
+    /// function of the length: at the new length the committed chaining values stand for spans
+    /// that no longer exist, so none of them can be reused and the root has to be recomputed from
+    /// the bytes. That makes a resize cost the size of the value, which a later commit reduces.
+    fn accessed_ranges(&self) -> Vec<Range<usize>> {
+        let prev_len = self.repr.previous.len();
+        let clamp = |start: usize, end: usize| -> Option<Range<usize>> {
+            let start = start.min(prev_len);
+            let end = end.min(prev_len);
+            (start < end).then_some(start..end)
+        };
+
+        let mut ranges: Vec<Range<usize>> = self
+            .repr
+            .reads
+            .borrow()
+            .iter()
+            .filter_map(|r| clamp(r.start, r.end))
+            .collect();
+
+        for (offset, bytes) in self.repr.writes.defined_range(0..self.repr.length) {
+            if let Some(range) = clamp(offset, offset + bytes.len()) {
+                ranges.push(range);
+            }
+        }
+
+        if self.repr.length != prev_len || self.repr.low_water.get() != self.repr.length {
+            ranges.extend(clamp(0, prev_len));
+        }
+
+        ranges
+    }
+
+    /// Build the within-value [`Blake3Proof`] capturing the pre-transition state, keeping the
+    /// accessed ranges present and blinding every untouched canonical subtree.
+    pub fn value_proof(&self) -> Blake3Proof {
+        prove(&self.repr.previous, &self.accessed_ranges())
+    }
+
+    /// Reconstruct the post-transition bytes: the pre-transition data, resized to the current
+    /// length, with the recorded writes overlaid.
+    ///
+    /// Any position at or beyond the low-water mark was dropped by a shrink at some point in the
+    /// transition, so if the value later regrew past it those bytes must read back as **zero**,
+    /// not the stale pre-transition data that `previous` still holds. For a plain append the
+    /// low-water mark is the pre length, so the zero-fill only touches the appended tail, which
+    /// is already zero.
+    fn post_bytes(&self) -> Vec<u8> {
+        let length = self.repr.length;
+        let mut data = self.repr.previous.to_vec();
+        data.resize(length, 0);
+        let low_water = self.repr.low_water.get();
+        if low_water < length {
+            data[low_water..length].fill(0);
+        }
+        for (offset, chunk) in self.repr.writes.defined_range(0..length) {
+            data[offset..][..chunk.len()].copy_from_slice(chunk);
+        }
+        data
+    }
+
+    /// Hash of the post-transition value.
+    pub fn hash(&self) -> Hash {
+        hash_value(&self.post_bytes())
+    }
+}
+
+impl Blake3Bytes<Verify> {
+    /// Reconstruct a [`Blake3Bytes<Verify>`] from a within-value proof, after checking the
+    /// proof reconstructs to `committed_root`.
+    ///
+    /// The present chunk bytes populate the sparse view; blinded regions stay absent and
+    /// faulting on read (invariant I4). Returns [`ProofError`] if the proof is malformed or
+    /// does not reconstruct to `committed_root` (invariants I2, I3).
+    pub fn from_proof_checked(
+        proof: Blake3Proof,
+        committed_root: Hash,
+    ) -> Result<Self, ProofError> {
+        let root = verify_root(&proof)?;
+        if root != committed_root {
+            return Err(ProofError::RootMismatch);
+        }
+        Ok(Self::from_proof_unchecked(proof))
+    }
+
+    /// Reconstruct a [`Blake3Bytes<Verify>`] from a proof without checking it against a
+    /// committed root. The root check is performed later by the [`PartialHashFold`] fold.
+    pub fn from_proof_unchecked(proof: Blake3Proof) -> Self {
+        let mut data = PartialVec::empty();
+        for range in present_ranges(&proof) {
+            let start = range.start;
+            let bytes = proof_read(&proof, range).unwrap_or_default();
+            if !bytes.is_empty() {
+                data.define(start, bytes);
+            }
+        }
+
+        Blake3Bytes {
+            repr: VerifyRepr {
+                length: Some(proof.total_len),
+                low_water: proof.total_len,
+                data,
+                proof: Some(proof),
+            },
+        }
+    }
+
+    /// The committed (pre-transition) root recovered from the retained proof, if any.
+    pub fn committed_root(&self) -> Option<Hash> {
+        self.repr.proof.as_ref().and_then(|p| verify_root(p).ok())
+    }
+
+    /// Return the given range as a contiguous byte slice, faulting (via [`not_found`]) if the
+    /// range is out of bounds or touches an unproven/blinded region (invariant I4).
+    pub fn partial_slice(&self, range: Range<usize>) -> &[u8] {
+        if range.is_empty() {
+            return &[];
+        }
+        if range.end > self.len() {
+            // SAFETY: called only in `Verify` mode.
+            unsafe { not_found() }
+        }
+        match self.repr.data.contiguous_range(range) {
+            Some(slice) => slice,
+            // SAFETY: called only in `Verify` mode.
+            None => unsafe { not_found() },
+        }
+    }
+}
+
+/// Construct `start..start+len` clamped so it does not extend beyond `total_len`.
+fn clamp_range(total_len: usize, start: usize, len: usize) -> Range<usize> {
+    let end = start.saturating_add(len).min(total_len);
+    start..end
+}
+
+// ---------------------------------------------------------------------------------------
+// Per-mode operations
+// ---------------------------------------------------------------------------------------
+
+/// Mode types that support the common [`Blake3Bytes`] operations.
+///
+/// Mirrors [`super::bytes::BytesMode`], adapted to the BLAKE3-direct scheme.
+pub trait Blake3BytesMode: Mode {
+    /// See [`Blake3Bytes::new`].
+    fn new(len: usize) -> Blake3Bytes<Self>;
+    /// See [`Blake3Bytes::read`].
+    fn read(this: &Blake3Bytes<Self>, start: usize, buffer: &mut [u8]) -> usize;
+    /// See [`Blake3Bytes::write`].
+    fn write(this: &mut Blake3Bytes<Self>, start: usize, buffer: &[u8]) -> usize;
+    /// See [`Blake3Bytes::len`].
+    fn len(this: &Blake3Bytes<Self>) -> usize;
+    /// See [`Blake3Bytes::resize`].
+    fn resize(this: &mut Blake3Bytes<Self>, new_len: usize);
+    /// Clone the whole component (including mode-specific bookkeeping).
+    fn clone(this: &Blake3Bytes<Self>) -> Blake3Bytes<Self>;
+}
+
+impl Blake3BytesMode for Normal {
+    fn new(len: usize) -> Blake3Bytes<Self> {
+        Blake3Bytes {
+            repr: NormalRepr {
+                bytes: vec![0u8; len],
+            },
+        }
+    }
+
+    fn read(this: &Blake3Bytes<Self>, start: usize, buffer: &mut [u8]) -> usize {
+        if start >= this.repr.bytes.len() {
+            return 0;
+        }
+        let range = clamp_range(this.repr.bytes.len(), start, buffer.len());
+        let len = range.len();
+        buffer[..len].copy_from_slice(&this.repr.bytes[range]);
+        len
+    }
+
+    fn write(this: &mut Blake3Bytes<Self>, start: usize, buffer: &[u8]) -> usize {
+        if start >= this.repr.bytes.len() {
+            return 0;
+        }
+        let range = clamp_range(this.repr.bytes.len(), start, buffer.len());
+        let len = range.len();
+        this.repr.bytes[range].copy_from_slice(&buffer[..len]);
+        len
+    }
+
+    fn len(this: &Blake3Bytes<Self>) -> usize {
+        this.repr.bytes.len()
+    }
+
+    fn resize(this: &mut Blake3Bytes<Self>, new_len: usize) {
+        this.repr.bytes.resize(new_len, 0);
+    }
+
+    fn clone(this: &Blake3Bytes<Self>) -> Blake3Bytes<Self> {
+        Blake3Bytes {
+            repr: this.repr.clone(),
+        }
+    }
+}
+
+impl Blake3BytesMode for Prove<'_> {
+    fn new(len: usize) -> Blake3Bytes<Self> {
+        Blake3Bytes {
+            repr: ProveRepr {
+                previous: Source::owned(Blake3Bytes::new(len)),
+                length: len,
+                did_access_length: Cell::new(false),
+                low_water: Cell::new(len),
+                reads: RefCell::new(Vec::new()),
+                writes: PartialVec::default(),
+            },
+        }
+    }
+
+    fn read(this: &Blake3Bytes<Self>, start: usize, buffer: &mut [u8]) -> usize {
+        // Go through `len` so the length access is recorded: a read depends on the value's length
+        // (to bound it), so the proof must commit the length — otherwise an out-of-bounds read
+        // records nothing, the value is blinded, and the verify-mode replay faults instead of
+        // returning 0. Mirrors `super::bytes::Bytes`.
+        let total = Self::len(this);
+        if start >= total {
+            return 0;
+        }
+        let range = clamp_range(total, start, buffer.len());
+        let len = range.len();
+
+        // Record the read so it stays present in the value proof (docs §4).
+        this.repr.reads.borrow_mut().push(range.clone());
+
+        let buffer = &mut buffer[..len];
+        let previous_len = this.repr.previous.len();
+        let from_prev_start = range.start.min(previous_len);
+        let from_prev_end = range.end.min(previous_len);
+        let from_prev_len = from_prev_end - from_prev_start;
+
+        buffer[..from_prev_len]
+            .copy_from_slice(&this.repr.previous[from_prev_start..from_prev_end]);
+        buffer[from_prev_len..].fill(0);
+
+        // `defined_range` yields offsets relative to `range.start`, so they index `buffer`
+        // (the range-sized slice) directly — matching `super::bytes::Bytes`.
+        for (offset, bytes) in this.repr.writes.defined_range(range.clone()) {
+            buffer[offset..][..bytes.len()].copy_from_slice(bytes);
+        }
+
+        len
+    }
+
+    fn write(this: &mut Blake3Bytes<Self>, start: usize, buffer: &[u8]) -> usize {
+        // Route through `len` so the length access is recorded (see the note on `read`).
+        let total = Self::len(this);
+        if start >= total {
+            return 0;
+        }
+        let range = clamp_range(total, start, buffer.len());
+        let len = range.len();
+        this.repr.writes.define(range.start, buffer[..len].to_vec());
+        len
+    }
+
+    fn len(this: &Blake3Bytes<Self>) -> usize {
+        this.repr.did_access_length.set(true);
+        this.repr.length
+    }
+
+    fn resize(this: &mut Blake3Bytes<Self>, new_len: usize) {
+        // Route through `len` so the length access is recorded — a resize commits the value's
+        // length into the proof, without which the verify-mode replay cannot reconstruct the
+        // resized value. Mirrors `super::bytes::Bytes`.
+        let prev_len = Self::len(this);
+
+        // Drop the low-water mark. Everything at or above it was dropped by this resize, so a
+        // later regrow must read back zeros there rather than the pre-transition bytes.
+        if prev_len != new_len {
+            this.repr
+                .low_water
+                .set(this.repr.low_water.get().min(new_len));
+        }
+
+        if new_len < prev_len {
+            this.repr.writes.truncate(new_len);
+        }
+        this.repr.length = new_len;
+    }
+
+    fn clone(this: &Blake3Bytes<Self>) -> Blake3Bytes<Self> {
+        Blake3Bytes {
+            repr: this.repr.clone(),
+        }
+    }
+}
+
+impl Blake3BytesMode for Verify {
+    fn new(len: usize) -> Blake3Bytes<Self> {
+        Blake3Bytes {
+            repr: VerifyRepr {
+                length: Some(len),
+                low_water: len,
+                data: PartialVec::from(vec![0u8; len]),
+                proof: None,
+            },
+        }
+    }
+
+    fn read(this: &Blake3Bytes<Self>, start: usize, buffer: &mut [u8]) -> usize {
+        let total = Verify::len(this);
+        if start >= total {
+            return 0;
+        }
+        let range = clamp_range(total, start, buffer.len());
+        let len = range.len();
+
+        let buffer = &mut buffer[..len];
+        let Some(chunks) = this.repr.data.continuous_defined_range(range) else {
+            // SAFETY: called only in `Verify` mode (invariant I4).
+            unsafe { not_found() }
+        };
+        let mut offset = 0;
+        for chunk in chunks {
+            buffer[offset..][..chunk.len()].copy_from_slice(chunk);
+            offset += chunk.len();
+        }
+        len
+    }
+
+    fn write(this: &mut Blake3Bytes<Self>, start: usize, buffer: &[u8]) -> usize {
+        let total = Verify::len(this);
+        if start >= total {
+            return 0;
+        }
+        let range = clamp_range(total, start, buffer.len());
+        let len = range.len();
+        this.repr.data.define(start, buffer[..len].to_vec());
+        len
+    }
+
+    fn len(this: &Blake3Bytes<Self>) -> usize {
+        match this.repr.length {
+            Some(len) => len,
+            // SAFETY: called only in `Verify` mode (invariant I4).
+            None => unsafe { not_found() },
+        }
+    }
+
+    fn resize(this: &mut Blake3Bytes<Self>, new_len: usize) {
+        let prev_len = Verify::len(this);
+        if new_len > prev_len {
+            this.repr
+                .data
+                .define(prev_len, vec![0u8; new_len - prev_len]);
+        }
+        if new_len < prev_len {
+            this.repr.data.truncate(new_len);
+        }
+        this.repr.length = Some(new_len);
+        // Track the low-water mark identically to prove mode, so the two agree on whether the
+        // committed shape still describes the value.
+        this.repr.low_water = this.repr.low_water.min(new_len);
+    }
+
+    fn clone(this: &Blake3Bytes<Self>) -> Blake3Bytes<Self> {
+        Blake3Bytes {
+            repr: this.repr.clone(),
+        }
     }
 }
 
