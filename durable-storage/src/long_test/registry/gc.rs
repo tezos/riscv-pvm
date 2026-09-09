@@ -4,30 +4,31 @@
 
 //! Snapshot retention for the [`Registry`] long test.
 //!
-//! A registry commit references many shared, content-addressed database commits,
-//! which can be referenced by other registry commits. When removing a registry commit,
-//! its database commits are removed only if no other retained registry commit still
-//! references them. Deletions apply
-//! to both backends so the persistent repo and the in-memory repo
-//! both stay bounded to the retention window.
+//! Epoch bases are the only commits a run records, so retention is a window over them: keep the
+//! `keep` most recent and hand the oldest of those to the repository's own collection. Driving
+//! [`collect`] rather than a copy of it means the run exercises what ships, and applying it to
+//! both backends keeps the persistent and in-memory repositories bounded the same way - which is
+//! the only place the in-memory repository's side of collection is exercised at all.
 //!
 //! [`Registry`]: crate::registry::Registry
 
-use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::fs;
 use std::num::NonZeroUsize;
 
 use anyhow::Context;
 use anyhow::Result;
 
+use crate::collect::collect;
 use crate::commit::CommitId;
 use crate::repo::DirectoryManager;
-use crate::repo::RegistryRepo;
 use crate::storage::in_memory::InMemoryRepo;
 
-/// Drop epoch snapshots older than the `keep` most-recent, garbage-collecting
-/// the database commits they no longer keep alive.
+/// Drop epoch snapshots older than the `keep` most-recent, reclaiming what they held.
+///
+/// Collecting at the oldest snapshot in the window retains it and everything recorded after it,
+/// which is exactly the window: a run records a commit per epoch base and nothing in between. The
+/// database commits an evicted snapshot shared with a retained one survive, since collection
+/// removes only those no retained manifest reaches.
 pub(super) fn prune(
     persistent_repo: &DirectoryManager,
     in_memory_repo: &InMemoryRepo,
@@ -35,65 +36,23 @@ pub(super) fn prune(
     keep: NonZeroUsize,
 ) -> Result<()> {
     while recent_commits.len() > keep.get() {
-        let old = recent_commits.pop_front().expect("non-empty");
-
-        // Keep the snapshot if a retained epoch still references it
-        if recent_commits.contains(&old) {
-            continue;
-        }
-
-        prune_registry_commit(persistent_repo, in_memory_repo, &old, recent_commits)?;
-    }
-    Ok(())
-}
-
-/// Remove the registry commit `old` and any of its database commits not reachable
-/// from a `retained` registry commit.
-fn prune_registry_commit(
-    persistent_repo: &DirectoryManager,
-    in_memory_repo: &InMemoryRepo,
-    old: &CommitId,
-    retained: &VecDeque<CommitId>,
-) -> Result<()> {
-    let mut reachable: HashSet<CommitId> = HashSet::new();
-    for commit in retained {
-        for db in crate::registry::database_commits(persistent_repo, commit)
-            .context("reading a retained registry manifest")?
-        {
-            reachable.insert(db);
-        }
+        recent_commits.pop_front();
     }
 
-    let old_databases = crate::registry::database_commits(persistent_repo, old)
-        .context("reading the evicted registry manifest")?;
-    for db in old_databases {
-        if reachable.contains(&db) {
-            continue;
-        }
-        let dir = persistent_repo.database_commit_dir(&db);
-        if dir.exists() {
-            fs::remove_dir_all(&dir)
-                .with_context(|| format!("removing database snapshot {}", dir.display()))?;
-        }
-        in_memory_repo
-            .remove_commit(&db)
-            .context("removing an in-memory database snapshot")?;
-    }
+    let Some(oldest) = recent_commits.front() else {
+        return Ok(());
+    };
 
-    let manifest_file = persistent_repo.registry_commit_file(old);
-    if manifest_file.exists() {
-        fs::remove_file(&manifest_file)
-            .with_context(|| format!("removing registry manifest {}", manifest_file.display()))?;
-    }
-    in_memory_repo
-        .remove_registry_commit(old)
-        .context("removing an in-memory registry manifest")?;
+    collect(persistent_repo, oldest).context("collecting the persistent repository")?;
+    collect(in_memory_repo, oldest).context("collecting the in-memory repository")?;
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_test_utils::TestableTmpdir;
@@ -155,6 +114,18 @@ mod tests {
             )
             .is_err(),
             "the evicted base should no longer check out in memory"
+        );
+
+        // Both journals were pruned, so neither backend will collect at the evicted base
+        // again - which is what a repeated round relies on to refuse a target whose data has
+        // already gone.
+        assert!(
+            collect(&persistent_repo, &base0.commit).is_err(),
+            "the evicted base should no longer be a persistent collection target"
+        );
+        assert!(
+            collect(&in_memory_repo, &base0.commit).is_err(),
+            "the evicted base should no longer be an in-memory collection target"
         );
 
         // The retained base still checks out fully on both backends, which
