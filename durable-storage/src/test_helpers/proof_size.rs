@@ -36,8 +36,7 @@
 use std::collections::BTreeSet;
 use std::ops::Range;
 
-use octez_riscv_data::components::bytes::NODE_ARITY as BYTES_NODE_ARITY;
-use octez_riscv_data::components::bytes::PAGE_SIZE;
+use octez_riscv_data::components::blake3_bytes::CHUNK_LEN;
 use octez_riscv_data::components::bytes::test_utils;
 use octez_riscv_data::components::vector::NODE_ARITY as VECTOR_NODE_ARITY;
 use octez_riscv_data::foldable::seq_tree::tree_depth;
@@ -55,6 +54,9 @@ use crate::test_helpers::registry::RegistryOperation;
 /// We limit it to half of the max size supported by L1 - as the WASM component
 /// will also be included (which itself also fits into 16KiB).
 const MAX_PROOF_SIZE: usize = 16 * 1024;
+
+/// BLAKE3 builds a binary chunk tree, so a path charges one blinded sibling per level.
+const BLAKE3_NODE_ARITY: usize = 2;
 
 /// Serialised size of a proof tree tag. Tags are written as one byte each by the
 /// `Encode` impl of `octez_riscv_data::merkle_proof::proof_tree::MerkleProof`.
@@ -195,45 +197,79 @@ fn avl_search_path(depth: usize) -> usize {
     depth * avl_path_node(KEY_MAX_SIZE) + terminal_blind(depth)
 }
 
-/// Bound on an opened value subtree: the `Bytes` component folds as a node of
-/// a `u64` length leaf and a page tree of arity [`BYTES_NODE_ARITY`] with
-/// [`PAGE_SIZE`]-byte page leaves (each a tag, a `u64` chunk length and the
-/// page's content). `byte_ranges` are the value's byte ranges read or written
-/// by the operation; every touched page is charged its content plus one full
-/// branch of blinded siblings per tree layer. The branch charge deliberately
-/// over-counts: touched pages can share their upper layers in the real proof
-/// and siblings that are themselves touched are not blinded.
-fn value_open(value_len: usize, byte_ranges: &[Range<usize>]) -> usize {
-    let pages = value_len.div_ceil(PAGE_SIZE);
-    let depth = tree_depth(pages, BYTES_NODE_ARITY) as usize;
-    let touched = touched_pages(value_len, byte_ranges);
+/// Ceiling on the serialised size of a BLAKE3 value leaf.
+///
+/// The leaf is a `Blake3Proof`: a `u64` length followed by a proof tree over the value's
+/// [`CHUNK_LEN`]-byte BLAKE3 chunks. This replaces the page-tree model this file carried, which
+/// described the component the AVL value type no longer is.
+///
+/// Bytes are charged where the verifier needs a pre-image and a chaining value where it does not.
+/// A chunk a read touches must return the same bytes in verify mode, and a chunk a write only
+/// partly covers still needs the part the write does not supply, so both are present. A chunk a
+/// write covers in full is blinded: the verifier hashes its own replay of those bytes.
+fn value_open(value_len: usize, access: &ValueAccess) -> usize {
+    let chunks = value_len.div_ceil(CHUNK_LEN).max(1);
+    let depth = tree_depth(chunks, BLAKE3_NODE_ARITY) as usize;
 
-    let page_leaves: usize = touched
+    let read = touched_chunks(value_len, &access.reads);
+    let written = touched_chunks(value_len, &access.writes);
+
+    // A chunk a write covers in full needs no pre-image: the verifier hashes its own replay of
+    // those bytes, so the proof carries a chaining value instead. One a write only partly covers
+    // still needs the part the write does not supply, so it is charged as present - as is any
+    // chunk a read touches, whose bytes the verifier has to be able to return.
+    let blinded: BTreeSet<usize> = written
         .iter()
-        .map(|page| {
-            let content = PAGE_SIZE.min(value_len - page * PAGE_SIZE);
+        .copied()
+        .filter(|chunk| !read.contains(chunk) && chunk_is_covered(*chunk, value_len, &access.writes))
+        .collect();
+
+    let present: BTreeSet<usize> = read.union(&written).copied().filter(|c| !blinded.contains(c)).collect();
+
+    let present_bytes: usize = present
+        .iter()
+        .map(|chunk| {
+            let content = CHUNK_LEN.min(value_len - chunk * CHUNK_LEN);
             TAG_BYTES + size_of::<u64>() + content
         })
         .sum();
-    let layers = depth * touched.len() * (TAG_BYTES + (BYTES_NODE_ARITY - 1) * BLIND_LEAF);
 
-    let computed = TAG_BYTES + LEN_LEAF + (page_leaves + layers).max(BLIND_LEAF);
+    // A contiguous written run collapses to the maximal aligned subtrees inside it, of which there
+    // are at most two per level, so charging one chaining value per written chunk is capped there.
+    let blinded_leaves = blinded.len().min(2 * depth + 2) * BLIND_LEAF;
+
+    // One node tag and one blinded sibling per level of the path to each charged chunk. This is
+    // the arity-2 case of the layer term the page-tree model used, and over-counts where paths
+    // share a prefix.
+    let layers = depth * (present.len() + blinded.len()) * (TAG_BYTES + BLIND_LEAF);
+
+    // The leaf tag, the `u64` length the leaf carries beside its tree, and the whole value
+    // collapsing to a single chaining value as the floor.
+    let computed =
+        TAG_BYTES + size_of::<u64>() + (present_bytes + blinded_leaves + layers).max(BLIND_LEAF);
 
     computed.min(test_utils::MAX_PROOF_LENGTH)
 }
 
-/// The pages of a value of `value_len` bytes touched by the given byte ranges,
+/// Whether a write covers the whole of `chunk`, so that no pre-image of it is needed.
+fn chunk_is_covered(chunk: usize, value_len: usize, writes: &[Range<usize>]) -> bool {
+    let start = chunk * CHUNK_LEN;
+    let end = (start + CHUNK_LEN).min(value_len);
+    writes.iter().any(|w| w.start <= start && end <= w.end)
+}
+
+/// The BLAKE3 chunks of a value of `value_len` bytes touched by the given byte ranges,
 /// after clamping each range to the value's length.
-fn touched_pages(value_len: usize, byte_ranges: &[Range<usize>]) -> BTreeSet<usize> {
-    let mut pages = BTreeSet::new();
+fn touched_chunks(value_len: usize, byte_ranges: &[Range<usize>]) -> BTreeSet<usize> {
+    let mut chunks = BTreeSet::new();
     for range in byte_ranges {
         let start = range.start.min(value_len);
         let end = range.end.min(value_len);
         if start < end {
-            pages.extend(start / PAGE_SIZE..=(end - 1) / PAGE_SIZE);
+            chunks.extend(start / CHUNK_LEN..=(end - 1) / CHUNK_LEN);
         }
     }
-    pages
+    chunks
 }
 
 /// The single-byte range read by `record_resize_boundary_dependency` (see
@@ -248,20 +284,43 @@ fn resize_boundary(prev_len: usize, new_len: usize) -> Range<usize> {
     }
 }
 
-/// The value byte ranges an operation reads or writes; empty ranges are
-/// ignored by [`value_open`].
-fn value_byte_ranges(op: &DatabaseOperation, value_len: usize) -> [Range<usize>; 2] {
+/// The value byte ranges an operation reads and the ones it writes, kept apart because
+/// [`value_open`] charges them differently. Empty ranges are ignored.
+struct ValueAccess {
+    reads: Vec<Range<usize>>,
+    writes: Vec<Range<usize>>,
+}
+
+#[expect(
+    clippy::single_range_in_vec_init,
+    reason = "the vectors are sets of byte ranges, not range initialisers"
+)]
+fn value_access(op: &DatabaseOperation, value_len: usize) -> ValueAccess {
     match op {
-        DatabaseOperation::Read(_, offset, len) => [*offset..offset.saturating_add(*len), 0..0],
+        DatabaseOperation::Read(_, offset, len) => ValueAccess {
+            reads: vec![*offset..offset.saturating_add(*len)],
+            writes: Vec::new(),
+        },
         DatabaseOperation::Write(_, offset, data) => {
             let end = offset.saturating_add(data.len());
-            [*offset..end, resize_boundary(value_len, end.max(value_len))]
+            ValueAccess {
+                // A resize reads the byte the prefix boundary chunk is settled from.
+                reads: vec![resize_boundary(value_len, end.max(value_len))],
+                writes: vec![*offset..end],
+            }
         }
-        // A `Set` replaces the value in full, so the prover omits every page of
-        // the previous one and the proof holds the length leaf and a single
-        // blinded page tree. `value_open` charges that through its lower bound.
-        DatabaseOperation::Set(..) => [0..0, 0..0],
-        _ => [0..0, 0..0],
+        // A `Set` replaces the value in full. Where the new value covers the old one the proof is
+        // a single blinded tree, which the floor in [`value_open`] charges; where it is shorter,
+        // the written prefix has to stay individually blinded rather than be swallowed by a blind
+        // spanning the dropped tail, and those blinds are what this charges.
+        DatabaseOperation::Set(_, data) => ValueAccess {
+            reads: vec![resize_boundary(value_len, data.len())],
+            writes: vec![0..data.len()],
+        },
+        _ => ValueAccess {
+            reads: Vec::new(),
+            writes: Vec::new(),
+        },
     }
 }
 
@@ -456,7 +515,7 @@ pub(crate) fn database_operation_proof_size_bound(
         // that blinded leaf, so the charge is refunded rather than paid twice.
         // `exists` implies a non-empty tree, so the path has a terminal node.
         let value_len = model.data()[key].len();
-        cost += value_open(value_len, &value_byte_ranges(op, value_len)) - BLIND_LEAF;
+        cost += value_open(value_len, &value_access(op, value_len)) - BLIND_LEAF;
     }
 
     // An untouched database is compressed to a single blinded leaf.
@@ -506,59 +565,63 @@ mod tests {
         clippy::single_range_in_vec_init,
         reason = "the arrays are slices of byte ranges, not range initialisers"
     )]
-    fn touched_pages_track_page_size() {
-        let len = 4 * PAGE_SIZE + PAGE_SIZE / 2;
+    fn touched_chunks_track_the_blake3_chunk_length() {
+        let len = 4 * CHUNK_LEN + CHUNK_LEN / 2;
 
-        assert_eq!(touched_pages(len, &[0..1]), BTreeSet::from([0]));
+        assert_eq!(touched_chunks(len, &[0..1]), BTreeSet::from([0]));
         assert_eq!(
-            touched_pages(len, &[PAGE_SIZE - 1..PAGE_SIZE + 1]),
+            touched_chunks(len, &[CHUNK_LEN - 1..CHUNK_LEN + 1]),
             BTreeSet::from([0, 1])
         );
         // Ranges are clamped to the value length.
         assert_eq!(
-            touched_pages(len, &[len - 1..len + PAGE_SIZE]),
+            touched_chunks(len, &[len - 1..len + CHUNK_LEN]),
             BTreeSet::from([4])
         );
         // Empty and out-of-bounds ranges touch nothing.
-        assert!(touched_pages(len, &[PAGE_SIZE..PAGE_SIZE, len..len + 1]).is_empty());
+        assert!(touched_chunks(len, &[CHUNK_LEN..CHUNK_LEN, len..len + 1]).is_empty());
     }
 
-    // The page counts behind the data cost of chunk-bounded operations,
-    // stated in terms of [`PAGE_SIZE`] and [`MAX_FILE_CHUNK_SIZE`] so they
-    // hold whatever values those parameters take: a `Write`'s data range may
-    // span `ceil(MAX_FILE_CHUNK_SIZE / PAGE_SIZE) + 1` pages when unaligned
-    // (its resize boundary byte never adds a page beyond the last old byte's),
-    // while a `Set` touches none at all - it replaces every page it covers.
+    // The chunk counts behind the data cost of chunk-bounded operations, stated in terms of
+    // [`CHUNK_LEN`] and [`MAX_FILE_CHUNK_SIZE`] so they hold whatever values those take. A
+    // `Write`'s data range spans `ceil(MAX_FILE_CHUNK_SIZE / CHUNK_LEN) + 1` chunks when
+    // unaligned, its resize boundary byte never reaching past the last old byte's chunk. A `Set`
+    // touches exactly the chunks it replaces - unlike the page-tree model this replaced, where a
+    // set touched none, because a written chunk still has to appear as its own blind rather than
+    // be swallowed by one spanning bytes the write does not cover.
     #[test]
-    fn operation_page_counts_respect_chunk_and_page_parameters() {
+    fn operation_chunk_counts_respect_chunk_parameters() {
         let key = Key::new(b"key").expect("valid key");
-        let value_len = MAX_FILE_CHUNK_SIZE + 4 * PAGE_SIZE + PAGE_SIZE / 2;
-        let chunk_pages = MAX_FILE_CHUNK_SIZE.div_ceil(PAGE_SIZE);
+        let value_len = MAX_FILE_CHUNK_SIZE + 4 * CHUNK_LEN + CHUNK_LEN / 2;
+        let data_chunks = MAX_FILE_CHUNK_SIZE.div_ceil(CHUNK_LEN);
 
-        let pages_for = |op: &DatabaseOperation| {
-            touched_pages(value_len, &value_byte_ranges(op, value_len)).len()
+        let chunks_for = |op: &DatabaseOperation| {
+            let access = value_access(op, value_len);
+            let mut all = touched_chunks(value_len, &access.reads);
+            all.extend(touched_chunks(value_len, &access.writes));
+            all.len()
         };
 
         let max_write = [
             0,
             1,
-            PAGE_SIZE / 2,
-            PAGE_SIZE - 1,
-            PAGE_SIZE,
-            2 * PAGE_SIZE - 1,
+            CHUNK_LEN / 2,
+            CHUNK_LEN - 1,
+            CHUNK_LEN,
+            2 * CHUNK_LEN - 1,
             value_len - 1,
             value_len,
         ]
         .into_iter()
         .map(|offset| {
             let chunk = Bytes::from(vec![0u8; MAX_FILE_CHUNK_SIZE]);
-            let write = pages_for(&DatabaseOperation::Write(key.clone(), offset, chunk));
-            let read = pages_for(&DatabaseOperation::Read(
+            let write = chunks_for(&DatabaseOperation::Write(key.clone(), offset, chunk));
+            let read = chunks_for(&DatabaseOperation::Read(
                 key.clone(),
                 offset,
                 MAX_FILE_CHUNK_SIZE,
             ));
-            assert!(read <= write, "a read touches no more pages than a write");
+            assert!(read <= write, "a read touches no more chunks than a write");
             write
         })
         .max()
@@ -567,7 +630,7 @@ mod tests {
         let max_set = [1, MAX_FILE_CHUNK_SIZE]
             .into_iter()
             .map(|len| {
-                pages_for(&DatabaseOperation::Set(
+                chunks_for(&DatabaseOperation::Set(
                     key.clone(),
                     Bytes::from(vec![0u8; len]),
                 ))
@@ -575,8 +638,8 @@ mod tests {
             .max()
             .expect("the length list is not empty");
 
-        assert_eq!(max_write, chunk_pages + 1);
-        assert_eq!(max_set, 0);
+        assert_eq!(max_write, data_chunks + 1);
+        assert_eq!(max_set, data_chunks);
     }
 
     #[test]

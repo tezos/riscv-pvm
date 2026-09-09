@@ -424,6 +424,13 @@ impl<C: LeafCodec> PartialHashFold<C> {
             // `InvalidProof`, which answering from the root hash here would paper over.
             Some(Tree::Node(_)) => Err(self),
 
+            // A BLAKE3 value leaf stands in for its committed value hash - exactly the
+            // `node_hash` a full descent would take from `into_node_fold`, whose children are
+            // then all `Previous`. So the shortcut matches the descent, as for `Blind`.
+            Some(Tree::Leaf(MerkleProofLeaf::Blake3(proof))) => Ok(PartialHash::Present(
+                crate::components::blake3_bytes::proof_root_hash(proof),
+            )),
+
             // A read leaf where the state expects a subtree is a malformed proof. Let the descent
             // report it the way it always has.
             Some(Tree::Leaf(MerkleProofLeaf::Read(_))) => Err(self),
@@ -500,6 +507,16 @@ impl<C: LeafCodec> Fold for PartialHashFold<C> {
 
             Tree::Leaf(MerkleProofLeaf::Blind(hash)) => PartialHashNodeFold {
                 node_hash: Some(hash),
+                children: VecDeque::new(),
+                child_hashes: VecDeque::new(),
+                _codec: PhantomData,
+            },
+
+            // A BLAKE3 value leaf is a leaf, not a node. If a node-shaped foldable is folded
+            // against it and defers to `previous`, present its committed value hash — mirroring
+            // the `Blind` arm.
+            Tree::Leaf(MerkleProofLeaf::Blake3(proof)) => PartialHashNodeFold {
+                node_hash: Some(crate::components::blake3_bytes::proof_root_hash(&proof)),
                 children: VecDeque::new(),
                 child_hashes: VecDeque::new(),
                 _codec: PhantomData,

@@ -10,8 +10,11 @@ use std::sync::LazyLock;
 use octez_riscv_data::codec;
 use octez_riscv_data::codec::LeafDecode;
 use octez_riscv_data::components::atom::AtomMode;
-use octez_riscv_data::components::bytes::Bytes;
-use octez_riscv_data::components::bytes::BytesMode;
+// The AVL value type is the length-committed BLAKE3 byte component, imported as `Bytes`/
+// `BytesMode` so the data-type-agnostic AVL code reads unchanged (see
+// `data/docs/blake3-bytes-length-committed.md` §7 step 5).
+use octez_riscv_data::components::blake3_bytes::Blake3Bytes as Bytes;
+use octez_riscv_data::components::blake3_bytes::Blake3BytesMode as BytesMode;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::foldable::NodeFold;

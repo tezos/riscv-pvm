@@ -9,6 +9,11 @@ workspace = true
 
 [features]
 unstable-test-utils = ["dep:proptest", "dep:serde"]
+# Parallelise the value-bytes BLAKE3 hash across a rayon pool for large values (see
+# `blake3_bytes::hash_value`). OFF by default: it is a net win only above ~256 KiB (measured
+# ~5-7x at 1-16 MiB) and a loss below ~128 KiB, and it pulls in a global thread pool. The output
+# is byte-identical to the single-threaded hash, so enabling it never changes any state hash.
+parallel-hashing = ["blake3/rayon"]
 
 [dependencies]
 bincode.workspace = true
@@ -41,6 +46,7 @@ rand.workspace = true
 humansize.workspace = true
 goldenfile.workspace = true
 clap.workspace = true
+blake3.workspace = true
 
 [[bench]]
 name = "proof"

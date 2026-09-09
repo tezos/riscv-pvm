@@ -314,6 +314,7 @@ dependencies = [
  "cfg-if",
  "constant_time_eq",
  "cpufeatures 0.3.0",
+ "rayon-core",
 ]
 
 [[package]]
@@ -2612,6 +2613,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "blake3",
  "bytes",
  "cfg-if",
  "clap",
