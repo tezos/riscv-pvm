@@ -29,6 +29,10 @@
           {
             "group": "Introduction",
             "pages": ["state-framework/index", "state-framework/components"]
+          },
+          {
+            "group": "Components",
+            "pages": ["state-framework/blake3-bytes"]
           }
         ]
       },
