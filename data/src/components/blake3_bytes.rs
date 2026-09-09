@@ -272,6 +272,18 @@ pub fn verify_root(proof: &Blake3Proof) -> Result<Hash, ProofError> {
     ]))
 }
 
+/// Infallible committed value hash of a proof, for the generic Merkle-proof machinery.
+///
+/// The BLAKE3 within-value leaf ([`crate::merkle_proof::proof_tree::MerkleProofLeaf::Blake3`])
+/// hashes to [`verify_root`]. Callers of [`crate::merkle_proof::proof_tree::MerkleProof::root_hash`]
+/// need a total function, so a malformed proof (only reachable from an adversarial, decoded proof)
+/// yields a fixed domain-separated poison hash instead of erroring. This is sound: the poison can
+/// never equal an honest value hash (which is a `combine`, not `hash_bytes` of this literal), so a
+/// proof whose root hashes to the poison simply fails the caller's root-equality check.
+pub fn proof_root_hash(proof: &Blake3Proof) -> Hash {
+    verify_root(proof).unwrap_or_else(|_| Hash::hash_bytes(b"octez-riscv:invalid-blake3-proof"))
+}
+
 /// Recompute `H_data` — the `ROOT`-finalised BLAKE3 root of the value bytes — from the data
 /// tree, reconstructing the shape canonically from `length` (invariants I2, I5).
 ///

@@ -252,6 +252,9 @@ fn find_message_pos(serialised_proof: &[u8]) -> Range<usize> {
             Tree::Leaf(MerkleProofLeaf::Blind(_)) => {
                 offset += Hash::DIGEST_SIZE;
             }
+            Tree::Leaf(MerkleProofLeaf::Blake3(_)) => {
+                unreachable!("PVM outbox proofs do not contain BLAKE3 within-value leaves")
+            }
         }
     }
 
