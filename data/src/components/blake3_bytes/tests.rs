@@ -25,6 +25,8 @@ use super::ProofTree;
 use super::canonical_cv;
 use super::hash_len;
 use super::hash_value;
+use super::present_ranges;
+use super::proof_read;
 use super::prove;
 use super::verify_root;
 use crate::hash::Hash;
@@ -386,4 +388,55 @@ fn empty_value_roundtrips() {
     let data: &[u8] = &[];
     let proof = prove(data, &[]);
     assert_eq!(verify_root(&proof).unwrap(), hash_value(data));
+}
+
+proptest! {
+    /// I4: a range that was never accessed is blinded, and reading it faults rather than
+    /// returning zeroes. A verifier that invented data for unproven regions would pass every
+    /// round-trip test while being unsound.
+    #[test]
+    fn unaccessed_read_faults(
+        start in (2 * CHUNK_LEN)..(8 * CHUNK_LEN),
+        len in 1usize..=CHUNK_LEN,
+    ) {
+        let data = vec![7u8; 8 * CHUNK_LEN];
+        let proof = prove(&data, &[0..1]);
+        let end = (start + len).min(data.len());
+        prop_assume!(end > start);
+        prop_assert!(matches!(proof_read(&proof, start..end), Err(ProofError::Blinded)));
+    }
+
+    /// Accessed ranges are present and read back exactly the bytes that were proved.
+    #[test]
+    fn accessed_ranges_read_back((data, access) in data_and_access()) {
+        prop_assume!(!access.is_empty());
+        let proof = prove(&data, &access);
+        for range in &access {
+            let got = proof_read(&proof, range.clone()).unwrap();
+            prop_assert_eq!(got.as_slice(), &data[range.clone()]);
+        }
+    }
+
+    /// I4: reading past the claimed length faults rather than returning padding.
+    #[test]
+    fn out_of_bounds_read_faults(over in 1usize..64) {
+        let data = vec![3u8; 2 * CHUNK_LEN];
+        let proof = prove(&data, &[0..data.len()]);
+        let start = data.len();
+        prop_assert!(matches!(
+            proof_read(&proof, start..(start + over)),
+            Err(ProofError::OutOfBounds)
+        ));
+    }
+
+    /// The ranges reported as present are exactly those that can be read back, so a caller can
+    /// use them to decide what it may ask for.
+    #[test]
+    fn present_ranges_are_readable((data, access) in data_and_access()) {
+        let proof = prove(&data, &access);
+        for range in present_ranges(&proof) {
+            let got = proof_read(&proof, range.clone()).unwrap();
+            prop_assert_eq!(got.as_slice(), &data[range]);
+        }
+    }
 }

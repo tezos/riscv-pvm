@@ -303,5 +303,77 @@ fn compute_cv(tree: &ProofTree, offset: u64, len: usize) -> Result<[u8; 32], Pro
     }
 }
 
+/// Collect the absolute `(offset, bytes)` of every present chunk leaf, descending the
+/// canonical shape derived from `len`.
+fn collect_present(tree: &ProofTree, offset: usize, len: usize, out: &mut Vec<(usize, Vec<u8>)>) {
+    match tree {
+        ProofTree::Chunk(bytes) => out.push((offset, bytes.clone())),
+        ProofTree::Blind(_) => {}
+        ProofTree::Node(left, right) => {
+            let left_len = left_subtree_len(len as u64) as usize;
+            collect_present(left, offset, left_len, out);
+            collect_present(right, offset + left_len, len - left_len, out);
+        }
+    }
+}
+
+/// Read `range` from a verified proof.
+///
+/// Returns the bytes if `range` lies entirely within present chunks; faults with
+/// [`ProofError::Blinded`] if any part was blinded, or [`ProofError::OutOfBounds`] if
+/// `range` exceeds `total_len` (invariant I4). This never returns zeroes for absent data.
+pub fn proof_read(proof: &Blake3Proof, range: Range<usize>) -> Result<Vec<u8>, ProofError> {
+    if range.start > range.end || range.end > proof.total_len {
+        return Err(ProofError::OutOfBounds);
+    }
+    if range.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut present = Vec::new();
+    collect_present(&proof.data, 0, proof.total_len, &mut present);
+
+    let mut out = vec![0u8; range.len()];
+    let mut covered = vec![false; range.len()];
+
+    for (chunk_offset, bytes) in &present {
+        let seg_start = (*chunk_offset).max(range.start);
+        let seg_end = (chunk_offset + bytes.len()).min(range.end);
+        for pos in seg_start..seg_end {
+            out[pos - range.start] = bytes[pos - chunk_offset];
+            covered[pos - range.start] = true;
+        }
+    }
+
+    if covered.iter().all(|&c| c) {
+        Ok(out)
+    } else {
+        // Any byte of the requested range fell in a blinded/absent subtree.
+        Err(ProofError::Blinded)
+    }
+}
+
+/// The byte ranges materialized (present) in `proof`, in ascending order. Reading any
+/// sub-range of these via [`proof_read`] succeeds; reading outside them faults.
+pub fn present_ranges(proof: &Blake3Proof) -> Vec<Range<usize>> {
+    let mut present = Vec::new();
+    collect_present(&proof.data, 0, proof.total_len, &mut present);
+    present.sort_by_key(|(offset, _)| *offset);
+
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    for (offset, bytes) in present {
+        let start = offset;
+        let end = offset + bytes.len();
+        if start == end {
+            continue;
+        }
+        match ranges.last_mut() {
+            Some(last) if last.end == start => last.end = end,
+            _ => ranges.push(start..end),
+        }
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod tests;
