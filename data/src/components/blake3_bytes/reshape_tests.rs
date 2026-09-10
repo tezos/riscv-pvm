@@ -451,7 +451,6 @@ fn tampered_boundary_chunk_diverges_on_reshape() {
 /// reshape proof, the verifier cannot hash the changed region live, so it cannot reproduce the
 /// honest post root — it must diverge or fail, never accept.
 #[test]
-#[ignore = "the verifier answers with the pre root instead of rejecting; fixed in the next commit"]
 fn reshape_without_boundary_chunk_cannot_forge_post_root() {
     let pre = filled(16 * CHUNK_LEN);
     let ops = vec![
@@ -696,7 +695,6 @@ fn all_blind(pre: &[u8]) -> Blake3Proof {
 /// only sound answer is to reject. Answering with the pre-transition root instead reports the
 /// transition as having made no change.
 #[test]
-#[ignore = "the verifier keeps the stale chaining value and reports the pre root; fixed in the next commit"]
 fn a_coarse_blind_cannot_hide_a_write() {
     let pre = filled(8 * CHUNK_LEN);
     let pre_root = hash_value(&pre);
@@ -719,7 +717,6 @@ fn a_coarse_blind_cannot_hide_a_write() {
 /// keeping a stale chaining value - and the failure is currently reported as `Previous`, which
 /// for this leaf resolves to the pre-transition value hash.
 #[test]
-#[ignore = "the verifier reports the pre root for a reshape it cannot recompute; fixed in the next commit"]
 fn a_coarse_blind_cannot_hide_a_shrink() {
     let pre = filled(8 * CHUNK_LEN);
     let pre_root = hash_value(&pre);

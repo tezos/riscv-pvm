@@ -1133,6 +1133,22 @@ impl<'a> Blake3Bytes<Prove<'a>> {
     }
 }
 
+/// What a verify-mode value can say about its current root.
+///
+/// The third case is the point: a proof that does not support recomputing a root is not the same
+/// as an absent value, even though both once produced no hash. Absent means the value was blinded
+/// at the AVL layer, and deferring to the previous hash is correct. Failing to recompute means
+/// the proof was inadequate, and deferring there would answer with the *pre-transition* value
+/// hash - reporting the transition as having changed nothing, which is precisely the forgery.
+enum ValueRoot {
+    /// The recomputed post-transition value hash.
+    Present(Hash),
+    /// The value is absent - its length unknown - so the fold defers to the previous hash.
+    Absent,
+    /// The proof does not support recomputing a root.
+    Invalid,
+}
+
 impl Blake3Bytes<Verify> {
     /// Reconstruct a [`Blake3Bytes<Verify>`] from a within-value proof, after checking the
     /// proof reconstructs to `committed_root`.
@@ -1210,14 +1226,16 @@ impl Blake3Bytes<Verify> {
     ///   [`reshape_data_root`]).
     /// - **No retained proof** (a value freshly created or wholly `set` in verify mode): recompute
     ///   `hash_value` from the fully materialised bytes.
-    fn current_root(&self) -> Option<Hash> {
-        let length = self.repr.length?;
+    fn current_root(&self) -> ValueRoot {
+        let Some(length) = self.repr.length else {
+            return ValueRoot::Absent;
+        };
 
         // A present but empty value always hashes to `hash_value(&[])`, independent of any
         // retained proof or reshape history. Handle it up front — the sparse-view accessors below
         // return `None` for the degenerate `0..0` range.
         if length == 0 {
-            return Some(hash_value(&[]));
+            return ValueRoot::Present(hash_value(&[]));
         }
 
         if let Some(proof) = self.repr.proof.as_ref() {
@@ -1231,12 +1249,16 @@ impl Blake3Bytes<Verify> {
             // `length == lp` but replaces the "blinded" chunks with zeros — it must NOT hit this
             // path, or it would reuse stale pre CVs. It falls through to the reshape recompute.
             if length == lp && self.repr.low_water == length {
-                let data = rebuild_tree(&proof.data, 0, length, &self.repr.data, true);
-                return verify_root(&Blake3Proof {
+                let Some(data) = rebuild_tree(&proof.data, 0, length, &self.repr.data, true) else {
+                    return ValueRoot::Invalid;
+                };
+                return match verify_root(&Blake3Proof {
                     total_len: length,
                     data,
-                })
-                .ok();
+                }) {
+                    Ok(hash) => ValueRoot::Present(hash),
+                    Err(_) => ValueRoot::Invalid,
+                };
             }
 
             // Reshape (length changed, or a shrink-below-then-regrow returned to the same length).
@@ -1250,7 +1272,10 @@ impl Blake3Bytes<Verify> {
             if let Some(h_data) =
                 reshape_data_root(&proof.data, lp, length, prefix, &self.repr.data)
             {
-                return Some(Hash::combine_hashes([hash_len(length), Hash::from(h_data)]));
+                return ValueRoot::Present(Hash::combine_hashes([
+                    hash_len(length),
+                    Hash::from(h_data),
+                ]));
             }
             // Reshape recompute could not complete from the sparse view (only reachable from a
             // malformed/adversarial proof): fall through to the full-materialisation attempt,
@@ -1258,8 +1283,13 @@ impl Blake3Bytes<Verify> {
         }
 
         // No retained proof: recompute from fully materialised bytes.
-        let full = self.repr.data.contiguous_range(0..length)?;
-        Some(hash_value(full))
+        match self.repr.data.contiguous_range(0..length) {
+            Some(full) => ValueRoot::Present(hash_value(full)),
+            // Nothing left to try. Deferring to the previous hash here would answer with the
+            // pre-transition value hash, reporting a transition that did change the value as
+            // having changed nothing, so the proof is rejected instead.
+            None => ValueRoot::Invalid,
+        }
     }
 }
 
@@ -1319,7 +1349,7 @@ fn reshape_cv(
     // `canonical(lq)` (e.g. `[4,7)` is a node of `canonical(7)` but not `canonical(10)`), so it is
     // NOT directly reusable — it is descended into its aligned pieces below.
     if offset + len <= safe_full && is_aligned_subtree(offset, len) {
-        return pre_subtree_cv(pre, 0, lp, offset, len, data);
+        return pre_subtree_cv(pre, 0, lp, offset, len, data, true);
     }
     if offset >= safe_full {
         let bytes = data.contiguous_range(offset..offset + len)?;
@@ -1359,15 +1389,16 @@ fn pre_subtree_cv(
     t_offset: usize,
     t_len: usize,
     data: &PartialVec<u8>,
+    is_root: bool,
 ) -> Option<[u8; 32]> {
     if cur_offset == t_offset && cur_len == t_len {
-        return subtree_cv_from_view(pre, cur_offset, cur_len, data);
+        return subtree_cv_from_view(pre, cur_offset, cur_len, data, is_root);
     }
     match pre {
         ProofTree::Node(left, right) => {
             let left_len = left_subtree_len(cur_len as u64) as usize;
             if t_offset < cur_offset + left_len {
-                pre_subtree_cv(left, cur_offset, left_len, t_offset, t_len, data)
+                pre_subtree_cv(left, cur_offset, left_len, t_offset, t_len, data, false)
             } else {
                 pre_subtree_cv(
                     right,
@@ -1376,6 +1407,7 @@ fn pre_subtree_cv(
                     t_offset,
                     t_len,
                     data,
+                    false,
                 )
             }
         }
@@ -1397,16 +1429,25 @@ fn subtree_cv_from_view(
     offset: usize,
     len: usize,
     data: &PartialVec<u8>,
+    is_root: bool,
 ) -> Option<[u8; 32]> {
     match pre {
         // As in `rebuild_tree`: if the verifier materialised this whole span itself (replayed
         // writes inside the reusable prefix), its CV comes from those bytes, not from the stale
         // pre CV. Never the root here - `pre_subtree_cv` only targets proper subtrees of a
         // reshaped value, whose blinds are non-root CVs.
-        ProofTree::Blind(cv) => Some(match data.contiguous_range(offset..offset + len) {
-            Some(current) => canonical_cv(current, offset as u64),
-            None => *cv,
-        }),
+        ProofTree::Blind(cv) => match data.contiguous_range(offset..offset + len) {
+            Some(current) => Some(canonical_cv(current, offset as u64)),
+            // Held in part but not in whole - see `rebuild_tree`. Neither answer is sound, so
+            // the recompute fails and the caller rejects the proof.
+            None if data.is_any_defined(offset..offset + len) => None,
+            // A blind standing for the whole pre value carries its `ROOT`-finalised hash, which
+            // is not a chaining value and cannot serve as one. An honest reshape proof keeps the
+            // root open exactly so this never arises, its children recombining to the non-root
+            // chaining value instead.
+            None if is_root => None,
+            None => Some(*cv),
+        },
         ProofTree::Chunk(_) => {
             let bytes = data.contiguous_range(offset..offset + len)?;
             Some(
@@ -1418,8 +1459,8 @@ fn subtree_cv_from_view(
         }
         ProofTree::Node(left, right) => {
             let left_len = left_subtree_len(len as u64) as usize;
-            let l = subtree_cv_from_view(left, offset, left_len, data)?;
-            let r = subtree_cv_from_view(right, offset + left_len, len - left_len, data)?;
+            let l = subtree_cv_from_view(left, offset, left_len, data, false)?;
+            let r = subtree_cv_from_view(right, offset + left_len, len - left_len, data, false)?;
             Some(merge_subtrees_non_root(&l, &r, B3Mode::Hash))
         }
     }
@@ -1440,31 +1481,39 @@ fn rebuild_tree(
     len: usize,
     data: &PartialVec<u8>,
     is_root: bool,
-) -> ProofTree {
-    match node {
-        ProofTree::Chunk(original) => match data.contiguous_range(offset..offset + len) {
+) -> Option<ProofTree> {
+    let span = offset..offset + len;
+    Some(match node {
+        ProofTree::Chunk(original) => match data.contiguous_range(span) {
             Some(current) => ProofTree::Chunk(current.to_vec()),
             None => ProofTree::Chunk(original.clone()),
         },
-        ProofTree::Blind(cv) => match data.contiguous_range(offset..offset + len) {
+        ProofTree::Blind(cv) => match data.contiguous_range(span.clone()) {
             Some(current) if is_root => ProofTree::Blind(*blake3::hash(current).as_bytes()),
             Some(current) => ProofTree::Blind(canonical_cv(current, offset as u64)),
+            // Held in part but not in whole. The chaining value cannot be recomputed, and the
+            // committed one cannot be kept either: it stands for bytes the replay has since
+            // overwritten, so keeping it would drop the write from the root. No honest prover
+            // emits a blind that spans written and unwritten bytes at once - a fully written
+            // subtree is blinded at its own granularity, and a partly written chunk is carried
+            // present - so this is only reachable from a proof built to exploit the gap.
+            None if data.is_any_defined(span) => return None,
             None => ProofTree::Blind(*cv),
         },
         ProofTree::Node(left, right) => {
             let left_len = left_subtree_len(len as u64) as usize;
             ProofTree::Node(
-                Box::new(rebuild_tree(left, offset, left_len, data, false)),
+                Box::new(rebuild_tree(left, offset, left_len, data, false)?),
                 Box::new(rebuild_tree(
                     right,
                     offset + left_len,
                     len - left_len,
                     data,
                     false,
-                )),
+                )?),
             )
         }
-    }
+    })
 }
 
 /// Construct `start..start+len` clamped so it does not extend beyond `total_len`.
@@ -1738,8 +1787,9 @@ impl Foldable<PartialHashFold> for Blake3Bytes<Verify> {
     /// layer); otherwise recomputes the current root from present bytes + committed CVs.
     fn fold(&self, builder: PartialHashFold) -> PartialHash {
         match self.current_root() {
-            Some(hash) => builder.present(hash),
-            None => builder.previous(),
+            ValueRoot::Present(hash) => builder.present(hash),
+            ValueRoot::Absent => builder.previous(),
+            ValueRoot::Invalid => PartialHash::InvalidProof,
         }
     }
 }
