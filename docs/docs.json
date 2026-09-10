@@ -41,7 +41,7 @@
         "groups": [
           {
             "group": "Concepts",
-            "pages": ["new-durable-storage/garbage-collection"]
+            "pages": ["new-durable-storage/garbage-collection", "new-durable-storage/batch-hashing"]
           }
         ]
       }
