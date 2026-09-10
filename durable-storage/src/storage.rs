@@ -106,26 +106,20 @@ pub trait WriteableKeyValueStore: ReadableKeyValueStore<Merkle = MerkleWorker<Se
     /// Attempt to make a copy of the key-value store.
     fn try_clone(&self, repo: &Self::Repo) -> Result<Self, OperationalError>;
 
-    /// Register a Merkle node body under its hash.
+    /// Register a Merkle node body under its hash, with the edges into the children it names.
+    ///
+    /// One call rather than one per record: the body and the edges into it belong to the same node,
+    /// and a store able to apply them together should. `children` are the children an edge is
+    /// recorded from - an empty tree is never stored, so none is among them.
     fn node_set(
         &self,
         key: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
+        children: impl IntoIterator<Item = Hash>,
     ) -> Result<(), OperationalError>;
 
     /// Deletes the Merkle node body associated with the given hash.
     fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError>;
-
-    /// Record that the node stored under `parent` refers to the one stored under `child`.
-    ///
-    /// Written as each node is stored, so that liveness can later be decided from a node upwards
-    /// rather than by traversing every retained root downwards. Nodes are immutable, so an edge
-    /// once true stays true until the parent itself is collected.
-    fn edge_set(
-        &self,
-        child: impl AsRef<[u8]>,
-        parent: impl AsRef<[u8]>,
-    ) -> Result<(), OperationalError>;
 
     /// Register data under a blob key.
     fn blob_set(

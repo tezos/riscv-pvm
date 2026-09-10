@@ -180,6 +180,39 @@ impl MerkleStore {
             })
     }
 
+    /// Store `data` as the node body under `key`, recording an edge to it from each of `children`.
+    ///
+    /// One batch rather than a put apiece. RocksDB applies a batch in a single go, and these
+    /// records are one node's: a body written without the edges into it would leave its children
+    /// looking, from below, as though nothing referred to them.
+    pub fn set_node(
+        &self,
+        key: &[u8],
+        data: &[u8],
+        children: impl IntoIterator<Item = Hash>,
+    ) -> Result<(), OperationalError> {
+        self.writeable()?;
+
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.put(key, data);
+
+        for child in children {
+            batch.put_cf(
+                self.refs_cf(),
+                edge_key(child.as_ref(), key),
+                Stamp::UNKNOWN.encode(),
+            );
+        }
+
+        self.db
+            .write(batch)
+            .map_err(|error| OperationalError::PutFailed {
+                column: "merkle".to_owned(),
+                key: key.to_owned(),
+                error,
+            })
+    }
+
     /// Remove the node body stored under `key`.
     pub fn delete(&self, key: &[u8]) -> Result<(), OperationalError> {
         self.writeable()?;
