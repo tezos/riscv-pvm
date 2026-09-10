@@ -18,8 +18,11 @@ use super::Blake3Proof;
 use super::ProofTree;
 use super::hash_value;
 use super::verify_root;
+use crate::codec::Bincode;
 use crate::hash::Hash;
 use crate::hash::PartialHash;
+use crate::merkle_proof::proof_binary;
+use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::mode::Normal;
 use crate::mode::Provable;
 use crate::mode::Verify;
@@ -91,11 +94,15 @@ fn run(pre: &[u8], ops: &[Op]) -> (Hash, Option<Hash>, Blake3Proof) {
         "value proof did not reconstruct the committed pre root"
     );
 
-    // Reconstruct the verifier state from the proof (checked against the pre root), replay, fold.
-    let mut verify = Blake3Bytes::<Verify>::from_proof_checked(proof.clone(), pre_root)
-        .expect("proof checks against pre root");
+    // Go through the AVL wire and fold with the parsed proof, which is what `MerkleLayer::hash`
+    // does. Folding with `None` instead makes every rejection assertion here vacuous: the fold
+    // defers to the previous hash and yields no root at all, whatever the proof said, so an
+    // `assert_ne!` against the honest post root passes without the proof having been judged.
+    let wire = serialise(MerkleProof::from_foldable(&prover)).expect("proof serialises");
+    let (mut verify, parsed) =
+        proof_binary::deserialise::<Bincode, Blake3Bytes<Verify>>(&wire).expect("proof parses");
     apply(&mut verify, ops);
-    let verify_root = PartialHash::from_foldable(None, &verify).to_hash();
+    let verify_root = PartialHash::from_foldable(parsed.into_present(), &verify).to_hash();
 
     (post_hash, verify_root, proof)
 }
@@ -444,6 +451,7 @@ fn tampered_boundary_chunk_diverges_on_reshape() {
 /// reshape proof, the verifier cannot hash the changed region live, so it cannot reproduce the
 /// honest post root — it must diverge or fail, never accept.
 #[test]
+#[ignore = "the verifier answers with the pre root instead of rejecting; fixed in the next commit"]
 fn reshape_without_boundary_chunk_cannot_forge_post_root() {
     let pre = filled(16 * CHUNK_LEN);
     let ops = vec![
@@ -453,22 +461,16 @@ fn reshape_without_boundary_chunk_cannot_forge_post_root() {
     let pre_root = hash_value(&pre);
     let honest_post = hash_value(&oracle(&pre, &ops));
 
-    // A proof of the pre value that blinds EVERYTHING (only the length was "read"): it verifies to
-    // the pre root, but carries no present boundary chunk. Reconstruct and replay the grow.
-    let all_blind = Blake3Proof {
-        total_len: pre.len(),
-        data: ProofTree::Blind(*blake3::hash(&pre).as_bytes()),
-    };
-    assert_eq!(verify_root(&all_blind).unwrap(), pre_root);
+    let proof = all_blind(&pre);
+    assert_eq!(verify_root(&proof).unwrap(), pre_root);
 
-    let mut verify = Blake3Bytes::<Verify>::from_proof_checked(all_blind, pre_root).unwrap();
-    apply(&mut verify, &ops);
-    let vroot = PartialHash::from_foldable(None, &verify).to_hash();
-    assert_ne!(
-        vroot,
-        Some(honest_post),
-        "a reshape proof with no boundary chunk forged the post root"
-    );
+    // Rejecting is the only sound answer. Asserting merely that the honest post root was not
+    // reproduced is too weak: answering with the PRE root is equally a forgery, and it is the
+    // one this construction actually achieves.
+    let folded = fold_hand_made(proof, &ops);
+    assert_eq!(folded, PartialHash::InvalidProof);
+    assert_ne!(folded, PartialHash::Present(honest_post));
+    assert_ne!(folded, PartialHash::Present(pre_root));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -665,4 +667,69 @@ fn reshape_costs_no_more_than_an_in_place_write() {
             "shrink {shrink} exceeded the O(depth) bound {bound} at {kib} KiB"
         );
     }
+}
+
+/// Fold a hand-made proof of the pre value the way production does: carry it on the AVL wire,
+/// parse it back, replay `ops`, and fold with the parsed proof supplied.
+fn fold_hand_made(proof: Blake3Proof, ops: &[Op]) -> PartialHash {
+    let wire = serialise(MerkleProof::leaf_blake3(proof)).expect("proof serialises");
+    let (mut verify, parsed) =
+        proof_binary::deserialise::<Bincode, Blake3Bytes<Verify>>(&wire).expect("proof parses");
+    apply(&mut verify, ops);
+    PartialHash::from_foldable(parsed.into_present(), &verify)
+}
+
+/// A proof of `pre` that blinds the whole value. Legal - blinding is unrestricted, and it
+/// reconstructs the committed pre root - but it leaves a verifier holding nothing except what it
+/// replays itself.
+fn all_blind(pre: &[u8]) -> Blake3Proof {
+    Blake3Proof {
+        total_len: pre.len(),
+        data: ProofTree::Blind(*blake3::hash(pre).as_bytes()),
+    }
+}
+
+/// A blind coarser than the honest prover would emit must not let a write disappear.
+///
+/// The verifier holds only the bytes the replay wrote, so it can neither recompute the span's
+/// chaining value nor keep the committed one, which stands for bytes the write replaced. The
+/// only sound answer is to reject. Answering with the pre-transition root instead reports the
+/// transition as having made no change.
+#[test]
+#[ignore = "the verifier keeps the stale chaining value and reports the pre root; fixed in the next commit"]
+fn a_coarse_blind_cannot_hide_a_write() {
+    let pre = filled(8 * CHUNK_LEN);
+    let pre_root = hash_value(&pre);
+    let proof = all_blind(&pre);
+    assert_eq!(
+        verify_root(&proof).unwrap(),
+        pre_root,
+        "the coarse proof must still prove the pre value, or it proves nothing about this attack"
+    );
+
+    let folded = fold_hand_made(proof, &[Op::Write(10, filled(16))]);
+    assert_eq!(
+        folded,
+        PartialHash::InvalidProof,
+        "a coarse blind hid a write: the verifier answered {folded:?}"
+    );
+}
+
+/// The same on the reshape path, where the recompute fails for want of the prefix rather than
+/// keeping a stale chaining value - and the failure is currently reported as `Previous`, which
+/// for this leaf resolves to the pre-transition value hash.
+#[test]
+#[ignore = "the verifier reports the pre root for a reshape it cannot recompute; fixed in the next commit"]
+fn a_coarse_blind_cannot_hide_a_shrink() {
+    let pre = filled(8 * CHUNK_LEN);
+    let pre_root = hash_value(&pre);
+    let proof = all_blind(&pre);
+    assert_eq!(verify_root(&proof).unwrap(), pre_root);
+
+    let folded = fold_hand_made(proof, &[Op::Resize(4 * CHUNK_LEN)]);
+    assert_eq!(
+        folded,
+        PartialHash::InvalidProof,
+        "a coarse blind hid a shrink: the verifier answered {folded:?}"
+    );
 }
