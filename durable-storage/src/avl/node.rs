@@ -998,16 +998,16 @@ where
         let tree_hash = Tree::<Hash>::present_hash(*self.hash());
         let children = [repr.left, repr.right];
         let bytes = serialise(repr)?;
-        store.node_set(tree_hash, bytes)?;
 
-        // Recorded alongside the body, so that what refers to a node is known from the node's own
-        // side and its liveness can be decided without traversing every root. An empty tree is
+        // The edges go down with the body, so that what refers to a node is known from the node's
+        // own side and its liveness can be decided without traversing every root. An empty tree is
         // never stored, so there is nothing to point at.
-        for child in children {
-            if child != Tree::<Hash>::empty_hash() {
-                store.edge_set(child, tree_hash)?;
-            }
-        }
+        let empty = Tree::<Hash>::empty_hash();
+        store.node_set(
+            tree_hash,
+            bytes,
+            children.into_iter().filter(|child| *child != empty),
+        )?;
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {

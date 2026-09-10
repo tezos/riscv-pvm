@@ -14,6 +14,7 @@ use std::sync::RwLock;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use octez_riscv_data::hash::Hash;
 
 use super::ReadableKeyValueStore;
 use super::StoreId;
@@ -150,30 +151,23 @@ impl WriteableKeyValueStore for InMemoryKeyValueStore {
         self.try_clone()
     }
 
+    /// Stores the body, and discards the edges.
+    ///
+    /// Edges exist so that node bodies can be collected from a store that outlives the states
+    /// written to it. Nothing collects from an in-memory store - a commit here is a copy, and the
+    /// whole thing goes when the process does - so recording them would cost memory proportional to
+    /// the tree and buy nothing.
     fn node_set(
         &self,
         key: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
+        _children: impl IntoIterator<Item = Hash>,
     ) -> Result<(), OperationalError> {
         self.blob_set(key, data)
     }
 
     fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
         self.blob_delete(key)
-    }
-
-    /// Discards the edge.
-    ///
-    /// Edges exist so that node bodies can be collected from a store that outlives the states
-    /// written to it. Nothing collects from an in-memory store - a commit here is a copy, and the
-    /// whole thing goes when the process does - so recording them would cost memory proportional to
-    /// the tree and buy nothing.
-    fn edge_set(
-        &self,
-        _child: impl AsRef<[u8]>,
-        _parent: impl AsRef<[u8]>,
-    ) -> Result<(), OperationalError> {
-        Ok(())
     }
 
     fn blob_set(

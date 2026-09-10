@@ -35,6 +35,7 @@ use std::sync::Arc;
 
 use bincode::BorrowDecode;
 use bincode::Encode;
+use octez_riscv_data::hash::Hash;
 use rocksdb::ColumnFamilyDescriptor;
 use rocksdb::MergeOperands;
 use rocksdb::checkpoint::Checkpoint;
@@ -633,20 +634,13 @@ impl WriteableKeyValueStore for PersistenceLayer {
         &self,
         key: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
+        children: impl IntoIterator<Item = Hash>,
     ) -> Result<(), OperationalError> {
-        self.merkle.set(key.as_ref(), data.as_ref())
+        self.merkle.set_node(key.as_ref(), data.as_ref(), children)
     }
 
     fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
         self.merkle.delete(key.as_ref())
-    }
-
-    fn edge_set(
-        &self,
-        child: impl AsRef<[u8]>,
-        parent: impl AsRef<[u8]>,
-    ) -> Result<(), OperationalError> {
-        self.merkle.set_edge(child.as_ref(), parent.as_ref())
     }
 
     fn blob_set(
