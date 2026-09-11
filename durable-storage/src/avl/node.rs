@@ -996,8 +996,18 @@ where
         // lookup instead of first reading a tree->node pointer. The hashes themselves are
         // unchanged, so commitments and proofs are unaffected.
         let tree_hash = Tree::<Hash>::present_hash(*self.hash());
+        let children = [repr.left, repr.right];
         let bytes = serialise(repr)?;
-        store.blob_set(tree_hash, bytes)?;
+
+        // The edges go down with the body, so that what refers to a node is known from the node's
+        // own side and its liveness can be decided without traversing every root. An empty tree is
+        // never stored, so there is nothing to point at.
+        let empty = Tree::<Hash>::empty_hash();
+        store.node_set(
+            tree_hash,
+            bytes,
+            children.into_iter().filter(|child| *child != empty),
+        )?;
 
         // Are we in charge of writing the value data to the KV store?
         if options.node_data() {
@@ -1040,7 +1050,7 @@ pub(crate) fn walk_stored_tree(
         }
 
         let bytes = store
-            .blob_get(hash)
+            .node_get(hash)
             .map_err(|error| OperationalError::CommitDataMissing {
                 root: hash,
                 source: Box::new(error),
@@ -1068,7 +1078,7 @@ impl<TreeId: Loadable, DataId: DataLoadable> Loadable for Node<TreeId, DataId, N
         } = {
             let bytes =
                 store
-                    .blob_get(id)
+                    .node_get(id)
                     .map_err(|error| OperationalError::CommitDataMissing {
                         root: id,
                         source: Box::new(error),

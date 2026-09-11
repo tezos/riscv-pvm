@@ -14,6 +14,7 @@ use std::sync::RwLock;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use octez_riscv_data::hash::Hash;
 
 use super::ReadableKeyValueStore;
 use super::StoreId;
@@ -105,6 +106,15 @@ impl ReadableKeyValueStore for InMemoryKeyValueStore {
         self.store_id
     }
 
+    /// Reads a node from the same map as [`InMemoryKeyValueStore::blob_get`].
+    ///
+    /// Unlike the persistent backend, nothing is shared between stores here: a copy is a copy, and
+    /// nodes live in the store that wrote them. Nothing needs the sharing the persistent backend
+    /// gets from a repository-wide store, since an in-memory commit is a copy either way.
+    fn node_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
+        self.blob_get(key)
+    }
+
     fn blob_get(&self, key: impl AsRef<[u8]>) -> Result<impl AsRef<[u8]>, Error> {
         let blob_store = self
             .blobs
@@ -139,6 +149,25 @@ impl WriteableKeyValueStore for InMemoryKeyValueStore {
 
     fn try_clone(&self, _repo: &Self::Repo) -> Result<Self, OperationalError> {
         self.try_clone()
+    }
+
+    /// Stores the body, and discards the edges.
+    ///
+    /// Edges exist so that node bodies can be collected from a store that outlives the states
+    /// written to it. Nothing collects from an in-memory store - a commit here is a copy, and the
+    /// whole thing goes when the process does - so recording them would cost memory proportional to
+    /// the tree and buy nothing.
+    fn node_set(
+        &self,
+        key: impl AsRef<[u8]>,
+        data: impl AsRef<[u8]>,
+        _children: impl IntoIterator<Item = Hash>,
+    ) -> Result<(), OperationalError> {
+        self.blob_set(key, data)
+    }
+
+    fn node_delete(&self, key: impl AsRef<[u8]>) -> Result<(), OperationalError> {
+        self.blob_delete(key)
     }
 
     fn blob_set(
@@ -311,6 +340,8 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
     }
 
     fn checkout_from_path(
+        // Nodes live in the store itself, so there is nothing to reach through the repo
+        _repo: &Self::Repo,
         source_path: &std::path::Path,
         // The in-memory store keeps no working copy on disk
         _working_path: tempfile::TempDir,
@@ -383,6 +414,7 @@ mod tests {
     // `InMemoryKeyValueStore`, which are themselves only used in tests
     #[test]
     fn test_commit_to_path_checkout_roundtrip() {
+        let repo = InMemoryRepo::default();
         let store = InMemoryKeyValueStore::init();
 
         store
@@ -411,8 +443,9 @@ mod tests {
 
         let working_path =
             tempfile::TempDir::new().expect("Should be able to create a working dir");
-        let restored = InMemoryKeyValueStore::checkout_from_path(commit_dir.path(), working_path)
-            .expect("Should be able to checkout from a path");
+        let restored =
+            InMemoryKeyValueStore::checkout_from_path(&repo, commit_dir.path(), working_path)
+                .expect("Should be able to checkout from a path");
 
         assert_eq!(
             *store.blobs.read().expect("Lock should not be poisoned"),

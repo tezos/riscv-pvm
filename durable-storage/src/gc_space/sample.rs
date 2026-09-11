@@ -17,10 +17,10 @@ use crate::persistence_layer::measurement::SstFile;
 /// Byte totals for one committed database.
 #[derive(Debug, Default, Clone, Copy, Serialize)]
 pub struct BlobBreakdown {
-    /// Entries in the blob column family, live and dead together.
+    /// Entries in the Merkle store, live and dead together.
     pub entries: u64,
 
-    /// Bytes stored in the blob column family, live and dead together.
+    /// Bytes stored in the Merkle store, live and dead together.
     pub stored_bytes: u64,
 
     /// Distinct node bodies reachable from the committed root.
@@ -28,6 +28,12 @@ pub struct BlobBreakdown {
 
     /// Bytes of the node bodies reachable from the committed root, including their keys.
     pub live_bytes: u64,
+
+    /// Reverse edges recorded between nodes.
+    pub edge_entries: u64,
+
+    /// Bytes those edges occupy, keys included.
+    pub edge_bytes: u64,
 }
 
 impl BlobBreakdown {
@@ -36,21 +42,13 @@ impl BlobBreakdown {
         self.stored_bytes.saturating_sub(self.live_bytes)
     }
 
-    /// Fraction of the blob column family that is dead, between 0 and 1.
+    /// Fraction of the Merkle store that is dead, between 0 and 1.
     pub fn dead_fraction(&self) -> f64 {
         if self.stored_bytes == 0 {
             return 0.0;
         }
 
         self.dead_bytes() as f64 / self.stored_bytes as f64
-    }
-
-    /// Fold another database's totals into these.
-    pub(super) fn add(&mut self, other: &Self) {
-        self.entries += other.entries;
-        self.stored_bytes += other.stored_bytes;
-        self.live_entries += other.live_entries;
-        self.live_bytes += other.live_bytes;
     }
 }
 
