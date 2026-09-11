@@ -97,7 +97,7 @@ fn single_key_counterfeit<KV: BackgroundWriteableKeyValueStore>(
     sort_nodes(key, nodes);
 
     for (other_key, (hash, v)) in nodes {
-        let mut data = octez_riscv_data::components::bytes::Bytes::new(v.len());
+        let mut data = octez_riscv_data::components::blake3_bytes::Blake3Bytes::new(v.len());
         data.write(0, v);
         let (left, right) = if key > other_key {
             (LazyTreeId::from(*hash), LazyTreeId::from(tree))
@@ -141,7 +141,6 @@ mod tests {
     use crate::storage::in_memory::InMemoryRepo;
     use crate::test_helpers::proof_size::BALANCE_FACTOR_LEAF;
     use crate::test_helpers::proof_size::BLIND_LEAF;
-    use crate::test_helpers::proof_size::LEN_LEAF;
     use crate::test_helpers::proof_size::TAG_BYTES;
     use crate::test_helpers::proof_size::TREE_WRAP;
     use crate::test_helpers::proof_size::avl_path_node;
@@ -189,9 +188,12 @@ mod tests {
 
     /// The target node's value, opened by the read rather than blinded.
     ///
-    /// This is `proof_size::value_open` for an empty value: no pages are touched, so the page
-    /// tree contributes nothing and the sum falls back on its [`BLIND_LEAF`] floor.
-    const EMPTY_VALUE_OPEN: usize = TAG_BYTES + LEN_LEAF + BLIND_LEAF;
+    /// The BLAKE3 value leaf is a leaf, not a node: its tag is followed by the `u64` `total_len`
+    /// that commits the length, and then by the data tree - here a single blind, since the read
+    /// touches no bytes of an empty value. (The page-tree `Bytes` this replaced instead folded as a
+    /// *node* of a length leaf and a page tree, one byte more: `TAG_BYTES + LEN_LEAF + BLIND_LEAF`,
+    /// a tag for the length leaf that the committed `total_len` does not need.)
+    const EMPTY_VALUE_OPEN: usize = TAG_BYTES + size_of::<u64>() + BLIND_LEAF;
 
     /// The length of the part of the proof which is present regardless of the depth of the tree:
     /// the target node, its opened value, and the final state hash that the serialised [`Proof`]

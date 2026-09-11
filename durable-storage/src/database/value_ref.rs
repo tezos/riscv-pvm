@@ -38,7 +38,7 @@ impl<T: AsRef<[u8]>> ValueRef for AsRefValueRef<T> {
     }
 }
 
-impl ValueRef for octez_riscv_data::components::bytes::Bytes<Normal> {
+impl ValueRef for octez_riscv_data::components::blake3_bytes::Blake3Bytes<Normal> {
     fn len(&self) -> usize {
         self.len()
     }
