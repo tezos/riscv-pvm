@@ -94,7 +94,7 @@ space-metrics-reference: build-gc-space
 space-metrics-long: build-gc-space
 	@cargo run --release --features rocksdb,unstable-test-utils --bin gc_space -- \
 		--databases 1 --keys 250000 --commits 30 --modified-keys 2500 \
-		--sample-every 1 --json-out $(SPACE_SAMPLES) --simulate-dir-gc
+		--sample-every 1 --json-out $(SPACE_SAMPLES) --collect
 	@cargo run -p bench-metrics -- --shape long $(MARKDOWN) space $(SPACE_SAMPLES)
 
 run-registry-long-test-stable:
