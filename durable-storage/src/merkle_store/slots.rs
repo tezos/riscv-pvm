@@ -303,20 +303,36 @@ fn reap_slot(slots_dir: &Path, slot: SlotId) -> Result<bool, OperationalError> {
         // the same repository finds. Not counted: the caller reads the count as how many slots
         // this round released, and two reapers each claiming the same one double-counts the disk
         // they think came back.
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // The lease file goes with it: nothing lists a slot by its lease, so this slot is
+            // never listed or reaped again and the file would sit for good in the directory it was
+            // there to help empty.
+            remove_lease_file(slots_dir, slot)?;
+            return Ok(false);
+        }
         Err(error) => return Err(OperationalError::DirRemovalFailed { path, error }),
     }
 
     // The lock is on this file, so it is unlinked last and while still held. A reader that opened
     // it beforehand is granted its lease once this one goes, and finds the slot gone by the check
     // it makes under the lock.
+    remove_lease_file(slots_dir, slot)?;
+
+    Ok(true)
+}
+
+/// Remove the file `slot`'s lease is taken on, taking it having gone already for done.
+///
+/// Only for the holder of its exclusive lock, which is what keeps a reader from being granted a
+/// lease on a file about to be unlinked.
+fn remove_lease_file(slots_dir: &Path, slot: SlotId) -> Result<(), OperationalError> {
     if let Err(error) = fs::remove_file(lease_path(slots_dir, slot))
         && error.kind() != std::io::ErrorKind::NotFound
     {
         return Err(OperationalError::FileWriteFailed { error });
     }
 
-    Ok(true)
+    Ok(())
 }
 
 /// Put the contents of `slot` back where the live store is opened from.
@@ -603,6 +619,34 @@ mod tests {
             lease_slot(&slots_dir, 7),
             Err(OperationalError::CommitNotFound)
         ));
+    }
+
+    // A slot that has gone by the time it is reaped - what a second process reaping the same
+    // repository finds - leaves no lease file behind, since nothing would ever reap it again.
+    #[test]
+    fn reaping_a_slot_already_gone_leaves_no_lease_file() {
+        let tmp = TestableTmpdir::new();
+        let (store, slots_dir) = fixture(&tmp);
+
+        store.take_slot(&slots_dir).expect("taking should succeed");
+        store.take_slot(&slots_dir).expect("taking should succeed");
+        assert!(
+            lease_path(&slots_dir, 1).exists(),
+            "the slot should have one"
+        );
+
+        // What the winner of the race leaves behind, having listed slot 1 as well.
+        fs::remove_dir_all(slot_path(&slots_dir, 1)).expect("removing should succeed");
+        fs::remove_file(lease_path(&slots_dir, 1)).expect("removing should succeed");
+
+        assert!(
+            !reap_slot(&slots_dir, 1).expect("reaping should succeed"),
+            "a slot someone else released is not counted twice"
+        );
+        assert!(
+            !lease_path(&slots_dir, 1).exists(),
+            "the lease file of a slot that has gone should go with it"
+        );
     }
 
     // A reader that cannot write to the repository can still take a lease, since the lease file is
