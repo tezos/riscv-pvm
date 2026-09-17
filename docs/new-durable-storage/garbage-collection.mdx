@@ -227,10 +227,8 @@ Leases are `flock`s, so the kernel releases one held by a process that dies and 
 The file a lease is taken on is created with the slot, so a reader only opens it and needs no write access to the repository.
 Several readers may hold the same slot at once; only reaping needs it to itself, and it never waits for a reader.
 
-<Warning>
-A lease is taken on a file beside the slot, not inside it.
-A reader that takes one just as a reap removes the slot can therefore be granted a lease on a slot that is no longer there, so opening it can still fail.
-</Warning>
+A lease is taken on a file beside the slot rather than inside it, so that taking one does not write into a directory whose whole point is being an untouched image.
+The slot is checked once the lease is held, not before, so a lease is never granted on a slot that has already gone: a reap removes the slot while holding the same lock exclusively.
 
 ## Planned mechanism
 
