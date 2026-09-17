@@ -48,6 +48,10 @@ const PENDING_PREFIX: &str = ".pending-";
 /// Beside the slot rather than inside it, so that taking a lease does not write into a directory
 /// whose whole point is being an untouched image, and so the lock survives the slot's removal long
 /// enough for the remover to hold it.
+///
+/// Created with the slot, so that a reader only ever opens it: `flock` asks no more than a
+/// descriptor, and a reader that cannot write to the repository - one running as another user, or
+/// reading a snapshot mounted read-only - must still be able to take a lease.
 const LEASE_SUFFIX: &str = ".lease";
 
 /// Which full commit a slot holds, counting from one.
@@ -86,7 +90,14 @@ pub fn lease_slot(slots_dir: &Path, slot: SlotId) -> Result<SlotLease, Operation
         return Err(OperationalError::CommitNotFound);
     }
 
-    let file = lease_file(slots_dir, slot)?;
+    let file = match open_lease_file(slots_dir, slot) {
+        Ok(file) => file,
+        // No lease file means no slot: taking one is what creates it.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(OperationalError::CommitNotFound);
+        }
+        Err(error) => return Err(OperationalError::FileReadFailed { error }),
+    };
 
     // Shared: readers do not exclude each other, only the reaper.
     if !try_flock(&file, libc::LOCK_SH)? {
@@ -97,7 +108,10 @@ pub fn lease_slot(slots_dir: &Path, slot: SlotId) -> Result<SlotLease, Operation
 }
 
 /// Open, creating if needed, the file a slot's lease is taken on.
-fn lease_file(slots_dir: &Path, slot: SlotId) -> Result<fs::File, OperationalError> {
+///
+/// For the processes that write to the repository: taking a slot, and reaping one. A reader uses
+/// [`open_lease_file`] instead.
+fn create_lease_file(slots_dir: &Path, slot: SlotId) -> Result<fs::File, OperationalError> {
     let path = lease_path(slots_dir, slot);
 
     fs::OpenOptions::new()
@@ -107,6 +121,11 @@ fn lease_file(slots_dir: &Path, slot: SlotId) -> Result<fs::File, OperationalErr
         .truncate(false)
         .open(&path)
         .map_err(|error| OperationalError::TempCreationFailed { path, error })
+}
+
+/// Open the file a slot's lease is taken on, read-only and without creating it.
+fn open_lease_file(slots_dir: &Path, slot: SlotId) -> Result<fs::File, std::io::Error> {
+    fs::File::open(lease_path(slots_dir, slot))
 }
 
 /// Where a slot's lease is taken.
@@ -163,6 +182,11 @@ impl MerkleStore {
         }
 
         self.checkpoint(&pending)?;
+
+        // Created before the rename, so that a slot is never visible without the file its lease is
+        // taken on. An attempt that fails leaves it behind for the next one, which reuses the
+        // number and so the file.
+        drop(create_lease_file(slots_dir, slot)?);
 
         // The target name is fresh, so this cannot hit an existing directory and is atomic.
         fs::rename(&pending, slot_path(slots_dir, slot))
@@ -259,7 +283,7 @@ pub fn reap_slots(slots_dir: &Path, keep: usize) -> Result<usize, OperationalErr
 
 /// Remove one slot if nothing is reading it, reporting whether it went.
 fn reap_slot(slots_dir: &Path, slot: SlotId) -> Result<bool, OperationalError> {
-    let lease = lease_file(slots_dir, slot)?;
+    let lease = create_lease_file(slots_dir, slot)?;
 
     // Exclusive, and held for the removal: a reader taking a shared lease meanwhile would find the
     // slot half-removed otherwise.
@@ -576,6 +600,31 @@ mod tests {
             lease_slot(&slots_dir, 7),
             Err(OperationalError::CommitNotFound)
         ));
+    }
+
+    // A reader that cannot write to the repository can still take a lease, since the lease file is
+    // created with the slot rather than by the reader.
+    #[test]
+    fn a_reader_without_write_access_can_take_a_lease() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TestableTmpdir::new();
+        let (store, slots_dir) = fixture(&tmp);
+
+        store.take_slot(&slots_dir).expect("taking should succeed");
+
+        let original = fs::metadata(&slots_dir)
+            .expect("reading the permissions should succeed")
+            .permissions();
+        fs::set_permissions(&slots_dir, fs::Permissions::from_mode(0o500))
+            .expect("dropping write access should succeed");
+
+        let lease = lease_slot(&slots_dir, 1);
+
+        fs::set_permissions(&slots_dir, original)
+            .expect("restoring the permissions should succeed");
+
+        lease.expect("leasing should succeed without write access");
     }
 
     // A lease file is not mistaken for a slot.
