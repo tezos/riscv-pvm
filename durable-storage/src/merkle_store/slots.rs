@@ -86,10 +86,6 @@ impl SlotLease {
 /// Fails with [`OperationalError::CommitNotFound`] if there is no such slot. Several readers may
 /// hold a lease on the same slot at once; only reaping needs it to itself.
 pub fn lease_slot(slots_dir: &Path, slot: SlotId) -> Result<SlotLease, OperationalError> {
-    if !slot_path(slots_dir, slot).exists() {
-        return Err(OperationalError::CommitNotFound);
-    }
-
     let file = match open_lease_file(slots_dir, slot) {
         Ok(file) => file,
         // No lease file means no slot: taking one is what creates it.
@@ -101,6 +97,13 @@ pub fn lease_slot(slots_dir: &Path, slot: SlotId) -> Result<SlotLease, Operation
 
     // Shared: readers do not exclude each other, only the reaper.
     if !try_flock(&file, libc::LOCK_SH)? {
+        return Err(OperationalError::CommitNotFound);
+    }
+
+    // Checked under the lock, not before it: a reap removes the slot while holding the lock
+    // exclusively, so a slot that is there while this lease is held cannot go until it is
+    // released. Checking first would leave the reader with a lease on a slot already gone.
+    if !slot_path(slots_dir, slot).exists() {
         return Err(OperationalError::CommitNotFound);
     }
 
@@ -304,9 +307,9 @@ fn reap_slot(slots_dir: &Path, slot: SlotId) -> Result<bool, OperationalError> {
         Err(error) => return Err(OperationalError::DirRemovalFailed { path, error }),
     }
 
-    // The lock is on this file, so it is unlinked last and while still held. A reader arriving
-    // afterwards creates a fresh one and is granted a lease on a slot that is no longer there,
-    // which is why taking a lease checks that the slot exists and reading it can still fail.
+    // The lock is on this file, so it is unlinked last and while still held. A reader that opened
+    // it beforehand is granted its lease once this one goes, and finds the slot gone by the check
+    // it makes under the lock.
     if let Err(error) = fs::remove_file(lease_path(slots_dir, slot))
         && error.kind() != std::io::ErrorKind::NotFound
     {
