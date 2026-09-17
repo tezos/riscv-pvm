@@ -30,6 +30,7 @@ use std::collections::HashSet;
 
 use octez_riscv_data::hash::Hash;
 
+use super::Suspend;
 use crate::avl::node::stored_children;
 use crate::errors::Error;
 use crate::errors::OperationalError;
@@ -48,6 +49,12 @@ pub struct SweptNodes {
 
     /// Reverse edges removed with them.
     pub edges: usize,
+
+    /// Whether the sweep stopped early because it was asked to.
+    ///
+    /// What it deleted is deleted; the rest is left for the next round, which starts again from
+    /// what is present.
+    pub suspended: bool,
 }
 
 /// Delete every node in `store` that no root in `roots` still reaches.
@@ -59,6 +66,7 @@ pub fn sweep(
     store: &MerkleStore,
     roots: &HashMap<Hash, Seq>,
     floor: Seq,
+    suspend: &Suspend,
 ) -> Result<SweptNodes, OperationalError> {
     let mut liveness = Liveness {
         store,
@@ -75,15 +83,27 @@ pub fn sweep(
     })?;
 
     let mut swept = SweptNodes::default();
-
     // Which nodes have gone already, so that an edge between two dead nodes is counted once. It is
     // reachable from both ends: as a parent edge when its child goes, and as a child edge when its
     // parent goes. Whichever happens first deletes it, so the second end must not count it again.
     let mut removed: HashSet<Vec<u8>> = HashSet::new();
 
     for (key, len) in dead {
+        // Checked per node rather than per batch: deciding one is a walk of bounded length, so this
+        // is as fine-grained as stopping needs to be.
+        if suspend.requested() {
+            swept.suspended = true;
+            return Ok(swept);
+        }
+
         if liveness.of(&key)?.is_some() {
             continue;
+        }
+
+        // Noted before the first removal, so that a crash part-way still leaves a store that knows
+        // an absent node may be one it collected.
+        if swept.nodes == 0 {
+            store.note_collected()?;
         }
 
         swept.edges += remove_node(store, &key, &removed)?;
@@ -121,9 +141,13 @@ fn remove_node(
                 }
             }
         }
-        // Absent, which is what a repeated round finds: reading a node is the only invalid-argument
-        // this can raise.
+        // Absent, which is what a repeated round finds: reading a node is the only
+        // invalid-argument this can raise.
         Err(Error::InvalidArgument(_)) => {}
+        // Also absent. Once this store has collected, an absent node is reported as collected
+        // rather than as missing - which is right for a reader, but here the sweep is the thing
+        // that collected it, and finding its own earlier work already done is ordinary.
+        Err(Error::Operational(OperationalError::NodeCollected { .. })) => {}
         Err(Error::Operational(error)) => return Err(error),
     }
 
