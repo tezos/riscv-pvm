@@ -321,6 +321,9 @@ fn generate_proof() {
                                 prop_assert!(read_leaves.contains(&idx) || written_leaves.contains(&idx));
                             }
                         },
+                        MerkleProofLeaf::Blake3(_) => {
+                            unreachable!("DataSpace proofs do not contain BLAKE3 within-value leaves")
+                        }
                     }
                 }
             }

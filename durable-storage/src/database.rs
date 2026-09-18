@@ -563,7 +563,7 @@ impl DatabaseMode for Verify {
     ) -> Result<impl ValueRef, Error> {
         // Wraps the return type of [`MerkleLayer::get`] to allow returning the data as an
         // [`impl ValueRef`] without allocating.
-        struct Wrapper<'a>(&'a octez_riscv_data::components::bytes::Bytes<Verify>);
+        struct Wrapper<'a>(&'a octez_riscv_data::components::blake3_bytes::Blake3Bytes<Verify>);
 
         impl ValueRef for Wrapper<'_> {
             fn len(&self) -> usize {
@@ -640,7 +640,9 @@ impl DatabaseMode for Prove<'static> {
         // caller actually reads from the value, and only records the requested range.
         // `value_length` and `exists` only invoke `len`, which queries the length without
         // recording a byte-range read.
-        struct Wrapper<'a>(&'a octez_riscv_data::components::bytes::Bytes<Prove<'static>>);
+        struct Wrapper<'a>(
+            &'a octez_riscv_data::components::blake3_bytes::Blake3Bytes<Prove<'static>>,
+        );
 
         impl ValueRef for Wrapper<'_> {
             fn len(&self) -> usize {
