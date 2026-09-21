@@ -228,6 +228,38 @@ impl MerkleStore {
             })
     }
 
+    /// Delete the node body under `key`, the edges to `children`, and every edge into it.
+    ///
+    /// One batch rather than a delete apiece, the way [`MerkleStore::set_node`] writes them:
+    /// removing a node is one node's worth of records, and each one written on its own is a
+    /// journal append of its own. Reports how many edges into the node were removed.
+    pub fn delete_node(&self, key: &[u8], children: &[Hash]) -> Result<usize, OperationalError> {
+        self.writeable()?;
+
+        let parents = self.parents_of(key)?;
+
+        let mut batch = rocksdb::WriteBatch::default();
+        batch.delete(key);
+
+        for child in children {
+            batch.delete_cf(self.refs_cf(), edge_key(child.as_ref(), key));
+        }
+
+        for (parent, _) in &parents {
+            batch.delete_cf(self.refs_cf(), edge_key(key, parent));
+        }
+
+        self.db
+            .write(batch)
+            .map_err(|error| OperationalError::DeleteFailed {
+                column: MERKLE_CF.to_owned(),
+                key: key.to_owned(),
+                error,
+            })?;
+
+        Ok(parents.len())
+    }
+
     /// Whether this handle may write to the store.
     pub fn is_read_only(&self) -> bool {
         self.read_only
@@ -381,17 +413,6 @@ impl MerkleStore {
             })?;
 
             visit(&key, value.len());
-        }
-
-        Ok(())
-    }
-
-    /// Remove every edge whose child is `child`.
-    pub fn delete_edges_from(&self, child: &[u8]) -> Result<(), OperationalError> {
-        self.writeable()?;
-
-        for (parent, _) in self.parents_of(child)? {
-            self.delete_edge(child, &parent)?;
         }
 
         Ok(())
@@ -804,6 +825,44 @@ mod tests {
     }
 
     // Removing an edge that is already gone succeeds, for the same reason.
+    #[test]
+    fn deleting_a_node_removes_its_body_and_both_ends_of_its_edges() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+
+        let children = [Hash::from(digest(2)), Hash::from(digest(3))];
+        store
+            .set_node(&digest(1), b"body", children)
+            .expect("storing should succeed");
+        store
+            .set_edge(&digest(1), &digest(10))
+            .expect("setting the parent edge should succeed");
+
+        let parents = store
+            .delete_node(&digest(1), &children)
+            .expect("deleting should succeed");
+
+        assert_eq!(parents, 1, "the one edge into the node should be reported");
+        assert!(store.get(&digest(1)).is_err(), "the body should have gone");
+        assert!(
+            store
+                .parents_of(&digest(1))
+                .expect("reading should succeed")
+                .is_empty(),
+            "the edge into it should have gone"
+        );
+
+        for child in children {
+            assert!(
+                store
+                    .parents_of(child.as_ref())
+                    .expect("reading should succeed")
+                    .is_empty(),
+                "the edge to the child should have gone"
+            );
+        }
+    }
+
     #[test]
     fn deleting_an_edge_twice_succeeds() {
         let tmp = TestableTmpdir::new();
