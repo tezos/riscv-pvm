@@ -24,9 +24,12 @@
 //!
 //! The graph cannot contain a cycle: a node's hash is derived from its children's, so a node can
 //! never be its own ancestor.
+//!
+//! A round holds one decision per node in the store, so its peak is set by how much the store has
+//! grown rather than by the size of the live state - which is the shape of the store it is there
+//! to shrink. Decisions are keyed by the hash itself, not by a copy of it on the heap.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use octez_riscv_data::hash::Hash;
 
@@ -64,30 +67,29 @@ pub fn sweep(
         store,
         roots,
         floor,
-        known: HashMap::new(),
+        decided: HashMap::new(),
     };
 
     // Collected first, because deciding liveness reads edges and deleting rewrites them, and an
     // iterator is not the place to be doing either.
-    let mut dead = Vec::new();
+    let mut candidates = Vec::new();
     store.for_each_node(|key, len| {
-        dead.push((key.to_vec(), len));
+        // Anything of another length was not written by the Merkle layer, so it is nobody's node
+        // and nobody's root: left where it is rather than swept.
+        if let Some(key) = hash_of(key) {
+            candidates.push((key, len));
+        }
     })?;
 
     let mut swept = SweptNodes::default();
 
-    // Which nodes have gone already, so that an edge between two dead nodes is counted once. It is
-    // reachable from both ends: as a parent edge when its child goes, and as a child edge when its
-    // parent goes. Whichever happens first deletes it, so the second end must not count it again.
-    let mut removed: HashSet<Vec<u8>> = HashSet::new();
-
-    for (key, len) in dead {
-        if liveness.of(&key)?.is_some() {
+    for (key, len) in candidates {
+        if liveness.of(key)?.is_some() {
             continue;
         }
 
-        swept.edges += remove_node(store, &key, &removed)?;
-        removed.insert(key.clone());
+        swept.edges += remove_node(store, key, &liveness)?;
+        liveness.mark_swept(key);
         swept.nodes += 1;
         swept.bytes += len as u64 + Hash::DIGEST_SIZE as u64;
     }
@@ -102,9 +104,10 @@ pub fn sweep(
 /// dead, or the node would have been live through it.
 fn remove_node(
     store: &MerkleStore,
-    key: &[u8],
-    removed: &HashSet<Vec<u8>>,
+    key: Hash,
+    liveness: &Liveness,
 ) -> Result<usize, OperationalError> {
+    let key = key.as_ref();
     let mut edges = 0;
 
     // Read before deleting: the body is the only record of what this node referred to. A body that
@@ -116,7 +119,7 @@ fn remove_node(
             for child in stored_children(body.as_ref())? {
                 store.delete_edge(child.as_ref(), key)?;
 
-                if !removed.contains(child.as_ref()) {
+                if !liveness.was_swept(&child) {
                     edges += 1;
                 }
             }
@@ -137,11 +140,35 @@ fn remove_node(
 
 /// Read a store key back as the hash it is.
 ///
-/// Anything of another length was not written by the Merkle layer, so it is nobody's root.
+/// Anything of another length was not written by the Merkle layer, so it is nobody's node.
 fn hash_of(key: &[u8]) -> Option<Hash> {
     <[u8; Hash::DIGEST_SIZE]>::try_from(key)
         .ok()
         .map(Hash::from)
+}
+
+/// What a round has settled about a node.
+#[derive(Clone, Copy)]
+enum Decision {
+    /// Held by a retained root, which was last recorded at this position.
+    Held(Seq),
+
+    /// No retained root reaches it. Worth remembering as much as the other answer: its children
+    /// ask the same question next.
+    Dead,
+
+    /// Dead, and already deleted by this round.
+    Swept,
+}
+
+impl Decision {
+    /// The root holding the node, if one still does.
+    fn held_by(self) -> Option<Seq> {
+        match self {
+            Self::Held(seq) => Some(seq),
+            Self::Dead | Self::Swept => None,
+        }
+    }
 }
 
 /// Answers, and remembers, whether a node is still held by a retained root.
@@ -150,32 +177,42 @@ struct Liveness<'a> {
     roots: &'a HashMap<Hash, Seq>,
     floor: Seq,
 
-    /// What has already been decided. `None` records a node shown to be unreachable, which is worth
-    /// remembering as much as the other answer: its children ask the same question next.
-    known: HashMap<Vec<u8>, Option<Seq>>,
+    /// What has already been settled, one entry per node the round has reached.
+    decided: HashMap<Hash, Decision>,
 }
 
 impl Liveness<'_> {
     /// The most recent retained root holding the node under `key`, if any still does.
-    fn of(&mut self, key: &[u8]) -> Result<Option<Seq>, OperationalError> {
-        if let Some(known) = self.known.get(key) {
-            return Ok(*known);
+    fn of(&mut self, key: Hash) -> Result<Option<Seq>, OperationalError> {
+        if let Some(decided) = self.decided.get(&key) {
+            return Ok(decided.held_by());
         }
 
         let answer = self.compute(key)?;
-        self.known.insert(key.to_vec(), answer);
+        self.decided
+            .insert(key, answer.map_or(Decision::Dead, Decision::Held));
 
         Ok(answer)
     }
 
+    /// Whether this round has already deleted the node under `key`.
+    fn was_swept(&self, key: &Hash) -> bool {
+        matches!(self.decided.get(key), Some(Decision::Swept))
+    }
+
+    /// Record that the node under `key`, already decided dead, has been deleted.
+    fn mark_swept(&mut self, key: Hash) {
+        self.decided.insert(key, Decision::Swept);
+    }
+
     /// Work out the answer for `key`, without consulting what is already known about it.
-    fn compute(&mut self, key: &[u8]) -> Result<Option<Seq>, OperationalError> {
+    fn compute(&mut self, key: Hash) -> Result<Option<Seq>, OperationalError> {
         // A retained root holds itself.
-        if let Some(seq) = hash_of(key).and_then(|hash| self.roots.get(&hash)) {
+        if let Some(seq) = self.roots.get(&key) {
             return Ok(Some(*seq));
         }
 
-        let parents = self.store.parents_of(key)?;
+        let parents = self.store.parents_of(key.as_ref())?;
         let mut held_by = None;
 
         for (parent, stamp) in &parents {
@@ -183,6 +220,10 @@ impl Liveness<'_> {
             if stamp.holds_at(self.floor) {
                 return Ok(Some(self.floor));
             }
+
+            let Some(parent) = hash_of(parent) else {
+                continue;
+            };
 
             if let Some(seq) = self.of(parent)? {
                 held_by = Some(held_by.map_or(seq, |best: Seq| best.max(seq)));
@@ -194,8 +235,13 @@ impl Liveness<'_> {
         // keeps a stamp a proof rather than a guess.
         if let Some(seq) = held_by {
             for (parent, _) in &parents {
+                let Some(parent) = hash_of(parent) else {
+                    continue;
+                };
+
                 if self.of(parent)?.is_some() {
-                    self.store.stamp_edge(key, parent, Stamp::at(seq))?;
+                    self.store
+                        .stamp_edge(key.as_ref(), parent.as_ref(), Stamp::at(seq))?;
                 }
             }
         }
