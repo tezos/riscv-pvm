@@ -616,6 +616,34 @@ mod node_tests {
         }
     }
 
+    // A key of another length was not written by the Merkle layer, so the sweep leaves it where
+    // it is rather than taking it for a node.
+    #[test]
+    fn a_key_that_is_not_a_node_hash_is_left_alone() {
+        let mut fixture = Fixture::new();
+
+        fixture
+            .repo
+            .merkle_store()
+            .set(b"not a hash", b"body")
+            .expect("setting should succeed");
+
+        fixture.commit(&[b"a"], b"1");
+        let second = fixture.commit(&[b"a"], b"2");
+
+        collect_all(&fixture.repo, &second).expect("collection should succeed");
+
+        assert_eq!(
+            fixture
+                .repo
+                .merkle_store()
+                .get(b"not a hash")
+                .expect("the key should still be there")
+                .as_ref(),
+            b"body"
+        );
+    }
+
     // A target committed twice collects from the first of its positions, so a root recorded
     // between them is retained - and the sweep keeps its nodes, not only its commit.
     #[test]
