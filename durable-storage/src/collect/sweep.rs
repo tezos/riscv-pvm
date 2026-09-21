@@ -108,34 +108,27 @@ fn remove_node(
     liveness: &Liveness,
 ) -> Result<usize, OperationalError> {
     let key = key.as_ref();
-    let mut edges = 0;
 
     // Read before deleting: the body is the only record of what this node referred to. A body that
     // is already gone is what a repeated round finds, and is not an error - but a read that failed
     // for any other reason is, and must not be taken for an absent body: the edges into this
     // node's children would then never be removed, and nothing revisits it to find them.
-    match store.get(key) {
-        Ok(body) => {
-            for child in stored_children(body.as_ref())? {
-                store.delete_edge(child.as_ref(), key)?;
-
-                if !liveness.was_swept(&child) {
-                    edges += 1;
-                }
-            }
-        }
-        // Absent, which is what a repeated round finds: reading a node is the only invalid-argument
-        // this can raise.
-        Err(Error::InvalidArgument(_)) => {}
+    let children = match store.get(key) {
+        Ok(body) => stored_children(body.as_ref())?,
+        // Absent, which is what a repeated round finds: reading a node is the only
+        // invalid-argument this can raise.
+        Err(Error::InvalidArgument(_)) => Vec::new(),
         Err(Error::Operational(error)) => return Err(error),
-    }
+    };
 
-    edges += store.parents_of(key)?.len();
-    store.delete_edges_from(key)?;
+    // An edge between two dead nodes is reachable from both ends, so it is counted by whichever
+    // of them went first and not again by the second.
+    let counted = children
+        .iter()
+        .filter(|child| !liveness.was_swept(child))
+        .count();
 
-    store.delete(key)?;
-
-    Ok(edges)
+    Ok(counted + store.delete_node(key, &children)?)
 }
 
 /// Read a store key back as the hash it is.
