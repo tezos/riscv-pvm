@@ -36,6 +36,10 @@
 //!
 //! Collection must not run while the repository is being committed to, and two collections must
 //! not overlap. Neither is enforced here.
+//!
+//! A working copy checked out at a root older than the target is invalidated by the node sweep:
+//! its node bodies go, and a commit made from it afterwards records a root over bodies that are no
+//! longer there, since a node already written to the store is not written again.
 
 // The sweep works on the repository-wide Merkle store, which only exists with a rocksdb backend.
 #[cfg(rocksdb)]
@@ -46,8 +50,6 @@ use std::collections::HashSet;
 #[cfg(rocksdb)]
 pub use self::sweep::SweptNodes;
 use crate::commit::CommitId;
-#[cfg(rocksdb)]
-use crate::errors::GcArgumentError;
 use crate::errors::GcError;
 use crate::errors::OperationalError;
 use crate::journal;
@@ -131,28 +133,17 @@ pub fn collect_all(
 /// Delete the Merkle nodes no retained commit of `repo` still reaches.
 ///
 /// Reads the retained roots from the journal, so a round that has already pruned it sees exactly
-/// the commits that survived.
+/// the commits that survived. Retention is decided by [`journal::retained_positions`], the same
+/// way [`collect`] decides it, so the sweep cannot drop the nodes of a commit the round kept.
 #[cfg(rocksdb)]
 pub fn collect_nodes(repo: &DirectoryManager, target: &CommitId) -> Result<SweptNodes, GcError> {
-    let entries = repo.read_commit_journal()?;
-    let positions = journal::latest_positions(&entries);
-
-    let floor =
-        *positions
-            .get(target)
-            .ok_or_else(|| GcArgumentError::CollectionTargetNotRecorded {
-                target: target.hex_encode(),
-            })?;
+    let (floor, retained) = journal::retained_positions(&repo.read_commit_journal()?, target)?;
 
     // A database commit is reached by every registry commit naming it, so it is held until the most
     // recent of them goes. Taking the highest is what stops an older reference from deciding it.
     let mut roots = sweep::RetainedRoots::new();
 
-    for (root, seq) in positions {
-        if seq < floor {
-            continue;
-        }
-
+    for (root, seq) in retained {
         let databases = match registry::database_commits(repo, &root) {
             Ok(databases) => databases,
             Err(OperationalError::CommitNotFound) => continue,
@@ -201,6 +192,7 @@ mod tests {
     use octez_riscv_test_utils::TestableTmpdir;
 
     use super::*;
+    use crate::errors::GcArgumentError;
     use crate::key::Key;
     use crate::persistence_layer::PersistenceLayer;
     use crate::registry::Registry;
@@ -618,6 +610,45 @@ mod node_tests {
                     .expect("the database should exist")
                     .read_bytes(&key, 0, 32)
                     .expect("the shared subtree should have survived")
+                    .as_ref(),
+                expected
+            );
+        }
+    }
+
+    // A target committed twice collects from the first of its positions, so a root recorded
+    // between them is retained - and the sweep keeps its nodes, not only its commit.
+    #[test]
+    fn a_root_between_two_positions_of_the_target_keeps_its_nodes() {
+        let mut fixture = Fixture::new();
+
+        let target = fixture.commit(&[b"a", b"b", b"c"], b"1");
+        let between = fixture.commit(&[b"a"], b"2");
+        let again = fixture.commit(&[b"a"], b"1");
+
+        assert_eq!(
+            target, again,
+            "recommitting the same state should reach the same root"
+        );
+
+        collect_all(&fixture.repo, &target).expect("collection should succeed");
+
+        let restored =
+            Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), between)
+                .expect("the root between the two positions should check out");
+
+        for (key, expected) in [
+            (b"a".as_slice(), b"2".as_slice()),
+            (b"b", b"1"),
+            (b"c", b"1"),
+        ] {
+            let key = Key::new(key).expect("the key should be valid");
+            assert_eq!(
+                restored
+                    .database(0)
+                    .expect("the database should exist")
+                    .read_bytes(&key, 0, 32)
+                    .expect("the retained root's nodes should have survived")
                     .as_ref(),
                 expected
             );

@@ -108,7 +108,7 @@ pub(crate) fn decode_entries(bytes: &[u8]) -> Vec<JournalEntry> {
 ///
 /// A root committed more than once keeps its highest position, so re-committing a state can only
 /// ever extend how long it is retained.
-pub fn latest_positions(entries: &[JournalEntry]) -> HashMap<CommitId, Seq> {
+fn latest_positions(entries: &[JournalEntry]) -> HashMap<CommitId, Seq> {
     let mut latest = HashMap::with_capacity(entries.len());
     for entry in entries {
         latest
@@ -119,7 +119,7 @@ pub fn latest_positions(entries: &[JournalEntry]) -> HashMap<CommitId, Seq> {
     latest
 }
 
-/// The roots to keep when collecting at `target`.
+/// The floor to collect at for `target`, and the position each retained root was last recorded at.
 ///
 /// Every root recorded at or after `target` is retained, `target` itself included. The two
 /// positions this compares are chosen in opposite directions, and both towards keeping a state:
@@ -128,23 +128,36 @@ pub fn latest_positions(entries: &[JournalEntry]) -> HashMap<CommitId, Seq> {
 /// reached rather than the last, so the states committed between its positions - which were
 /// committed after the caller's target and are none of the round's business - are not dropped.
 ///
+/// Every part of a round reads retention from here, so the commits it keeps and the nodes it
+/// sweeps are decided against the same floor.
+///
 /// Fails with [`GcArgumentError::CollectionTargetNotRecorded`] if the journal holds no entry for
 /// `target`, since without one there is no floor to compare against and collecting would drop
 /// everything.
-pub fn roots_to_retain(
+pub fn retained_positions(
     entries: &[JournalEntry],
     target: &CommitId,
-) -> Result<HashSet<CommitId>, GcArgumentError> {
+) -> Result<(Seq, HashMap<CommitId, Seq>), GcArgumentError> {
     let floor = earliest_position(entries, target).ok_or_else(|| {
         GcArgumentError::CollectionTargetNotRecorded {
             target: target.hex_encode(),
         }
     })?;
 
-    Ok(latest_positions(entries)
+    let retained = latest_positions(entries)
         .into_iter()
-        .filter_map(|(root, seq)| (seq >= floor).then_some(root))
-        .collect())
+        .filter(|(_, seq)| *seq >= floor)
+        .collect();
+
+    Ok((floor, retained))
+}
+
+/// The roots to keep when collecting at `target`, as [`retained_positions`] decides them.
+pub fn roots_to_retain(
+    entries: &[JournalEntry],
+    target: &CommitId,
+) -> Result<HashSet<CommitId>, GcArgumentError> {
+    Ok(retained_positions(entries, target)?.1.into_keys().collect())
 }
 
 /// The position `root` was first recorded at, if the journal holds it at all.
@@ -246,6 +259,22 @@ mod tests {
         assert!(
             !retained.contains(&root(9)),
             "a root recorded before every position of the target should be dropped"
+        );
+    }
+
+    // The floor a round collects at is the target's earliest position, while the roots it keeps
+    // are judged by their latest - the asymmetry every part of a round shares.
+    #[test]
+    fn retention_floors_at_the_targets_earliest_position() {
+        let entries = vec![entry(0, 9), entry(1, 1), entry(2, 2), entry(3, 1)];
+
+        let (floor, retained) =
+            retained_positions(&entries, &root(1)).expect("the target is recorded");
+
+        assert_eq!(floor, Seq(1));
+        assert_eq!(
+            retained,
+            HashMap::from([(root(1), Seq(3)), (root(2), Seq(2))])
         );
     }
 
