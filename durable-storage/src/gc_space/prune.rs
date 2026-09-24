@@ -34,12 +34,12 @@ pub(super) fn prune_unreachable(
         ..PruneOutcome::default()
     };
 
-    let (collected, swept) = collect_all(repo, target, &Suspend::new()).context("collecting")?;
-    outcome.databases_removed = collected.database_commits as u64;
-    outcome.registries_removed = collected.registry_commits as u64;
-    outcome.nodes_removed = swept.nodes as u64;
-    outcome.node_bytes_removed = swept.bytes;
-    outcome.edges_removed = swept.edges as u64;
+    let round = collect_all(repo, target, &Suspend::new()).context("collecting")?;
+    outcome.databases_removed = round.collected.database_commits as u64;
+    outcome.registries_removed = round.collected.registry_commits as u64;
+    outcome.nodes_removed = round.swept.nodes as u64;
+    outcome.node_bytes_removed = round.swept.bytes;
+    outcome.edges_removed = round.swept.edges as u64;
 
     // A delete only marks the key; the space comes back when compaction rewrites the files without
     // it. Forcing that here is what makes the freed figure below the real one rather than a promise.

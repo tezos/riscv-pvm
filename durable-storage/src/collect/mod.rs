@@ -98,10 +98,42 @@ pub struct Collected {
     /// Database commits that were removed.
     pub database_commits: usize,
 
-    /// Whether the round stopped early because it was asked to.
+    /// Whether this half stopped early because it was asked to.
     ///
-    /// What it did remove is still removed; the rest is left for the next round.
+    /// What it did remove is still removed; the rest is left for the next round. Says nothing
+    /// about the node sweep, which runs after this and reports itself: whether a whole round
+    /// finished is [`Round::suspended`].
     pub suspended: bool,
+}
+
+/// What one round of collection did, across both halves.
+#[cfg(rocksdb)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub struct Round {
+    /// What the commit half removed.
+    pub collected: Collected,
+
+    /// What the node sweep removed.
+    pub swept: SweptNodes,
+
+    /// Whether either half stopped early, so the round left work for the next one.
+    ///
+    /// The answer to "is there more to do?", which neither half can give on its own: a caller that
+    /// asked only the half it happened to hold would stop re-running a round the other half did
+    /// not finish, and the store would stay under-collected with nothing reporting it.
+    pub suspended: bool,
+}
+
+#[cfg(rocksdb)]
+impl Round {
+    /// The round made of both halves, suspended if either of them was.
+    fn of(collected: Collected, swept: SweptNodes) -> Self {
+        Self {
+            suspended: collected.suspended || swept.suspended,
+            collected,
+            swept,
+        }
+    }
 }
 
 /// Drop everything the repository no longer needs to serve `target` and the commits after it.
@@ -181,14 +213,14 @@ pub fn collect_all(
     repo: &DirectoryManager,
     target: &CommitId,
     suspend: &Suspend,
-) -> Result<(Collected, SweptNodes), GcError> {
+) -> Result<Round, GcError> {
     let collected = collect(repo, target, suspend)?;
 
     // A suspended first half leaves commits the second half would treat as retained, so the sweep
     // would keep nodes that are on their way out. Correct, but wasted work: the next round does
     // both halves against a settled set.
     if collected.suspended {
-        return Ok((
+        return Ok(Round::of(
             collected,
             SweptNodes {
                 suspended: true,
@@ -199,7 +231,7 @@ pub fn collect_all(
 
     let swept = collect_nodes(repo, target, suspend)?;
 
-    Ok((collected, swept))
+    Ok(Round::of(collected, swept))
 }
 
 /// Delete the Merkle nodes no retained commit of `repo` still reaches.
@@ -438,6 +470,24 @@ mod tests {
         );
     }
 
+    // A round is unfinished if either half is, which is the question a caller driving rounds asks.
+    // Neither half's own flag answers it: the sweep stopping leaves the commit half's flag down.
+    #[test]
+    fn a_round_is_suspended_if_either_half_was() {
+        let stopped = Collected {
+            suspended: true,
+            ..Collected::default()
+        };
+        let swept_stopped = SweptNodes {
+            suspended: true,
+            ..SweptNodes::default()
+        };
+
+        assert!(!Round::of(Collected::default(), SweptNodes::default()).suspended);
+        assert!(Round::of(stopped, SweptNodes::default()).suspended);
+        assert!(Round::of(Collected::default(), swept_stopped).suspended);
+    }
+
     // What a suspended round left is picked up by the next one, so suspending costs progress but
     // never correctness.
     #[test]
@@ -623,8 +673,9 @@ mod node_tests {
 
         let before = fixture.nodes();
 
-        let (_, swept) =
-            collect_all(&fixture.repo, &third, &Suspend::new()).expect("collection should succeed");
+        let swept = collect_all(&fixture.repo, &third, &Suspend::new())
+            .expect("collection should succeed")
+            .swept;
 
         assert!(swept.nodes > 0, "the earlier commits left nodes behind");
         assert!(swept.edges > 0, "their edges should go with them");
@@ -673,8 +724,9 @@ mod node_tests {
             "the node should be there before collecting"
         );
 
-        let (_, swept) = collect_all(&fixture.repo, &second, &Suspend::new())
-            .expect("collection should succeed");
+        let swept = collect_all(&fixture.repo, &second, &Suspend::new())
+            .expect("collection should succeed")
+            .swept;
         assert!(swept.nodes > 0, "the first commit should have left nodes");
 
         assert!(
@@ -727,8 +779,9 @@ mod node_tests {
         fixture.commit(&[b"a"], b"2");
 
         let before = (fixture.nodes(), fixture.edges());
-        let (_, swept) =
-            collect_all(&fixture.repo, &first, &Suspend::new()).expect("collection should succeed");
+        let swept = collect_all(&fixture.repo, &first, &Suspend::new())
+            .expect("collection should succeed")
+            .swept;
 
         assert_eq!(swept, SweptNodes::default());
         assert_eq!((fixture.nodes(), fixture.edges()), before);
