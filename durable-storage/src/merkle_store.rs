@@ -36,6 +36,7 @@ use crate::errors::InvalidArgumentError;
 use crate::errors::OperationalError;
 use crate::journal::Seq;
 use crate::persistence_layer::found_or_missing;
+use crate::persistence_layer::rocksdb_meta_options;
 use crate::persistence_layer::rocksdb_node_store_options;
 use crate::storage::StoreId;
 
@@ -46,6 +47,17 @@ const MERKLE_CF: &str = "merkle";
 
 /// The column family holding reverse edges, keyed by `child || parent`.
 const REFS_CF: &str = "refs";
+
+/// The column family holding facts about the store itself rather than its contents.
+///
+/// A family of its own rather than a key among the nodes, which a sweep would scan and take for a
+/// node, or among the edges, whose keys are all `child || parent`. Inside the store rather than
+/// beside it so that it is ordered against the writes it describes and is carried into any image
+/// taken of the store.
+const META_CF: &str = "meta";
+
+/// The key under which [`META_CF`] records that a collection has taken something from the store.
+const COLLECTED_KEY: &[u8] = b"collected";
 
 /// How recently a reverse edge was known to hold its child alive.
 ///
@@ -86,13 +98,24 @@ impl Stamp {
     }
 }
 
-/// The file recording that a store has collected at least once.
+/// Whether `db` records that a collection has taken something from it.
 ///
-/// Beside the store rather than a key inside it, which a sweep would scan and take for a node.
-fn collected_marker(store_dir: &Path) -> PathBuf {
-    let mut path = store_dir.as_os_str().to_owned();
-    path.push("-collected");
-    PathBuf::from(path)
+/// Read once when the store is opened. A store written before [`META_CF`] existed has no family to
+/// read, which is the same answer as an empty one: nothing has been collected from it.
+fn read_collected(db: &rocksdb::DB) -> Result<bool, OperationalError> {
+    let Some(cf) = db.cf_handle(META_CF) else {
+        return Ok(false);
+    };
+
+    let recorded =
+        db.get_pinned_cf(cf, COLLECTED_KEY)
+            .map_err(|error| OperationalError::GetFailed {
+                column: META_CF.to_owned(),
+                key: COLLECTED_KEY.to_owned(),
+                error,
+            })?;
+
+    Ok(recorded.is_some())
 }
 
 /// The key an edge from `parent` to `child` is stored under.
@@ -140,7 +163,8 @@ pub struct MerkleStore {
     ///
     /// Changes what an absent node means. Before a collection it can only be a bug; after one it is
     /// most likely a state being read while its nodes were reclaimed, which is worth telling apart.
-    /// Persisted, since the distinction outlives the process that collected.
+    /// Held here as well as in [`META_CF`], so that reporting an absent node does not read the
+    /// store again; the record on disk is what outlives the process that collected.
     collected: std::sync::atomic::AtomicBool,
 }
 
@@ -271,8 +295,10 @@ impl MerkleStore {
 
     /// Record that a collection has removed something from this store.
     ///
-    /// Written through to disk, so that a later process reading a node the collection took still
-    /// learns why it is missing.
+    /// Written into the store itself, so that a later process reading a node the collection took
+    /// still learns why it is missing. Being one of the store's own writes is what makes it
+    /// ordered ahead of the removals that follow it in the write-ahead log, and what carries it
+    /// into every image taken of the store afterwards.
     pub fn note_collected(&self) -> Result<(), OperationalError> {
         self.writeable()?;
 
@@ -280,13 +306,22 @@ impl MerkleStore {
             return Ok(());
         }
 
+        let cf = self
+            .meta_cf()
+            .expect("a writeable Merkle store always has its meta column family");
+
         // Written before the flag is raised, not after. The flag is only a way to skip repeating
         // the write; if it went up first and the write then failed, the next call would take that
         // shortcut and return success, and the store would delete nodes with nothing on disk to
         // say it ever had. After a restart those absent nodes read as a corrupt store, which is
-        // the confusion this marker exists to prevent.
-        std::fs::write(collected_marker(&self.path), [])
-            .map_err(|error| OperationalError::FileWriteFailed { error })?;
+        // the confusion this record exists to prevent.
+        self.db
+            .put_cf(cf, COLLECTED_KEY, [])
+            .map_err(|error| OperationalError::PutFailed {
+                column: META_CF.to_owned(),
+                key: COLLECTED_KEY.to_owned(),
+                error,
+            })?;
 
         self.collected
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -436,6 +471,14 @@ impl MerkleStore {
         self.db
             .cf_handle(REFS_CF)
             .expect("the Merkle store always has its refs column family")
+    }
+
+    /// The column family holding facts about the store itself.
+    ///
+    /// Absent on a store written before the family existed, which only a read-only handle can
+    /// reach: opening for writing creates the family.
+    fn meta_cf(&self) -> Option<&rocksdb::ColumnFamily> {
+        self.db.cf_handle(META_CF)
     }
 
     /// Count every node in the store, and the bytes they occupy.
@@ -617,8 +660,8 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
     // Opened without the registry held: RocksDB takes a lock on the directory, and a store closing
     // right now needs the registry to finish getting out of the way.
     let mut options = rocksdb_node_store_options();
-    // The refs family is created with the store rather than after it, and a store opened before
-    // edges existed has to gain one.
+    // The families beside the nodes are created with the store rather than after it, and a store
+    // opened before one of them existed has to gain it.
     options.create_missing_column_families(true);
 
     let db = rocksdb::DB::open_cf_descriptors(
@@ -629,13 +672,18 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
             // of them.
             rocksdb::ColumnFamilyDescriptor::new("default", rocksdb_node_store_options()),
             rocksdb::ColumnFamilyDescriptor::new(REFS_CF, rocksdb_node_store_options()),
+            // Untuned, unlike the two above: what the store records about itself is a handful of
+            // keys, and the node store's memtable is sized for a repository's worth of hashes.
+            rocksdb::ColumnFamilyDescriptor::new(META_CF, rocksdb_meta_options()),
         ],
     )
     .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 
+    let collected = read_collected(&db)?;
+
     let store = Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
-        collected: std::sync::atomic::AtomicBool::new(collected_marker(&key).exists()),
+        collected: std::sync::atomic::AtomicBool::new(collected),
         path: key.clone(),
         read_only: false,
         store_id: StoreId::next(),
@@ -690,10 +738,12 @@ pub fn open_read_only(path: &Path) -> Result<Arc<MerkleStore>, OperationalError>
     )
     .map_err(|error| OperationalError::OpenRocksDbFailed { error })?;
 
+    let collected = read_collected(&db)?;
+
     Ok(Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
         read_only: true,
-        collected: std::sync::atomic::AtomicBool::new(collected_marker(path).exists()),
+        collected: std::sync::atomic::AtomicBool::new(collected),
         // Never registered, so nothing looks this up and Drop finds no entry of its own to remove.
         path: path.to_path_buf(),
         store_id: StoreId::next(),
@@ -1007,6 +1057,45 @@ mod tests {
 
     // Once every handle is dropped the instance closes, and opening again reads what it wrote
     // rather than finding a stale entry or a held lock.
+    // The record outlives the process that collected, which is the whole point of keeping it in the
+    // store rather than in memory.
+    #[test]
+    fn reopening_remembers_that_the_store_collected() {
+        let tmp = TestableTmpdir::new();
+        let path = tmp.path().join("merkle");
+
+        let store = open_shared(&path).expect("opening should succeed");
+        assert!(!store.has_collected(), "a new store has collected nothing");
+
+        store.note_collected().expect("noting should succeed");
+        store.sync().expect("syncing should succeed");
+        drop(store);
+
+        let reopened = open_shared(&path).expect("reopening should succeed");
+        assert!(
+            reopened.has_collected(),
+            "the record should have survived the close"
+        );
+    }
+
+    // A reader sees it too, which is who the distinction is for: the process that collected is not
+    // the one that trips over an absent node.
+    #[test]
+    fn a_reader_sees_that_the_store_collected() {
+        let tmp = TestableTmpdir::new();
+        let path = tmp.path().join("merkle");
+
+        let store = open_shared(&path).expect("opening should succeed");
+        store.note_collected().expect("noting should succeed");
+        store.sync().expect("syncing should succeed");
+
+        let reader = open_read_only(&path).expect("opening for reading should succeed");
+        assert!(
+            reader.has_collected(),
+            "a reader opened after the collection should see it"
+        );
+    }
+
     #[test]
     fn reopening_after_the_last_handle_is_dropped_succeeds() {
         let tmp = TestableTmpdir::new();

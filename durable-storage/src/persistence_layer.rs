@@ -318,6 +318,15 @@ pub(crate) fn rocksdb_node_store_options() -> rocksdb::Options {
     options
 }
 
+/// Options for the column family a Merkle store records facts about itself in.
+///
+/// Deliberately untuned. The node store's options size a memtable for a repository's worth of
+/// content-addressed keys, which this family holds a handful of; taking them would cost that
+/// memtable again to record almost nothing.
+pub(crate) fn rocksdb_meta_options() -> rocksdb::Options {
+    rocksdb::Options::default()
+}
+
 /// These options are used for opening a rocksdb instance from a checkpoint.
 pub(crate) fn rocksdb_checkpoint_options() -> rocksdb::Options {
     let mut options = rocksdb_default_options();

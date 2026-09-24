@@ -562,6 +562,55 @@ mod tests {
     }
 
     // A leased slot is left alone by reaping, and the one after it still goes.
+    // What the store records about itself is part of the store, so recovering from a slot recovers
+    // it too: a restored store that had collected still knows an absent node may be one it took.
+    #[test]
+    fn a_recovered_store_remembers_that_it_collected() {
+        let tmp = TestableTmpdir::new();
+        let store_dir = tmp.path().join("merkle");
+        let (store, slots_dir) = fixture(&tmp);
+
+        store.note_collected().expect("noting should succeed");
+
+        let slot = store.take_slot(&slots_dir).expect("taking should succeed");
+        drop(store);
+
+        fs::remove_dir_all(&store_dir).expect("removing the store should succeed");
+
+        restore_from_slot(&slot_path(&slots_dir, slot), &store_dir)
+            .expect("restoring should succeed");
+
+        let recovered = open_shared(&store_dir).expect("the recovered store should open");
+        assert!(
+            recovered.has_collected(),
+            "a store restored from a slot taken after collecting should remember it"
+        );
+    }
+
+    // And the other way about: the record is taken with the slot rather than found beside it, so a
+    // slot from before any collection restores to a store that has collected nothing.
+    #[test]
+    fn a_store_recovered_from_before_a_collection_has_collected_nothing() {
+        let tmp = TestableTmpdir::new();
+        let store_dir = tmp.path().join("merkle");
+        let (store, slots_dir) = fixture(&tmp);
+
+        let slot = store.take_slot(&slots_dir).expect("taking should succeed");
+        store.note_collected().expect("noting should succeed");
+        drop(store);
+
+        fs::remove_dir_all(&store_dir).expect("removing the store should succeed");
+
+        restore_from_slot(&slot_path(&slots_dir, slot), &store_dir)
+            .expect("restoring should succeed");
+
+        let recovered = open_shared(&store_dir).expect("the recovered store should open");
+        assert!(
+            !recovered.has_collected(),
+            "a store restored from a slot taken before collecting should not claim it collected"
+        );
+    }
+
     #[test]
     fn reaping_leaves_a_leased_slot_alone() {
         let tmp = TestableTmpdir::new();
