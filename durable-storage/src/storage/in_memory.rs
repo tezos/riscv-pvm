@@ -553,6 +553,11 @@ impl crate::repo::RegistryRepo for InMemoryRepo {
         Ok(())
     }
 
+    fn merkle_store_id(&self) -> StoreId {
+        // Nothing collects nodes here: each store holds its own, and they go only with it.
+        StoreId::NONE
+    }
+
     fn registry_commits(&self) -> Result<Vec<crate::commit::CommitId>, OperationalError> {
         Ok(self
             .registry_commits
