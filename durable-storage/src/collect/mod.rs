@@ -1059,6 +1059,78 @@ mod node_tests {
             );
         }
     }
+
+    // A dead node relisted above a later floor survives a round that deletes its child through a
+    // lower listing. A working state of the dropped lineage would commit the survivor as if its
+    // subtree were whole, so it is refused instead.
+    #[test]
+    fn a_working_state_whose_base_was_collected_cannot_commit() {
+        fn set(
+            registry: &mut Registry<PersistenceLayer, Normal>,
+            db: usize,
+            key: &[u8],
+            value: &[u8],
+        ) {
+            registry
+                .database_mut(db)
+                .expect("the database should exist")
+                .set(
+                    Key::new(key).expect("the key should be valid"),
+                    Bytes::copy_from_slice(value),
+                )
+                .expect("setting should succeed");
+        }
+
+        let tmp = TestableTmpdir::new();
+        let repo = DirectoryManager::new(tmp.path())
+            .expect("creating the directory manager should succeed");
+        let mut registry = Registry::<PersistenceLayer, Normal>::new(repo.clone());
+        for size in [1, 2] {
+            registry
+                .resize_tick(size)
+                .expect("resizing the registry should succeed");
+        }
+
+        // Database 0 is a root `a` over a leaf `b`, both listed at seq 0.
+        set(&mut registry, 0, b"a", b"1");
+        set(&mut registry, 0, b"b", b"1");
+        registry.commit().expect("committing should succeed");
+
+        // A fresh leaf `b` in database 1 hashes the same as database 0's, and lists it again at 1.
+        set(&mut registry, 1, b"b", b"1");
+        let second = registry.commit().expect("committing should succeed");
+
+        // Neither database holds the root or the leaf any more.
+        set(&mut registry, 0, b"a", b"2");
+        set(&mut registry, 0, b"b", b"2");
+        set(&mut registry, 1, b"b", b"2");
+        let third = registry.commit().expect("committing should succeed");
+
+        // Both are live here, and both are relisted under the newest root, seq 2.
+        collect_all(&repo, &second, &Suspend::new()).expect("the first round should succeed");
+
+        // A working state of a lineage the next round drops.
+        let mut stale = Registry::<PersistenceLayer, Normal>::checkout(repo.clone(), second)
+            .expect("the second commit should check out");
+
+        // Floor 2: the leaf's listing at 1 is a candidate and dead, so it goes. The root is listed
+        // only at 2, so it is never examined and its body stays.
+        let swept = collect_all(&repo, &third, &Suspend::new())
+            .expect("the second round should succeed")
+            .swept;
+        assert!(
+            swept.nodes > 0,
+            "the second round should have deleted the leaf"
+        );
+
+        // Committing would record the root over a subtree that is no longer whole.
+        set(&mut stale, 1, b"c", b"1");
+        let committed = stale.commit();
+        assert!(
+            matches!(committed, Err(OperationalError::BaseCollected { .. })),
+            "a working state whose base was collected should not commit, got {committed:?}"
+        );
+    }
 }
 
 #[cfg(all(test, rocksdb_test_utils))]

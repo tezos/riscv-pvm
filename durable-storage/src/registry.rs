@@ -50,6 +50,7 @@ use crate::merkle_worker::BackgroundWriteableKeyValueStore;
 use crate::repo::RegistryRepo;
 use crate::storage::ReadOnlyKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
+use crate::storage::StoreId;
 
 #[derive(Debug, Encode, Decode)]
 /// Structure to store the result of serialising a registry.
@@ -89,6 +90,7 @@ impl<KV: BackgroundReadableKeyValueStore> Registry<KV, Normal> {
             inner: NormalImpl {
                 repo,
                 runtime: LazyRuntime::default(),
+                base: Base::none(),
             },
             databases: Vector::new(Vec::new()),
         }
@@ -173,8 +175,13 @@ where
         databases: Vec<Database<KV, Normal>>,
         commit_id: CommitId,
     ) -> Result<Self, Error> {
+        let base = Base::at(commit_id, repo.merkle_store_id());
         let registry = Registry {
-            inner: NormalImpl { repo, runtime },
+            inner: NormalImpl {
+                repo,
+                runtime,
+                base,
+            },
             databases: Vector::new(databases),
         };
 
@@ -224,6 +231,34 @@ where
     /// of all underlying databases through the [`Foldable<HashFold>`] implementation,
     /// and the registry manifest is stored at the corresponding commit path.
     pub fn commit(&self) -> Result<CommitId, OperationalError> {
+        // Held for the whole commit, so the base checked is the one committed on top of.
+        let mut base = self
+            .inner
+            .base
+            .0
+            .lock()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+
+        // Read before checking, so a collection finishing afterwards is noticed next time.
+        let store_id = self.inner.repo.merkle_store_id();
+
+        if let Some((root, seen)) = *base {
+            // A round prunes the journal before it removes anything, so a base missing from it after
+            // a removal is one whose subtree may be partly gone.
+            if seen != store_id
+                && !self
+                    .inner
+                    .repo
+                    .read_commit_journal()?
+                    .iter()
+                    .any(|entry| entry.root == root)
+            {
+                return Err(OperationalError::BaseCollected {
+                    root: *root.as_hash(),
+                });
+            }
+        }
+
         let mut database_hashes = Vec::with_capacity(self.databases.len());
 
         for database in self.databases.iter() {
@@ -244,6 +279,7 @@ where
         // Recorded after the manifest, so that an interrupted commit leaves a manifest that
         // collection can reclaim, rather than a recorded root with nothing behind it.
         self.inner.repo.record_commit(&registry_commit)?;
+        *base = Some((registry_commit, store_id));
 
         Ok(registry_commit)
     }
@@ -284,7 +320,11 @@ where
     /// Copies nothing and cannot fail - see [`Database::clone_read_only`] - so read-only consumers
     /// can be handed a registry each for free.
     pub fn clone_read_only(&self) -> Self {
-        let NormalImpl { repo, runtime } = &self.inner;
+        let NormalImpl {
+            repo,
+            runtime,
+            base,
+        } = &self.inner;
 
         let databases = self
             .databases
@@ -296,6 +336,7 @@ where
             inner: NormalImpl {
                 repo: repo.clone(),
                 runtime: runtime.clone(),
+                base: base.clone(),
             },
             databases: Vector::new(databases),
         }
@@ -307,7 +348,11 @@ where
     where
         KV::Writeable: BackgroundPersistentKeyValueStore,
     {
-        let NormalImpl { repo, runtime } = &self.inner;
+        let NormalImpl {
+            repo,
+            runtime,
+            base,
+        } = &self.inner;
         let handle = runtime.handle()?;
 
         // TODO RV-946: Investigate parallelising the checkouts of individual databases.
@@ -321,6 +366,7 @@ where
             inner: NormalImpl {
                 repo: repo.clone(),
                 runtime: runtime.clone(),
+                base: base.clone(),
             },
             databases: Vector::new(databases),
         })
@@ -707,7 +753,11 @@ impl CloneRegistryMode for Normal {
         let databases = Vector::new(databases);
 
         Ok(Registry {
-            inner: NormalImpl { repo, runtime },
+            inner: NormalImpl {
+                repo,
+                runtime,
+                base: this.inner.base.clone(),
+            },
 
             databases,
         })
@@ -718,6 +768,36 @@ impl CloneRegistryMode for Normal {
 struct NormalImpl<KV: ReadableKeyValueStore> {
     repo: KV::Repo,
     runtime: LazyRuntime,
+    base: Base,
+}
+
+/// The root a working state was checked out at or last committed, and the Merkle store identity
+/// seen then.
+///
+/// A commit skips what it holds as already stored, and all of that descends from this root. Sound
+/// while the root is retained, since a round removes only what no retained root reaches.
+struct Base(std::sync::Mutex<Option<(CommitId, StoreId)>>);
+
+impl Base {
+    /// No base: nothing was loaded, so nothing skipped can have been collected.
+    fn none() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+
+    fn at(root: CommitId, store_id: StoreId) -> Self {
+        Self(std::sync::Mutex::new(Some((root, store_id))))
+    }
+}
+
+impl Clone for Base {
+    fn clone(&self) -> Self {
+        // The value is replaced whole, so a poisoned lock still holds a consistent one.
+        let base = *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Self(std::sync::Mutex::new(base))
+    }
 }
 
 /// The async runtime hosting the Merkle workers of a registry's databases, built when first needed.

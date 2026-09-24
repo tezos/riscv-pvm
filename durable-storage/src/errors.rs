@@ -142,6 +142,14 @@ pub enum OperationalError {
     )]
     NodeCollected { root: Hash },
 
+    /// A working state was committed on top of a root a collection has since dropped.
+    ///
+    /// A commit skips what it holds as already stored, which is only sound while the root it came
+    /// from is retained: a round may have deleted part of a dropped root's subtree. Check out a
+    /// retained root and apply the changes again.
+    #[error("The working state's base {root:?} has been collected")]
+    BaseCollected { root: Hash },
+
     /// The lazy resolver encountered an internally inconsistent identifier state.
     ///
     /// `LazyId` values must always hold either (though can hold both):

@@ -22,6 +22,7 @@ use crate::journal::JournalEntry;
 use crate::journal::Seq;
 #[cfg(rocksdb)]
 use crate::merkle_store::MerkleStore;
+use crate::storage::StoreId;
 
 /// The [`DirectoryManager`] represents the root directory where commitments & internal data should
 /// be stored.
@@ -339,6 +340,12 @@ pub trait RegistryRepo: Clone {
     /// [`RegistryRepo::registry_commits`].
     fn database_commits(&self) -> Result<Vec<CommitId>, OperationalError>;
 
+    /// The identity of the store the repository's Merkle nodes live in.
+    ///
+    /// Replaced by every collection that removes a node, so an unchanged identity means nothing has
+    /// been removed since it was read.
+    fn merkle_store_id(&self) -> StoreId;
+
     /// Remove the manifest for the registry commit `id`.
     ///
     /// Removing one that is already gone succeeds, so collection can be repeated after an
@@ -434,6 +441,17 @@ impl RegistryRepo for DirectoryManager {
 
     fn registry_commits(&self) -> Result<Vec<CommitId>, OperationalError> {
         commit_ids_in(&self.registry_commits_dir)
+    }
+
+    fn merkle_store_id(&self) -> StoreId {
+        cfg_if::cfg_if! {
+            if #[cfg(rocksdb)] {
+                self.merkle.store_id()
+            } else {
+                // Without RocksDB there is no shared store, and nothing collects nodes.
+                StoreId::NONE
+            }
+        }
     }
 
     fn database_commits(&self) -> Result<Vec<CommitId>, OperationalError> {
