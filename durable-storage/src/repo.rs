@@ -252,6 +252,15 @@ impl DirectoryManager {
         self.merkle.is_compacting()
     }
 
+    /// Wait for a reclaim started by [`DirectoryManager::start_reclaim`] to finish.
+    ///
+    /// Call before the process exits: a reclaim still running then has RocksDB torn down beneath it.
+    /// Dropping the repository does not wait, so this is the only place that does.
+    #[cfg(rocksdb)]
+    pub fn finish_reclaim(&self) {
+        self.merkle.wait_for_compaction()
+    }
+
     /// The most recent full commit, which is the image recovery would open.
     #[cfg(rocksdb)]
     pub fn latest_full_commit(
