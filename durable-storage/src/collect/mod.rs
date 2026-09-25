@@ -832,9 +832,8 @@ mod node_tests {
         let third = fixture.commit(&[b"\x00\x00\x00\x02"], b"2");
 
         // Wait for it, so the test does not leave a thread writing into a temporary directory.
-        while fixture.repo.is_reclaiming() {
-            std::thread::yield_now();
-        }
+        fixture.repo.finish_reclaim();
+        assert!(!fixture.repo.is_reclaiming());
 
         Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), third)
             .expect("the commit made during the reclaim should check out");
