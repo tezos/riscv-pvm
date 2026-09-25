@@ -199,6 +199,18 @@ pub struct MerkleStore {
     /// to a node that was collected out from under it.
     store_id: std::sync::atomic::AtomicU64,
 
+    /// Whether a background compaction is running.
+    ///
+    /// Keeps a second request from starting another rather than queueing a rewrite behind the one
+    /// already under way. Shared rather than owned, so the compaction thread can release the store
+    /// before lowering it.
+    compacting: Arc<std::sync::atomic::AtomicBool>,
+
+    /// The thread running the latest background compaction, so shutdown can wait for it.
+    ///
+    /// A process exiting mid-rewrite tears RocksDB down underneath the thread.
+    compaction: Mutex<Option<std::thread::JoinHandle<()>>>,
+
     /// Whether anything has ever been collected from this store.
     ///
     /// Changes what an absent node means. Before a collection it can only be a bug; after one it is
@@ -206,6 +218,32 @@ pub struct MerkleStore {
     /// Held here as well as in [`META_CF`], so that reporting an absent node does not read the
     /// store again; the record on disk is what outlives the process that collected.
     collected: std::sync::atomic::AtomicBool,
+}
+
+/// Holds a store for as long as a reclaim is running, and lowers its flag when that ends.
+///
+/// However it ends: returning normally, or unwinding out of RocksDB.
+struct Reclaiming {
+    store: Option<Arc<MerkleStore>>,
+    compacting: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for Reclaiming {
+    /// Release the store, then lower the flag.
+    ///
+    /// In that order, so a caller that sees the reclaim finished can rely on the thread no longer
+    /// holding the store. Otherwise the thread could hold the last handle and close RocksDB after
+    /// the caller has moved on to reopening or removing the directory.
+    fn drop(&mut self) {
+        drop(self.store.take());
+
+        // Widens the window between the two steps, so a test sees it if they are ever reordered.
+        #[cfg(test)]
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        self.compacting
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl Drop for MerkleStore {
@@ -765,13 +803,105 @@ impl MerkleStore {
         }
 
         let unbounded: Option<&[u8]> = None;
-        self.db.compact_range(unbounded, unbounded);
+
+        let mut options = rocksdb::CompactOptions::default();
+        // Set explicitly because it is load-bearing here rather than incidental: this rewrites the
+        // whole store, and excluding RocksDB's own compaction for that long would stall writes
+        // behind it for no reason - the point is to reclaim disk, not to be the only thing doing
+        // so. It matches the current RocksDB default, so it changes nothing today; it is here so
+        // that a default flipping back does not silently make a reclaim exclusive.
+        options.set_exclusive_manual_compaction(false);
+
+        self.db.compact_range_opt(unbounded, unbounded, &options);
         self.db
-            .compact_range_cf(self.refs_cf(), unbounded, unbounded);
+            .compact_range_cf_opt(self.refs_cf(), unbounded, unbounded, &options);
         // Relisting a live node writes a new entry and a tombstone for the old one, so a round
         // leaves as much behind here as it does among the nodes themselves.
         self.db
-            .compact_range_cf(self.written_cf(), unbounded, unbounded);
+            .compact_range_cf_opt(self.written_cf(), unbounded, unbounded, &options);
+    }
+
+    /// Start reclaiming in the background, and return without waiting for it.
+    ///
+    /// Reclaiming rewrites the store, so it costs the store rather than the garbage and takes far
+    /// longer than anything that would want to trigger it. A full commit in particular must not wait
+    /// for one: taking a slot is a flush and a rename, and pairing it with a rewrite of the whole
+    /// store would make the cheap operation as slow as the expensive one.
+    ///
+    /// Returns whether this call started one. A second call while one is running is a no-op rather
+    /// than a queued rewrite, since two of these achieve nothing one does not.
+    ///
+    /// Reads and writes continue throughout. The store stays open until the work finishes, because
+    /// the thread holds a reference to it.
+    pub fn start_compaction(self: &Arc<Self>) -> bool {
+        if self.read_only
+            || self
+                .compacting
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return false;
+        }
+
+        let store = Arc::clone(self);
+
+        // Held across the spawn, so a concurrent wait cannot find no handle while one is starting.
+        // A poisoned lock only guards a handle, which is still valid.
+        let mut compaction = self
+            .compaction
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        match std::thread::Builder::new()
+            .name("merkle-compaction".to_owned())
+            .spawn(move || {
+                // Lowered by the guard rather than after the call, so that it comes down on an
+                // unwind too. Left raised, it would refuse every later reclaim for the life of the
+                // process, and anything waiting on `is_compacting` would wait for a rewrite that
+                // is no longer running.
+                let reclaiming = Reclaiming {
+                    compacting: Arc::clone(&store.compacting),
+                    store: Some(store),
+                };
+                if let Some(store) = &reclaiming.store {
+                    store.compact();
+                }
+            }) {
+            Ok(handle) => {
+                *compaction = Some(handle);
+                true
+            }
+            Err(error) => {
+                // Nothing is running, so the flag has to come back down or nothing ever reclaims.
+                self.compacting
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                log::warn!("could not start Merkle store compaction: {error}");
+                false
+            }
+        }
+    }
+
+    /// Whether a background compaction started by [`MerkleStore::start_compaction`] is running.
+    pub fn is_compacting(&self) -> bool {
+        self.compacting.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Wait for a background compaction started by [`MerkleStore::start_compaction`] to finish.
+    ///
+    /// For shutdown, so the process does not exit while the thread is still inside RocksDB. Returns
+    /// at once if none is running. Never called from [`Drop`], so dropping a handle stays cheap.
+    pub fn wait_for_compaction(&self) {
+        let handle = self
+            .compaction
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+
+        // Joined without the lock, so a new compaction can start meanwhile rather than block.
+        if let Some(handle) = handle
+            && handle.join().is_err()
+        {
+            log::warn!("Merkle store compaction panicked");
+        }
     }
 
     /// Put everything written so far beyond reach of a crash.
@@ -852,6 +982,8 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
     let store = Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
         collected: std::sync::atomic::AtomicBool::new(collected),
+        compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        compaction: Mutex::new(None),
         path: key.clone(),
         read_only: false,
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
@@ -912,6 +1044,8 @@ pub fn open_read_only(path: &Path) -> Result<Arc<MerkleStore>, OperationalError>
         db: ManuallyDrop::new(db),
         read_only: true,
         collected: std::sync::atomic::AtomicBool::new(collected),
+        compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        compaction: Mutex::new(None),
         // Never registered, so nothing looks this up and Drop finds no entry of its own to remove.
         path: path.to_path_buf(),
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
@@ -1282,5 +1416,52 @@ mod tests {
                 .as_ref(),
             b"body"
         );
+    }
+
+    // Once a reclaim reports itself finished, its thread no longer holds the store, so whoever
+    // holds the last handle closes it rather than the thread closing it some time later.
+    #[test]
+    fn a_finished_reclaim_has_let_go_of_the_store() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+        store.set(b"key", b"body").expect("setting should succeed");
+
+        assert!(store.start_compaction(), "a reclaim should have started");
+        while store.is_compacting() {
+            std::hint::spin_loop();
+        }
+
+        assert_eq!(
+            Arc::strong_count(&store),
+            1,
+            "the reclaim should have let go of the store before reporting itself finished"
+        );
+    }
+
+    // Waiting for a reclaim returns only once its thread is done with the store, which is what
+    // lets shutdown close RocksDB with nothing still inside it.
+    #[test]
+    fn waiting_for_a_reclaim_outlasts_it() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+        store.set(b"key", b"body").expect("setting should succeed");
+
+        // Nothing running yet, so this returns at once.
+        store.wait_for_compaction();
+
+        assert!(store.start_compaction(), "a reclaim should have started");
+        store.wait_for_compaction();
+
+        assert!(!store.is_compacting(), "the reclaim should have finished");
+        assert_eq!(
+            Arc::strong_count(&store),
+            1,
+            "the reclaim thread should be done with the store"
+        );
+        assert!(
+            store.start_compaction(),
+            "a reclaim should start again after the last one was waited for"
+        );
+        store.wait_for_compaction();
     }
 }
