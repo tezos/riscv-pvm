@@ -202,8 +202,9 @@ pub struct MerkleStore {
     /// Whether a background compaction is running.
     ///
     /// Keeps a second request from starting another rather than queueing a rewrite behind the one
-    /// already under way.
-    compacting: std::sync::atomic::AtomicBool,
+    /// already under way. Shared rather than owned, so the compaction thread can release the store
+    /// before lowering it.
+    compacting: Arc<std::sync::atomic::AtomicBool>,
 
     /// Whether anything has ever been collected from this store.
     ///
@@ -217,12 +218,25 @@ pub struct MerkleStore {
 /// Holds a store for as long as a reclaim is running, and lowers its flag when that ends.
 ///
 /// However it ends: returning normally, or unwinding out of RocksDB.
-struct Reclaiming(Arc<MerkleStore>);
+struct Reclaiming {
+    store: Option<Arc<MerkleStore>>,
+    compacting: Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl Drop for Reclaiming {
+    /// Release the store, then lower the flag.
+    ///
+    /// In that order, so a caller that sees the reclaim finished can rely on the thread no longer
+    /// holding the store. Otherwise the thread could hold the last handle and close RocksDB after
+    /// the caller has moved on to reopening or removing the directory.
     fn drop(&mut self) {
-        self.0
-            .compacting
+        drop(self.store.take());
+
+        // Widens the window between the two steps, so a test sees it if they are ever reordered.
+        #[cfg(test)]
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        self.compacting
             .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -832,8 +846,13 @@ impl MerkleStore {
                 // unwind too. Left raised, it would refuse every later reclaim for the life of the
                 // process, and anything waiting on `is_compacting` would wait for a rewrite that
                 // is no longer running.
-                let store = Reclaiming(store);
-                store.0.compact();
+                let reclaiming = Reclaiming {
+                    compacting: Arc::clone(&store.compacting),
+                    store: Some(store),
+                };
+                if let Some(store) = &reclaiming.store {
+                    store.compact();
+                }
             }) {
             Ok(_) => true,
             Err(error) => {
@@ -929,7 +948,7 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
     let store = Arc::new(MerkleStore {
         db: ManuallyDrop::new(db),
         collected: std::sync::atomic::AtomicBool::new(collected),
-        compacting: std::sync::atomic::AtomicBool::new(false),
+        compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         path: key.clone(),
         read_only: false,
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
@@ -990,7 +1009,7 @@ pub fn open_read_only(path: &Path) -> Result<Arc<MerkleStore>, OperationalError>
         db: ManuallyDrop::new(db),
         read_only: true,
         collected: std::sync::atomic::AtomicBool::new(collected),
-        compacting: std::sync::atomic::AtomicBool::new(false),
+        compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         // Never registered, so nothing looks this up and Drop finds no entry of its own to remove.
         path: path.to_path_buf(),
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
@@ -1360,6 +1379,26 @@ mod tests {
                 .expect("the node should have survived")
                 .as_ref(),
             b"body"
+        );
+    }
+
+    // Once a reclaim reports itself finished, its thread no longer holds the store, so whoever
+    // holds the last handle closes it rather than the thread closing it some time later.
+    #[test]
+    fn a_finished_reclaim_has_let_go_of_the_store() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+        store.set(b"key", b"body").expect("setting should succeed");
+
+        assert!(store.start_compaction(), "a reclaim should have started");
+        while store.is_compacting() {
+            std::hint::spin_loop();
+        }
+
+        assert_eq!(
+            Arc::strong_count(&store),
+            1,
+            "the reclaim should have let go of the store before reporting itself finished"
         );
     }
 }
