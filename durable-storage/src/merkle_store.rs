@@ -206,6 +206,11 @@ pub struct MerkleStore {
     /// before lowering it.
     compacting: Arc<std::sync::atomic::AtomicBool>,
 
+    /// The thread running the latest background compaction, so shutdown can wait for it.
+    ///
+    /// A process exiting mid-rewrite tears RocksDB down underneath the thread.
+    compaction: Mutex<Option<std::thread::JoinHandle<()>>>,
+
     /// Whether anything has ever been collected from this store.
     ///
     /// Changes what an absent node means. Before a collection it can only be a bug; after one it is
@@ -839,6 +844,13 @@ impl MerkleStore {
 
         let store = Arc::clone(self);
 
+        // Held across the spawn, so a concurrent wait cannot find no handle while one is starting.
+        // A poisoned lock only guards a handle, which is still valid.
+        let mut compaction = self
+            .compaction
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
         match std::thread::Builder::new()
             .name("merkle-compaction".to_owned())
             .spawn(move || {
@@ -854,7 +866,10 @@ impl MerkleStore {
                     store.compact();
                 }
             }) {
-            Ok(_) => true,
+            Ok(handle) => {
+                *compaction = Some(handle);
+                true
+            }
             Err(error) => {
                 // Nothing is running, so the flag has to come back down or nothing ever reclaims.
                 self.compacting
@@ -868,6 +883,25 @@ impl MerkleStore {
     /// Whether a background compaction started by [`MerkleStore::start_compaction`] is running.
     pub fn is_compacting(&self) -> bool {
         self.compacting.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Wait for a background compaction started by [`MerkleStore::start_compaction`] to finish.
+    ///
+    /// For shutdown, so the process does not exit while the thread is still inside RocksDB. Returns
+    /// at once if none is running. Never called from [`Drop`], so dropping a handle stays cheap.
+    pub fn wait_for_compaction(&self) {
+        let handle = self
+            .compaction
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+
+        // Joined without the lock, so a new compaction can start meanwhile rather than block.
+        if let Some(handle) = handle
+            && handle.join().is_err()
+        {
+            log::warn!("Merkle store compaction panicked");
+        }
     }
 
     /// Put everything written so far beyond reach of a crash.
@@ -949,6 +983,7 @@ pub fn open_shared(path: &Path) -> Result<Arc<MerkleStore>, OperationalError> {
         db: ManuallyDrop::new(db),
         collected: std::sync::atomic::AtomicBool::new(collected),
         compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        compaction: Mutex::new(None),
         path: key.clone(),
         read_only: false,
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
@@ -1010,6 +1045,7 @@ pub fn open_read_only(path: &Path) -> Result<Arc<MerkleStore>, OperationalError>
         read_only: true,
         collected: std::sync::atomic::AtomicBool::new(collected),
         compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        compaction: Mutex::new(None),
         // Never registered, so nothing looks this up and Drop finds no entry of its own to remove.
         path: path.to_path_buf(),
         store_id: std::sync::atomic::AtomicU64::new(StoreId::next().raw()),
@@ -1400,5 +1436,32 @@ mod tests {
             1,
             "the reclaim should have let go of the store before reporting itself finished"
         );
+    }
+
+    // Waiting for a reclaim returns only once its thread is done with the store, which is what
+    // lets shutdown close RocksDB with nothing still inside it.
+    #[test]
+    fn waiting_for_a_reclaim_outlasts_it() {
+        let tmp = TestableTmpdir::new();
+        let store = open_shared(&tmp.path().join("merkle")).expect("opening should succeed");
+        store.set(b"key", b"body").expect("setting should succeed");
+
+        // Nothing running yet, so this returns at once.
+        store.wait_for_compaction();
+
+        assert!(store.start_compaction(), "a reclaim should have started");
+        store.wait_for_compaction();
+
+        assert!(!store.is_compacting(), "the reclaim should have finished");
+        assert_eq!(
+            Arc::strong_count(&store),
+            1,
+            "the reclaim thread should be done with the store"
+        );
+        assert!(
+            store.start_compaction(),
+            "a reclaim should start again after the last one was waited for"
+        );
+        store.wait_for_compaction();
     }
 }
