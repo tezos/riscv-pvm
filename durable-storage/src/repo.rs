@@ -22,6 +22,7 @@ use crate::journal::JournalEntry;
 use crate::journal::Seq;
 #[cfg(rocksdb)]
 use crate::merkle_store::MerkleStore;
+use crate::storage::StoreId;
 
 /// The [`DirectoryManager`] represents the root directory where commitments & internal data should
 /// be stored.
@@ -260,9 +261,7 @@ impl DirectoryManager {
     /// The journal open for appending, with its last whole entry and the offset just past it.
     ///
     /// Reads only the tail, since assigning the next sequence number is on the commit path and the
-    /// journal grows with every commit until collection prunes it. A trailing partial entry is a
-    /// torn write, so the last whole entry is the one before it and the offset is where the next
-    /// entry belongs: appending past torn bytes would leave every later entry misaligned.
+    /// journal grows with every commit until collection prunes it.
     fn open_journal(&self) -> Result<(std::fs::File, Option<JournalEntry>, u64), OperationalError> {
         let mut journal = std::fs::OpenOptions::new()
             .create(true)
@@ -274,26 +273,24 @@ impl DirectoryManager {
             .open(self.journal_file())
             .map_err(|error| OperationalError::FileWriteFailed { error })?;
 
-        let len = journal
-            .metadata()
-            .map_err(|error| OperationalError::FileReadFailed { error })?
-            .len();
-        let end = len - len % journal::ENTRY_BYTES as u64;
+        let (last, end) = journal_tail(&mut journal)?;
 
-        let Some(last) = end.checked_sub(journal::ENTRY_BYTES as u64) else {
-            return Ok((journal, None, end));
+        Ok((journal, last, end))
+    }
+
+    /// The most recently recorded journal entry, if the repository has committed anything.
+    ///
+    /// Opens for reading and creates nothing, so asking what position comes next never writes to
+    /// the repository - which is why this is separate from [`DirectoryManager::open_journal`]
+    /// rather than a use of it.
+    fn last_journal_entry(&self) -> Result<Option<JournalEntry>, OperationalError> {
+        let mut journal = match std::fs::File::open(self.journal_file()) {
+            Ok(journal) => journal,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(OperationalError::FileReadFailed { error }),
         };
 
-        journal
-            .seek(SeekFrom::Start(last))
-            .map_err(|error| OperationalError::FileReadFailed { error })?;
-
-        let mut bytes = [0u8; journal::ENTRY_BYTES];
-        journal
-            .read_exact(&mut bytes)
-            .map_err(|error| OperationalError::FileReadFailed { error })?;
-
-        Ok((journal, Some(JournalEntry::decode(&bytes)), end))
+        Ok(journal_tail(&mut journal)?.0)
     }
 }
 
@@ -317,6 +314,13 @@ pub trait RegistryRepo: Clone {
     /// Every commit recorded by [`RegistryRepo::record_commit`], in the order they were recorded.
     fn read_commit_journal(&self) -> Result<Vec<JournalEntry>, OperationalError>;
 
+    /// The position the next [`RegistryRepo::record_commit`] will use.
+    ///
+    /// Read before a commit writes its nodes, so they can be recorded as belonging to it. A commit
+    /// that then fails leaves that position unused, which costs nothing: positions order commits
+    /// and need not be contiguous.
+    fn next_commit_seq(&self) -> Result<Seq, OperationalError>;
+
     /// Keep only the journal entries whose root is in `retained`, dropping the rest.
     ///
     /// Replaces the journal in one step, so an interrupted prune leaves either the old journal or
@@ -335,6 +339,12 @@ pub trait RegistryRepo: Clone {
     /// Unordered, and enumerated from what is present for the same reason as
     /// [`RegistryRepo::registry_commits`].
     fn database_commits(&self) -> Result<Vec<CommitId>, OperationalError>;
+
+    /// The identity of the store the repository's Merkle nodes live in.
+    ///
+    /// Replaced by every collection that removes a node, so an unchanged identity means nothing has
+    /// been removed since it was read.
+    fn merkle_store_id(&self) -> StoreId;
 
     /// Remove the manifest for the registry commit `id`.
     ///
@@ -364,6 +374,13 @@ impl RegistryRepo for DirectoryManager {
         let commit_path = self.registry_commit_file(id);
         std::fs::write(&commit_path, bytes)
             .map_err(|error| OperationalError::FileWriteFailed { error })
+    }
+
+    fn next_commit_seq(&self) -> Result<Seq, OperationalError> {
+        Ok(match self.last_journal_entry()? {
+            Some(last) => last.seq.next(),
+            None => Seq::FIRST,
+        })
     }
 
     fn record_commit(&self, root: &CommitId) -> Result<Seq, OperationalError> {
@@ -426,6 +443,17 @@ impl RegistryRepo for DirectoryManager {
         commit_ids_in(&self.registry_commits_dir)
     }
 
+    fn merkle_store_id(&self) -> StoreId {
+        cfg_if::cfg_if! {
+            if #[cfg(rocksdb)] {
+                self.merkle.store_id()
+            } else {
+                // Without RocksDB there is no shared store, and nothing collects nodes.
+                StoreId::NONE
+            }
+        }
+    }
+
     fn database_commits(&self) -> Result<Vec<CommitId>, OperationalError> {
         commit_ids_in(&self.database_commits_dir)
     }
@@ -446,6 +474,36 @@ impl RegistryRepo for DirectoryManager {
             Err(error) => Err(OperationalError::DirRemovalFailed { path: dir, error }),
         }
     }
+}
+
+/// The last whole entry in `journal`, and the offset just past it.
+///
+/// A trailing partial entry is a torn write, so the last whole entry is the one before it and the
+/// offset is where the next entry belongs: appending past torn bytes would leave every later entry
+/// misaligned.
+fn journal_tail(
+    journal: &mut std::fs::File,
+) -> Result<(Option<JournalEntry>, u64), OperationalError> {
+    let len = journal
+        .metadata()
+        .map_err(|error| OperationalError::FileReadFailed { error })?
+        .len();
+    let end = len - len % journal::ENTRY_BYTES as u64;
+
+    let Some(last) = end.checked_sub(journal::ENTRY_BYTES as u64) else {
+        return Ok((None, end));
+    };
+
+    journal
+        .seek(SeekFrom::Start(last))
+        .map_err(|error| OperationalError::FileReadFailed { error })?;
+
+    let mut bytes = [0u8; journal::ENTRY_BYTES];
+    journal
+        .read_exact(&mut bytes)
+        .map_err(|error| OperationalError::FileReadFailed { error })?;
+
+    Ok((Some(JournalEntry::decode(&bytes)), end))
 }
 
 /// The commit ids named by the entries of `dir`.

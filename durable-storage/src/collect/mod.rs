@@ -245,6 +245,12 @@ pub fn collect_nodes(
     target: &CommitId,
     suspend: &Suspend,
 ) -> Result<SweptNodes, GcError> {
+    // Refused up front rather than when the first deletion is attempted, so that collecting through
+    // a handle that cannot write says so whether or not this round happens to have work to do.
+    if repo.merkle_read_only() {
+        return Err(OperationalError::RepositoryIsReadOnly.into());
+    }
+
     let (floor, retained) = journal::retained_positions(&repo.read_commit_journal()?, target)?;
 
     // A database commit is reached by every registry commit naming it, so it is held until the most
@@ -748,6 +754,53 @@ mod node_tests {
         );
     }
 
+    // A collection gives the store a new identity, so no node still in memory can claim to be
+    // stored here on the strength of a write from before the round. Without that, a working tree
+    // whose lineage the round dropped would skip writing nodes the round had just deleted, and
+    // commit something referring to bodies that are gone - silently, unlike a read, which errors.
+    #[test]
+    fn collecting_makes_stored_nodes_prove_themselves_again() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(&[b"a", b"b"], b"1");
+        let second = fixture.commit(&[b"a", b"b"], b"2");
+
+        let before = fixture.repo.merkle_store().store_id();
+
+        let swept = collect_all(&fixture.repo, &second, &Suspend::new())
+            .expect("collection should succeed")
+            .swept;
+        assert!(swept.nodes > 0, "the round should have deleted something");
+
+        assert_ne!(
+            fixture.repo.merkle_store().store_id(),
+            before,
+            "a round that deleted nodes should leave a store nothing can claim to be in"
+        );
+    }
+
+    // A round that deletes nothing leaves the identity alone, so an ordinary collection over a
+    // settled store does not cost the next commit a full rewrite.
+    #[test]
+    fn a_round_that_deletes_nothing_keeps_the_identity() {
+        let mut fixture = Fixture::new();
+
+        let first = fixture.commit(&[b"a"], b"1");
+        fixture.commit(&[b"a"], b"2");
+
+        let before = fixture.repo.merkle_store().store_id();
+
+        let swept = collect_all(&fixture.repo, &first, &Suspend::new())
+            .expect("collection should succeed")
+            .swept;
+        assert_eq!(
+            swept.nodes, 0,
+            "collecting at the oldest root drops nothing"
+        );
+
+        assert_eq!(fixture.repo.merkle_store().store_id(), before);
+    }
+
     // A store that has never collected reports an absent node as simply absent, so the distinction
     // means something.
     #[test]
@@ -768,6 +821,79 @@ mod node_tests {
             ),
             "a store that never collected should not blame collection, got {error:?}"
         );
+    }
+
+    // In steady state a round looks at the churn since the last one, not at the store. This is the
+    // property that keeps collection affordable at scale, and it depends on collecting behind the
+    // tip: a node settled by one round is relisted under the newest retained root, so it stays out
+    // of range until the floor passes that root.
+    //
+    // The first round after a backlog is different, and necessarily so: every node written since
+    // the last round is one whose commit is being dropped, so all of them are in question. What that
+    // round settles is what later rounds no longer pay for.
+    #[test]
+    fn a_settled_store_costs_only_its_churn() {
+        let mut fixture = Fixture::new();
+
+        let base: Vec<Vec<u8>> = (0..400u32).map(|i| i.to_be_bytes().to_vec()).collect();
+        let base_refs: Vec<&[u8]> = base.iter().map(|k| k.as_slice()).collect();
+        fixture.commit(&base_refs, b"0");
+
+        // A run of commits, so that collection can sit behind the tip the way a rollup node does.
+        let mut commits = Vec::new();
+        for value in [b"1", b"2", b"3", b"4", b"5", b"6"] {
+            commits.push(fixture.commit(&[b"\x00\x00\x00\x01"], value));
+        }
+
+        // Catching up: settles the base, which later rounds then do not pay for.
+        let catch_up = collect_nodes(&fixture.repo, &commits[1], &Suspend::new())
+            .expect("the first round should succeed");
+        assert!(
+            catch_up.examined >= 400,
+            "the first round should have had to consider the base"
+        );
+
+        let store_nodes = fixture.nodes();
+
+        // A little churn, then a round whose floor is still behind the tip.
+        fixture.commit(&[b"\x00\x00\x00\x02"], b"7");
+        fixture.commit(&[b"\x00\x00\x00\x02"], b"8");
+
+        let swept = collect_nodes(&fixture.repo, &commits[3], &Suspend::new())
+            .expect("the second round should succeed");
+
+        assert!(
+            swept.examined < store_nodes / 4,
+            "a round examined {} of {} nodes; it should cost the churn, not the store",
+            swept.examined,
+            store_nodes,
+        );
+    }
+
+    // A node proved live is not looked at again by a later round at the same floor, because it is
+    // relisted under the root that holds it.
+    #[test]
+    fn a_live_node_is_not_re_examined() {
+        let mut fixture = Fixture::new();
+
+        let base: Vec<Vec<u8>> = (0..200u32).map(|i| i.to_be_bytes().to_vec()).collect();
+        let base_refs: Vec<&[u8]> = base.iter().map(|k| k.as_slice()).collect();
+        fixture.commit(&base_refs, b"0");
+        fixture.commit(&[b"\x00\x00\x00\x01"], b"1");
+        let last = fixture.commit(&[b"\x00\x00\x00\x01"], b"2");
+
+        let first_round = collect_nodes(&fixture.repo, &last, &Suspend::new())
+            .expect("the first round should succeed");
+        assert!(first_round.examined > 0);
+
+        let second_round = collect_nodes(&fixture.repo, &last, &Suspend::new())
+            .expect("the second round should succeed");
+
+        assert_eq!(
+            second_round.examined, 0,
+            "everything settled by the first round should be out of the second round's range"
+        );
+        assert_eq!(second_round.nodes, 0);
     }
 
     // Collecting at the oldest root keeps every node, since every commit is retained.
@@ -932,6 +1058,78 @@ mod node_tests {
                 expected
             );
         }
+    }
+
+    // A dead node relisted above a later floor survives a round that deletes its child through a
+    // lower listing. A working state of the dropped lineage would commit the survivor as if its
+    // subtree were whole, so it is refused instead.
+    #[test]
+    fn a_working_state_whose_base_was_collected_cannot_commit() {
+        fn set(
+            registry: &mut Registry<PersistenceLayer, Normal>,
+            db: usize,
+            key: &[u8],
+            value: &[u8],
+        ) {
+            registry
+                .database_mut(db)
+                .expect("the database should exist")
+                .set(
+                    Key::new(key).expect("the key should be valid"),
+                    Bytes::copy_from_slice(value),
+                )
+                .expect("setting should succeed");
+        }
+
+        let tmp = TestableTmpdir::new();
+        let repo = DirectoryManager::new(tmp.path())
+            .expect("creating the directory manager should succeed");
+        let mut registry = Registry::<PersistenceLayer, Normal>::new(repo.clone());
+        for size in [1, 2] {
+            registry
+                .resize_tick(size)
+                .expect("resizing the registry should succeed");
+        }
+
+        // Database 0 is a root `a` over a leaf `b`, both listed at seq 0.
+        set(&mut registry, 0, b"a", b"1");
+        set(&mut registry, 0, b"b", b"1");
+        registry.commit().expect("committing should succeed");
+
+        // A fresh leaf `b` in database 1 hashes the same as database 0's, and lists it again at 1.
+        set(&mut registry, 1, b"b", b"1");
+        let second = registry.commit().expect("committing should succeed");
+
+        // Neither database holds the root or the leaf any more.
+        set(&mut registry, 0, b"a", b"2");
+        set(&mut registry, 0, b"b", b"2");
+        set(&mut registry, 1, b"b", b"2");
+        let third = registry.commit().expect("committing should succeed");
+
+        // Both are live here, and both are relisted under the newest root, seq 2.
+        collect_all(&repo, &second, &Suspend::new()).expect("the first round should succeed");
+
+        // A working state of a lineage the next round drops.
+        let mut stale = Registry::<PersistenceLayer, Normal>::checkout(repo.clone(), second)
+            .expect("the second commit should check out");
+
+        // Floor 2: the leaf's listing at 1 is a candidate and dead, so it goes. The root is listed
+        // only at 2, so it is never examined and its body stays.
+        let swept = collect_all(&repo, &third, &Suspend::new())
+            .expect("the second round should succeed")
+            .swept;
+        assert!(
+            swept.nodes > 0,
+            "the second round should have deleted the leaf"
+        );
+
+        // Committing would record the root over a subtree that is no longer whole.
+        set(&mut stale, 1, b"c", b"1");
+        let committed = stale.commit();
+        assert!(
+            matches!(committed, Err(OperationalError::BaseCollected { .. })),
+            "a working state whose base was collected should not commit, got {committed:?}"
+        );
     }
 }
 
