@@ -1,0 +1,195 @@
+---
+title: "Batched hashing"
+description: "Why most of the AVL's hashing runs on one SIMD lane out of sixteen, what a forked BLAKE3 measured, and what would have to change to collect the win"
+---
+
+Hashing a large byte value is fast, because BLAKE3 hashes its chunks in parallel across SIMD
+lanes. Hashing the AVL itself is not, because it is thousands of *small independent* hashes issued
+one at a time, and each one uses a single lane. This page records what that costs, what a forked
+BLAKE3 measured, and what would have to change to collect it.
+
+Everything here is an investigation, not a plan. Nothing in it is implemented.
+
+<Note>
+Measurements below are from one dev machine — 16 cores, AVX-512, so a SIMD degree of 16 — with
+`--release`. Ratios should travel; absolute figures will not. A machine with AVX2 has a degree of
+8 and should see roughly half the batching win.
+</Note>
+
+## The shape of the problem
+
+BLAKE3 compresses 64 bytes at a time. Within one hash those compressions form a chain, so they
+cannot overlap — the parallelism comes from running *several independent* chains in different
+lanes at once. `blake3::hash` does that internally across the chunks of a single large input,
+which is why hashing a 1 MiB value runs at ~7.5 GB/s. Issue the same work as many separate calls
+and every one of them runs alone.
+
+Measured directly:
+
+| | per 64-byte block |
+|---|---|
+| hashed serially, one input at a time | ~50 ns |
+| batched, lanes full | ~7.8 ns |
+
+That factor of about 6.5 is the whole opportunity.
+
+The cost of a single small hash is almost entirely fixed overhead rather than work:
+
+| input | cost |
+|---|---|
+| 1 B | 58.7 ns |
+| 32 B | 45.9 ns |
+| 64 B | 43.8 ns |
+| **65 B** | **115.4 ns** |
+| 128 B | 117.9 ns |
+| 160 B | 162.9 ns |
+| 1024 B | 781.1 ns |
+
+Note the cliff between 64 and 65 bytes. One byte over a block boundary costs a second
+compression, and 65 bytes costs the same as 128.
+
+## What the AVL actually hashes
+
+| hashed input | bytes | 64-byte blocks | uniform whole blocks? |
+|---|---|---|---|
+| a 2-digest combine (key subtree, value hash) | 64 | 1 | yes |
+| **an AVL node hash** (5 digests) | 160 | 2 + a 32 B tail | **no** |
+| **a full key page leaf** | **65** | **2** | **no** |
+| a key length leaf | 1 | 1 | yes |
+
+Measured costs that follow from that: an AVL node hash is **168 ns**, a 2-digest combine **62 ns**,
+a full key page leaf **115 ns**. A key folds as a length leaf plus a binary tree over 64-byte
+pages, with no memoisation — the `Cell`s in `avl/key.rs` track Prove-mode access, not hashes — so
+every fold recomputes the lot:
+
+| key | hashes | cost |
+|---|---|---|
+| 64 B (1 page) | 3 | 221 ns |
+| 150 B (3 pages) | 7 | 575 ns |
+| 255 B (4 pages) | 9 | 752 ns |
+
+For a root rehash over a 20k-key tree with 1000 dirty paths, that is roughly 1.2 ms of node
+hashing and 0.6 ms of key hashing against 0.15 ms of value hashing — call it **1.9 ms of a 6.8 ms
+rehash**. Node and key hashing is around 26% of the work; value hashing is about 2%. These are
+estimates from per-hash costs and an approximate node count, not instrumented totals, and anyone
+acting on them should instrument first.
+
+## The fork
+
+BLAKE3's multi-buffer routine, `hash_many`, is what fills the lanes. The crate uses it internally
+and does not export it: `hazmat` exposes tree surgery only. Exposing it takes about thirty-five
+lines appended to a vendored copy of `blake3` 1.8.7:
+
+```rust
+pub mod batch {
+    use super::*;
+
+    pub fn simd_degree() -> usize {
+        platform::Platform::detect().simd_degree()
+    }
+
+    /// Hash `inputs`, each exactly `N` bytes, producing 32 bytes per input into `out`.
+    pub fn hash_many_uniform<const N: usize>(inputs: &[&[u8; N]], out: &mut [u8]) {
+        assert_eq!(N % BLOCK_LEN, 0, "inputs must be a whole number of 64-byte blocks");
+        assert!(N > 0 && N <= CHUNK_LEN, "inputs must fit in a single chunk");
+        assert!(out.len() >= inputs.len() * OUT_LEN, "output too short");
+        platform::Platform::detect().hash_many(
+            inputs,
+            IV,
+            0,
+            crate::IncrementCounter::No,
+            0,
+            CHUNK_START,
+            CHUNK_END | ROOT,
+            out,
+        );
+    }
+}
+```
+
+The flags are the part worth getting right. `ROOT` must be applied only to the *final* block, so it
+belongs in `flags_end` and not in `flags` — passing it in `flags` would set it on every block and
+silently produce the wrong hash for any input longer than one block. With the arrangement above,
+the output is bit-identical to `blake3::hash` for each input, which is worth asserting in any
+experiment before trusting a benchmark.
+
+### Two hard constraints
+
+`hash1` asserts `N % BLOCK_LEN == 0`, and `N` is a const generic. So a batch must be inputs of
+**one uniform length** that is a **whole number of 64-byte blocks**. There is no `block_len`
+parameter anywhere in the multi-buffer path, so a partial final block cannot be batched — which is
+why the 160-byte node hash and the 65-byte key page leaf are both excluded.
+
+## What it measures
+
+Serial versus batched, 1024 inputs:
+
+| input size | serial per input | batched per input | speedup |
+|---|---|---|---|
+| 64 B | 48.8 ns | 7.9 ns | 6.16× |
+| 128 B | 132.9 ns | 15.4 ns | 8.61× |
+| 192 B | 185.7 ns | 22.9 ns | 8.12× |
+
+But the win depends sharply on how many inputs are batched at once:
+
+| batch | speedup (64 B inputs) |
+|---|---|
+| 1 | 1.45× |
+| 2 | 2.79× |
+| 3 | 1.58× |
+| 4 | 2.77× |
+| 8 | 5.27× |
+| 16 | 6.17× |
+| 1024 | 6.14× |
+
+It is a sawtooth: a batch of 3 leaves 13 of 16 lanes idle and does worse than a batch of 2.
+
+**This is the finding that shapes everything else.** Batching a single key's 3–4 page hashes —
+which is easy, since they are independent and local — buys under 2×. Reaching 6× needs batches of
+8 to 16, which means batching *across* nodes, which means the fold must stop being depth-first
+recursive and evaluate level by level, collecting the independent hashes at each level and issuing
+them together. Nodes at the same depth are independent; only the parent-child edge is ordered, so
+this is sound. It is also invasive: `Foldable`/`Fold` is shared by every component, not just the
+AVL.
+
+## Two tiers
+
+**Tier 1, changing no hashes.** Batch only the inputs that are already uniform whole blocks — the
+64-byte 2-digest combines. Node hashes, which are the bulk, stay serial. Worth roughly 0.2 ms of a
+6.8 ms rehash, about 2–3%. That does not justify a forked dependency.
+
+**Tier 2, changing the hashed encodings.** Make them block-aligned:
+
+- A full key page leaf is 65 bytes because `PageRef::encode` writes a `u8` length ahead of 64 bytes
+  of page. The prefix is redundant there — the key's total length already has its own committed
+  leaf — and removing it makes the leaf exactly one block. That is **2.6× cheaper with no batching
+  at all**, and batchable on top.
+- An AVL node hash is 160 bytes. Either restructure it into block-aligned combines or accept
+  192-byte padding, which batches at 8.1×.
+
+Estimated together: node hashing 1.18 → ~0.17 ms, key hashing 0.58 → ~0.07 ms. About **1.5 ms off a
+6.8 ms rehash, roughly 1.28×** — more than migrating the value hash to BLAKE3 delivered on the same
+workload (1.16×).
+
+Tier 2 changes consensus-relevant hashes. It is a hard fork.
+
+## For the next session
+
+1. **Instrument first.** The 26% figure is inferred. Count the hashes a real rehash issues, by
+   shape, before designing anything around it.
+2. **Prototype the level-order fold** on the AVL alone, before touching the generic pipeline, and
+   confirm batches actually reach 8–16 in a realistic tree. If they do not, the rest is moot.
+3. **Try the key page leaf on its own.** It is the smallest self-contained change with a real
+   payoff, it needs no batching to pay, and it is easy to measure.
+4. **Prefer upstreaming to forking.** The routine already exists inside `blake3`, and `hazmat`
+   shows the maintainers will expose sharp tools with the right warnings. A maintained fork of a
+   hash library used for consensus is a liability worth avoiding.
+5. **Check the tail case.** Batching the two full blocks of a 160-byte node hash and finishing the
+   32-byte tail serially yields about 2×, not 8×. If node hashes cannot be made block-aligned, that
+   is the ceiling for them.
+
+<Warning>
+Any change in this area moves consensus-relevant hashes, and batching must be verified
+bit-identical to the serial path before it is believed — the flag handling described above is easy
+to get subtly wrong in a way that still produces plausible-looking digests.
+</Warning>

@@ -15,6 +15,8 @@ pub const fn ones(n: u64) -> u64 {
 
 /// Tag of a node
 pub const TAG_NODE: u8 = 0b00;
+/// Tag of a BLAKE3 within-value proof leaf (see [`crate::components::blake3_bytes`])
+pub const TAG_BLAKE3: u8 = 0b01;
 /// Tag of a blind leaf
 pub const TAG_BLIND: u8 = 0b10;
 /// Tag of a read leaf
@@ -37,6 +39,8 @@ const fn tag_offset(index: usize) -> usize {
 pub enum LeafTag {
     Blind,
     Read,
+    /// A BLAKE3 within-value partial proof (a length-committed [`crate::components::blake3_bytes::Blake3Proof`]).
+    Blake3,
 }
 
 impl Encode for LeafTag {
@@ -47,6 +51,7 @@ impl Encode for LeafTag {
         match self {
             LeafTag::Blind => TAG_BLIND,
             LeafTag::Read => TAG_READ,
+            LeafTag::Blake3 => TAG_BLAKE3,
         }
         .encode(encoder)
     }
@@ -111,6 +116,7 @@ impl From<Tag> for u8 {
             Tag::Leaf(leaf_tag) => match leaf_tag {
                 LeafTag::Blind => TAG_BLIND,
                 LeafTag::Read => TAG_READ,
+                LeafTag::Blake3 => TAG_BLAKE3,
             },
         }
     }
@@ -128,6 +134,7 @@ impl TryFrom<u8> for Tag {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             TAG_NODE => Ok(Self::Node),
+            TAG_BLAKE3 => Ok(Self::Leaf(LeafTag::Blake3)),
             TAG_BLIND => Ok(Self::Leaf(LeafTag::Blind)),
             TAG_READ => Ok(Self::Leaf(LeafTag::Read)),
             _ => Err(InvalidTagError),
@@ -155,6 +162,7 @@ mod tests {
             Tag::Node,
             Tag::Leaf(LeafTag::Blind),
             Tag::Leaf(LeafTag::Read),
+            Tag::Leaf(LeafTag::Blake3),
         ];
         for tag in tags.iter() {
             tag_encode_cycle_checker(tag);

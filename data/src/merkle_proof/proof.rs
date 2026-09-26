@@ -183,6 +183,9 @@ mod tests {
                     nodes_count: 1,
                     content_size: data.len() as u64,
                 },
+                MerkleProof::Leaf(MerkleProofLeaf::Blake3(_)) => {
+                    panic!("This test does not generate BLAKE3 within-value proof leaves")
+                }
             }
         }
     }
