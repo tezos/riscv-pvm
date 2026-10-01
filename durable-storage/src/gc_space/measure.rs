@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
+use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::Duration;
@@ -246,15 +247,22 @@ fn accumulate_disk_usage(
 ) -> Result<()> {
     let mut pending = vec![root.to_path_buf()];
 
+    // A background reclaim may delete files mid-walk; those are no longer occupying anything.
     while let Some(dir) = pending.pop() {
-        let entries = fs::read_dir(&dir)
-            .with_context(|| format!("reading the directory {}", dir.display()))?;
+        let entries = match fs::read_dir(&dir) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            entries => {
+                entries.with_context(|| format!("reading the directory {}", dir.display()))?
+            }
+        };
 
         for entry in entries {
             let entry = entry.with_context(|| format!("reading an entry of {}", dir.display()))?;
-            let metadata = entry
-                .metadata()
-                .with_context(|| format!("reading metadata of {}", entry.path().display()))?;
+            let metadata = match entry.metadata() {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                metadata => metadata
+                    .with_context(|| format!("reading metadata of {}", entry.path().display()))?,
+            };
 
             if metadata.is_dir() {
                 pending.push(entry.path());
