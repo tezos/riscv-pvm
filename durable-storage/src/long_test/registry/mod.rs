@@ -124,6 +124,7 @@ pub fn run_long_test(
         .with_context(|| format!("creating repo dir {}", repo_dir.display()))?;
     let persistent_repo =
         DirectoryManager::new(&repo_dir).context("creating the directory manager")?;
+    let _reclaim = gc::ReclaimGuard(&persistent_repo);
     let in_memory_repo = InMemoryRepo::default();
 
     let mut base = initial_base(&in_memory_repo, &persistent_repo, permanent);
@@ -166,13 +167,34 @@ pub fn run_long_test(
 
         match result {
             Ok(()) => {
+                // Garbage-collect snapshots older than the retention window.
+                let round = match keep_epochs {
+                    Some(keep_epochs) => gc::prune(
+                        &persistent_repo,
+                        &in_memory_repo,
+                        &mut recent_commits,
+                        keep_epochs,
+                    )?,
+                    None => None,
+                };
+                let swept = round
+                    .map(|round| {
+                        format!(
+                            ", swept {}/{} nodes",
+                            round.swept.nodes, round.swept.examined
+                        )
+                    })
+                    .unwrap_or_default();
+
                 // Size reporting only via the binary, not the crate test.
                 #[cfg(not(test))]
                 {
+                    // A reclaim writes the rewritten store before deleting the old one.
+                    persistent_repo.finish_reclaim();
                     let repo_size = crate::gc_space::disk_usage(&repo_dir)
                         .context("measuring the size of the repo")?;
                     eprintln!(
-                        "epoch {epoch} ok ({} databases, {} entries, repo: {:.2} MiB)",
+                        "epoch {epoch} ok ({} databases, {} entries, repo: {:.2} MiB{swept})",
                         base.model.len(),
                         base.model.total_entries(),
                         repo_size.unique_bytes as f64 / (1024.0 * 1024.0),
@@ -180,20 +202,10 @@ pub fn run_long_test(
                 }
                 #[cfg(test)]
                 eprintln!(
-                    "epoch {epoch} ok ({} databases, {} entries)",
+                    "epoch {epoch} ok ({} databases, {} entries{swept})",
                     base.model.len(),
                     base.model.total_entries()
                 );
-
-                // Garbage-collect snapshots older than the retention window.
-                if let Some(keep_epochs) = keep_epochs {
-                    gc::prune(
-                        &persistent_repo,
-                        &in_memory_repo,
-                        &mut recent_commits,
-                        keep_epochs,
-                    )?;
-                }
 
                 Ok(())
             }
@@ -427,10 +439,12 @@ mod tests {
 
     use bytes::Bytes;
     use octez_riscv_data::hash::Hash;
+    use octez_riscv_data::mode::Normal;
     use octez_riscv_test_utils::TestableTmpdir;
 
     use super::*;
     use crate::key::Key;
+    use crate::registry::Registry;
     use crate::test_helpers::database::DatabaseOperation;
 
     fn restricted_config() -> LongTestConfig {
@@ -460,44 +474,72 @@ mod tests {
             .expect("the short keep-stable-size registry long test run should succeed");
     }
 
-    const PERMANENT: usize = 2;
+    pub(super) const PERMANENT: usize = 2;
 
-    struct TestSetup {
+    /// Both backends' repositories in a temporary directory, for building bases on.
+    pub(super) struct Fixture {
         _tmp: TestableTmpdir,
-        out_dir: PathBuf,
-        persistent_repo: DirectoryManager,
-        in_memory_repo: InMemoryRepo,
-        base: Base<RegistryLongTestModel>,
-        key: Key,
+        pub(super) out_dir: PathBuf,
+        pub(super) persistent_repo: DirectoryManager,
+        pub(super) in_memory_repo: InMemoryRepo,
     }
 
-    /// Build a base committed on both backends whose database 0 holds a key.
-    fn build_base_with_key() -> TestSetup {
-        let tmp = TestableTmpdir::new();
-        let out_dir = tmp.path().to_owned();
-        let repo_dir = out_dir.join("repo");
-        fs::create_dir_all(&repo_dir).expect("creating the repo dir should succeed");
-        let persistent_repo = DirectoryManager::new(&repo_dir)
-            .expect("creating the directory manager should succeed");
-        let in_memory_repo = InMemoryRepo::default();
+    impl Fixture {
+        pub(super) fn new() -> Self {
+            let tmp = TestableTmpdir::new();
+            let out_dir = tmp.path().to_owned();
+            let repo_dir = out_dir.join("repo");
+            fs::create_dir_all(&repo_dir).expect("creating the repo dir should succeed");
+            let persistent_repo = DirectoryManager::new(&repo_dir)
+                .expect("creating the directory manager should succeed");
 
-        let key = Key::new(&[1, 2, 3]).expect("the key should be valid");
-        let set = RegistryOperation::Database(
-            0,
-            DatabaseOperation::Set(key.clone(), Bytes::from_static(b"value")),
-        );
-
-        let base = initial_base(&in_memory_repo, &persistent_repo, PERMANENT);
-        let base = advance_base(&in_memory_repo, &persistent_repo, &base, &[set]);
-
-        TestSetup {
-            _tmp: tmp,
-            out_dir,
-            persistent_repo,
-            in_memory_repo,
-            base,
-            key,
+            Self {
+                _tmp: tmp,
+                out_dir,
+                persistent_repo,
+                in_memory_repo: InMemoryRepo::default(),
+            }
         }
+
+        /// The key [`Fixture::set`] writes.
+        pub(super) fn key() -> Key {
+            Key::new(&[1, 2, 3]).expect("the key should be valid")
+        }
+
+        pub(super) fn initial_base(&self) -> Base<RegistryLongTestModel> {
+            initial_base(&self.in_memory_repo, &self.persistent_repo, PERMANENT)
+        }
+
+        /// Advance `base` by setting [`Fixture::key`] in database 0 to `value`.
+        pub(super) fn set(
+            &self,
+            base: &Base<RegistryLongTestModel>,
+            value: &'static [u8],
+        ) -> Base<RegistryLongTestModel> {
+            let ops = [RegistryOperation::Database(
+                0,
+                DatabaseOperation::Set(Self::key(), Bytes::from_static(value)),
+            )];
+            advance_base(&self.in_memory_repo, &self.persistent_repo, base, &ops)
+        }
+
+        /// Check out `commit` on both backends.
+        pub(super) fn assert_checks_out(&self, commit: CommitId) {
+            Registry::<PersistenceLayer, Normal>::checkout(self.persistent_repo.clone(), commit)
+                .expect("the base should check out on the persistent backend");
+            Registry::<InMemoryKeyValueStore, Normal>::checkout(
+                self.in_memory_repo.clone(),
+                commit,
+            )
+            .expect("the base should check out on the in-memory backend");
+        }
+    }
+
+    /// A fixture with a base whose database 0 holds [`Fixture::key`].
+    fn build_base_with_key() -> (Fixture, Base<RegistryLongTestModel>) {
+        let fixture = Fixture::new();
+        let base = fixture.set(&fixture.initial_base(), b"value");
+        (fixture, base)
     }
 
     fn dummy_meta(base_commit: CommitId) -> FailureMeta {
@@ -517,15 +559,15 @@ mod tests {
     // reproduces the failure.
     #[test]
     fn internal_test_replay_reproduces_recorded_failure() {
-        let setup = build_base_with_key();
-        let meta = dummy_meta(setup.base.commit);
+        let (setup, base) = build_base_with_key();
+        let meta = dummy_meta(base.commit);
 
         // An empty model disagrees with the restored base (whose database 0
         // holds `key`): checking the key's existence mismatches and panics.
         let model = RegistryLongTestModel::new(PERMANENT);
         let ops = vec![RegistryOperation::Database(
             0,
-            DatabaseOperation::Exists(setup.key.clone()),
+            DatabaseOperation::Exists(Fixture::key()),
         )];
         write_failure(
             &setup.out_dir,
@@ -549,11 +591,11 @@ mod tests {
     // on both backends, so a non-mutating sequence passes.
     #[test]
     fn internal_test_replay_passes_for_a_consistent_base() {
-        let setup = build_base_with_key();
-        let meta = dummy_meta(setup.base.commit);
+        let (setup, base) = build_base_with_key();
+        let meta = dummy_meta(base.commit);
 
         let ops = vec![
-            RegistryOperation::Database(0, DatabaseOperation::Exists(setup.key.clone())),
+            RegistryOperation::Database(0, DatabaseOperation::Exists(Fixture::key())),
             RegistryOperation::Database(0, DatabaseOperation::Hash),
         ];
         write_failure(
@@ -561,7 +603,7 @@ mod tests {
             &setup.persistent_repo,
             &setup.in_memory_repo,
             &meta,
-            &setup.base.model,
+            &base.model,
             &ops,
         )
         .expect("writing the failure artifact should succeed");
