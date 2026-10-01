@@ -819,6 +819,15 @@ impl MerkleStore {
         // leaves as much behind here as it does among the nodes themselves.
         self.db
             .compact_range_cf_opt(self.written_cf(), unbounded, unbounded, &options);
+
+        // Compacting the families above flushes them onto a fresh write-ahead log, but a log can
+        // only go once every family has flushed past it. The first collection writes a few bytes
+        // here, never enough to flush on its own, so unflushed this would pin every log since.
+        if let Some(meta) = self.meta_cf()
+            && let Err(error) = self.db.flush_cf(meta)
+        {
+            log::warn!("could not flush the Merkle store's {META_CF} family: {error}");
+        }
     }
 
     /// Start reclaiming in the background, and return without waiting for it.
@@ -1378,6 +1387,36 @@ mod tests {
             reopened.has_collected(),
             "the record should have survived the close"
         );
+    }
+
+    // Repeated collect-and-compact rounds do not accumulate write-ahead logs: each round writes to
+    // the meta family, which compacting has to flush along with the others.
+    #[test]
+    fn compacting_after_collecting_releases_the_write_ahead_logs() {
+        let tmp = TestableTmpdir::new();
+        let path = tmp.path().join("merkle");
+        let store = open_shared(&path).expect("opening should succeed");
+
+        for round in 0..8u8 {
+            store
+                .set(&digest(round), b"node")
+                .expect("setting should succeed");
+            store.note_collected().expect("noting should succeed");
+            store.compact();
+        }
+
+        let logs = std::fs::read_dir(&path)
+            .expect("the store directory should be readable")
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .expect("an entry should be readable")
+                    .path()
+                    .extension()
+                    .is_some_and(|extension| extension == "log")
+            })
+            .count();
+        assert_eq!(logs, 1, "only the live write-ahead log should remain");
     }
 
     // A reader sees it too, which is who the distinction is for: the process that collected is not
