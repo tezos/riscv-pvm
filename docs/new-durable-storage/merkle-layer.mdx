@@ -1,0 +1,76 @@
+---
+title: "Merkle Layer"
+description: "The AVL tree that gives every state a root hash"
+---
+
+The Merkle Layer is a Merkle-ised AVL tree over the keys and values of one Database.
+It gives every state of the database a root hash, and supports producing and verifying proofs of operations over it.
+In normal operation it lives inside the Database's [Merkle Worker](/new-durable-storage/merkle-worker); when proving or verifying, the database holds it directly.
+
+## The AVL tree
+
+An AVL tree is a binary search tree that keeps itself balanced.
+Every node has a key; keys smaller than a node's are in its left subtree and keys greater are in its right subtree (see [Key comparison](/new-durable-storage/key-comparison)).
+To find a key, you start at the root and compare: go left if the key is smaller, right if it is greater, and stop when it matches.
+Inserting a new key follows the same path down and adds the new node where the path reaches an empty subtree; setting an existing key replaces its value in place.
+After an insertion or deletion, the tree checks the heights of the subtrees along that path and restructures them wherever one side has become more than one level taller than the other.
+This keeps the tree's height logarithmic in the number of keys.
+
+<Note>
+How the tree is restructured depends on the order of operations, and the root hash covers the tree's shape as well as its contents.
+The same keys and values can therefore have different root hashes if they were written in a different order.
+</Note>
+
+A tree (`Tree`) is either empty or a single root node.
+Each node (`Node`) holds:
+
+| Field | Type | Contents |
+|---|---|---|
+| `balance_factor` | `i8` | Height of the right subtree minus height of the left, kept within `-1..=1` |
+| `key` | `Key` | The database key, which orders the tree |
+| `data` | `LazyDataId` | The value, through an identifier that can stand for it by its hash alone |
+| `left` | `LazyTreeId` | The left subtree, holding smaller keys |
+| `right` | `LazyTreeId` | The right subtree, holding greater keys |
+
+A node that has not been loaded is represented by its hash alone, in the identifier pointing to it, so it is never rehashed or rewritten.
+A loaded node caches its hash and the store it was last written to; changing it clears both.
+Only the nodes an operation changed are therefore rehashed, and only those are written on commit (see [Merkle nodes](/new-durable-storage/persistence-layer#merkle-nodes)).
+
+## Resolving
+
+The tree refers to its nodes, subtrees and values through identifiers rather than holding them directly.
+A resolver turns an identifier into the value it stands for.
+
+In normal operation the identifiers are `LazyNodeId`, `LazyTreeId` and `LazyDataId`, resolved by `LazyResolver`.
+A lazy identifier starts as a hash only.
+The first time it is resolved, `LazyResolver` loads the value from the [Persistence Layer](/new-durable-storage/persistence-layer) and caches it in the identifier.
+Mutating a value clears its hash, which is recomputed when next needed.
+
+Only resolved data is held in memory; the rest of the tree is just hashes.
+Tests use an eager variant, `ArcNodeId` and `ArcTreeId` resolved by `ArcResolver`, which holds the whole tree in memory.
+
+<Warning>
+There is currently no way to un-resolve data, so a tree's memory use only grows as more of it is read or written.
+The only way of releasing it at the moment is to drop it and check out from a commit.
+</Warning>
+
+## Copying a database
+
+Copying or cloning a database clones its Merkle tree with `MerkleLayer::clone_with`.
+This is cheap: resolved nodes are reference-counted, so the copy shares every node with the original instead of duplicating it.
+A later change copies only the nodes on the path it modifies, leaving the rest shared.
+
+## Folding and hashing
+
+The hash of a database is the root hash of its Merkle AVL tree.
+The hash of a registry combines the hashes of its databases.
+
+Hashing is one instance of folding.
+A type implementing `Foldable` describes its structure once, and each `Fold` implementation interprets that structure differently.
+A node folds its balance factor, key, value, left subtree and right subtree, in that order; a tree folds whether it is empty, then its root.
+
+| Fold | Mode | Produces |
+|---|---|---|
+| `HashFold` | `Normal` | The root hash, reusing cached node hashes |
+| `MerkleProofFold` | `Prove` | A Merkle proof covering the nodes an operation touched |
+| `PartialHashFold` | `Verify` | The root hash of a partial tree rebuilt from a proof, taking unchanged parts from the proof |

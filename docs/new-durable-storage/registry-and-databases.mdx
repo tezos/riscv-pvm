@@ -1,0 +1,93 @@
+---
+title: "Registry and databases"
+description: "The interface you use to store and commit data"
+---
+
+The Registry and its databases are the part of the NDS you use directly.
+A Registry is an ordered collection of databases, addressed by index, which are hashed, committed and checked out together.
+A database is an independent key-value store.
+
+## Registry
+
+In normal operation you use `Registry<PersistenceLayer, Normal>`, created over a repository directory.
+
+### Operations
+
+| Operation | Description |
+|---|---|
+| `new(repo)` | Create an empty Registry over a repository |
+| `checkout(repo, commit_id)` | Restore a committed Registry into a working state you can modify |
+| `checkout_read_only(repo, commit_id)` | Restore a committed Registry for reading only, reading its databases where they lie on disk |
+| `commit()` | Commit every database and the Registry itself, returning the Registry's `CommitId` |
+| `len()`, `is_empty()` | The number of databases |
+| `resize_tick(new_size)` | Grow or shrink the Registry by at most one database. New databases are empty; shrinking drops the last one |
+| `database(index)`, `database_mut(index)` | Reach a database to operate on it |
+| `copy_database(src, dst)` | Replace database `dst` with a copy of database `src` |
+| `move_database(src, dst)` | Replace database `dst` with database `src`, leaving an empty database at `src` |
+| `clear_database(index)` | Replace a database with an empty one |
+| `try_clone()` | Copy the whole Registry |
+| `clone_read_only()` | Copy a read-only Registry, at no cost |
+| `to_writeable()` | Turn a read-only Registry into a working one |
+
+Operations that take an index fail if it is out of bounds.
+
+### Hashing a Registry
+
+The hash of a Registry is computed from the hashes of its databases.
+It folds as a node of two children: the number of databases, and a binary tree whose leaves are the database hashes, in index order.
+A database's hash is the root hash of its [Merkle Layer](/new-durable-storage/merkle-layer); here it can be treated as opaque.
+The Merkle Layer page also explains folding in more detail.
+
+### The repository on disk
+
+A Registry stores everything in a repository, accessed through the `RegistryRepo` trait.
+The implementation backed by the file system is `DirectoryManager`, opened with `DirectoryManager::new(path)`, which creates the directories below if they do not exist yet.
+
+```text
+<repo_path>/
+  databases/
+    temporary/db_<random>/        working databases
+    commits/<commit_id>/          database commits
+  registries/
+    commits/<commit_id>           registry manifests
+    journal                       the order registry commits were made in
+  merkle/                         Merkle node store, shared by every database
+  merkle-commits/                 recoverable images of the Merkle node store
+```
+
+`RegistryRepo` covers the registry's own part of this: reading and writing manifests, and recording commits in the journal.
+The databases' directories and the Merkle node store are managed by the [Persistence Layer](/new-durable-storage/persistence-layer).
+
+### Committing and checking out
+
+`commit` first [commits each database](/new-durable-storage/persistence-layer#committing) in turn, which returns a `CommitId` for each.
+It then writes a **registry manifest**: the list of those database commit ids, in index order.
+The manifest is stored under `registries/commits/`, named after the Registry's own `CommitId`, which is the hash of the Registry.
+Finally, the commit is recorded in the journal.
+The journal is written after the manifest, so an interrupted commit leaves at worst an unrecorded manifest, never a recorded commit with no manifest behind it.
+
+Several registry commits can name the same database commit, since a database commit id is the hash of that database's state.
+
+`checkout` reads the manifest of the given commit, checks out each database it names, and recomputes the Registry's hash.
+If the hash does not match the commit id, the checkout fails with `RegistryCommitMismatch`.
+`checkout_read_only` does the same without copying the databases into a working state (see [Checking out and cloning](/new-durable-storage/persistence-layer#checking-out-and-cloning)).
+
+## Databases
+
+A database maps keys of at most 255 bytes to values of at most 64 MiB.
+Each one combines a [Persistence Layer](/new-durable-storage/persistence-layer), which stores its values, with a [Merkle Layer](/new-durable-storage/merkle-layer), which gives its state a root hash.
+In normal operation the Merkle Layer is maintained in the background by a [Merkle Worker](/new-durable-storage/merkle-worker).
+
+| Operation | Description |
+|---|---|
+| `exists(key)` | Whether the key is present |
+| `value_length(key)` | The length of the key's value |
+| `read(key, offset, output)` | Read part of a value, from `offset`, into a buffer, returning the number of bytes read |
+| `read_bytes(key, offset, max_bytes)` | Read up to `max_bytes` of a value, from `offset`, returning the bytes |
+| `set(key, data)` | Set the key's value, replacing any existing one |
+| `write(key, offset, data)` | Write into the key's value at `offset`, appending if it equals the value's length. A missing key is treated as an empty value |
+| `delete(key)` | Remove the key. Deleting a missing key succeeds |
+| `hash()` | The root hash of the database's state |
+
+A single read, `set` or `write` handles at most `MAX_FILE_CHUNK_SIZE` bytes; larger values are built up with several writes.
+Reads fail if the key is missing or the offset is past the end of the value.
