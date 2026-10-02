@@ -36,8 +36,24 @@
         "tab": "New Durable Storage",
         "groups": [
           {
+            "group": "Introduction",
+            "pages": ["new-durable-storage/index", "new-durable-storage/architecture"]
+          },
+          {
+            "group": "Components",
+            "pages": [
+              "new-durable-storage/registry-and-databases",
+              "new-durable-storage/merkle-layer",
+              "new-durable-storage/merkle-worker",
+              "new-durable-storage/persistence-layer"
+            ]
+          },
+          {
             "group": "Concepts",
-            "pages": ["new-durable-storage/garbage-collection"]
+            "pages": [
+              "new-durable-storage/garbage-collection",
+              "new-durable-storage/key-comparison"
+            ]
           }
         ]
       }
