@@ -1,0 +1,67 @@
+---
+title: "Overview"
+description: "An authenticated persistent storage system"
+---
+
+The _New Durable Storage_ (NDS) is an authenticated persistent storage system intended to be used as the durable storage solution for [Tezos smart rollups](https://docs.tezos.com/architecture/smart-rollups).
+It is designed to work with both the existing WASM PVM and the planned RISC-V PVM.
+
+This page is a short, intuitive introduction to the NDS from the point of view of its clients, which should set the stage for diving deeper into its internals next.
+
+## A registry of databases
+
+You interact with the NDS through a Registry: an ordered collection of databases, addressed by an index.
+Each database is an independent key-value store with its own key space.
+
+In normal operation the Registry is backed by RocksDB: `Registry<PersistenceLayer, Normal>`, over a repository directory opened with `DirectoryManager::new`.
+
+The Registry allows you to:
+
+- Grow or shrink it by one database at a time with `resize_tick`. New databases are empty and shrinking drops the last one.
+- Copy, move or clear whole databases by index with `copy_database`, `move_database` and `clear_database`.
+- Reach a database with `database` or `database_mut` and apply operations on it.
+
+On a database, you can `set` or `delete` a key, `write` into a value at an offset, and `read` from one.
+You can also get a single Merkle root `hash` which authenticates the contents of a database.
+Keys are at most 255 bytes and values at most 64 MiB.
+
+```rust
+use octez_riscv_data::mode::Normal;
+use octez_riscv_durable_storage::key::Key;
+use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
+use octez_riscv_durable_storage::registry::Registry;
+use octez_riscv_durable_storage::repo::DirectoryManager;
+
+let repo = DirectoryManager::new(Path::new("/var/lib/rollup/nds"))?;
+let mut registry = Registry::<PersistenceLayer, Normal>::new(repo);
+
+registry.resize_tick(1)?;
+let key = Key::new(b"/accounts/tz1")?;
+registry.database_mut(0)?.set(key.clone(), Bytes::from_static(b"100"))?;
+let balance = registry.database(0)?.read_bytes(&key, 0, 3)?;
+let root_hash = registry.database(0)?.hash()?;
+```
+
+## Committing and checking out
+
+Changes apply to a working state in memory and on disk, and nothing is retained until you commit.
+
+`Registry::commit` persists the current state and returns a `CommitId`.
+The id is the Merkle root hash of the whole registry, so committing the same state twice gives the same id.
+
+`Registry::checkout` restores a registry from a `CommitId`, verifying its contents against the id.
+The result is a fresh working state: changing it never alters the commit.
+
+`Registry::checkout_read_only` reads a commit in place instead, without copying it (see [Checking out and cloning](/new-durable-storage/persistence-layer#checking-out-and-cloning)).
+Such a registry cannot be modified, but `to_writeable` turns it into one that can.
+
+Retained commits take up disk space until they are collected.
+See [Garbage collection](/new-durable-storage/garbage-collection).
+
+## Proving and verifying
+
+A proof can be produced for individual steps over the registry.
+The proof holds a small subset of the NDS state required to replay that step and the final state hash.
+Everything else is blinded. A security property of the NDS is that any single step is provable and the resulting proof is small enough to be included in a Tezos manager operation alongside an Irmin proof.
+
+To enable proof production and verification, the registry can run in the `Prove` and `Verify` modes of the [state framework](/state-framework/index), in addition to the `Normal` mode, with identical runtime behaviour in each case.

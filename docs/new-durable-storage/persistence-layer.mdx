@@ -1,0 +1,141 @@
+---
+title: "Persistence Layer"
+description: "How data is stored on disk"
+---
+
+The Persistence Layer stores everything a database holds on disk, using RocksDB.
+Each database has a Persistence Layer of its own, which keeps the database's values in a RocksDB instance of its own.
+It also gives the database's [Merkle Layer](/new-durable-storage/merkle-layer) access to the Merkle node store, a second RocksDB instance shared by every database in the repository.
+
+<Note>
+A few RocksDB terms used below:
+- a **column family** is a named key-value space inside one RocksDB instance
+- a **merge operator** is a function RocksDB uses to combine a stored value with pending update records
+- **compaction** is RocksDB's background rewrite of its files, where overwritten values and delete markers (**tombstones**) can finally be discarded.
+</Note>
+
+## Store traits
+
+The rest of the NDS reaches storage through a small set of traits, defined in `durable-storage/src/storage.rs`:
+
+| Trait | What it provides |
+|---|---|
+| `ReadableKeyValueStore` | Reading values with `get` and Merkle nodes with `node_get` |
+| `WriteableKeyValueStore` | Creating and cloning a store, writing values with `set`, `write` and `delete`, and writing Merkle nodes with `node_set` |
+| `PersistentKeyValueStore` | Committing a store and checking one out |
+| `ReadOnlyKeyValueStore` | Reading a commit in place, and upgrading it into a writeable store |
+
+`PersistenceLayer` implements the first three and `ReadOnlyPersistenceLayer` the first and last.
+`InMemoryKeyValueStore` implements the same traits without touching disk, and is used in tests.
+
+## Values
+
+A database's values live in a RocksDB instance in its own temporary directory, under `databases/temporary/`.
+Values are stored in the `default` column family, keyed by the database key.
+A `blob` column family also exists, but the NDS itself does not use it.
+
+- **`get`, `set` and `delete`** are plain RocksDB reads, writes and deletes.
+- **`write`** goes through a RocksDB merge operator, which records the offset and the bytes and applies them when the value is next read or compacted. A write at a non-zero offset first reads the existing value to check the offset is within it, so it is more expensive than one at offset zero.
+
+A working database is temporary: dropping its `PersistenceLayer` destroys it.
+Only commits outlive it.
+
+The instance is tuned for how the NDS uses it; see [RocksDB configuration](#rocksdb-configuration).
+
+## Merkle nodes
+
+The Merkle Layer's nodes live in one RocksDB instance per repository, under `merkle/`, rather than in the databases.
+Nodes are content-addressed, so the same node reached from several databases or commits is stored once.
+`DirectoryManager` holds the store open for as long as the repository handle lives, and every database of the repository shares it.
+RocksDB allows a single writer per directory, so another process can only open the store for reading, with `DirectoryManager::open_read_only`.
+
+| Column family | Contents |
+|---|---|
+| `default` | Node bodies |
+| `refs` | Reverse edges, from a child to each parent that refers to it |
+| `written` | Nodes listed by the most recent commit known to hold them |
+| `meta` | Facts about the store itself (currently only whether anything has been collected from it) |
+
+A stored node body holds the node's balance factor and key, and the hashes of its value and of its two subtrees.
+It does not hold the value itself, which is already in the database's own instance.
+The body is stored under the hash of the subtree it is the root of, so resolving a subtree by its hash reaches the node in a single lookup.
+The edges to its children are written in the same batch as the body.
+
+Writing a node also records which store it went to.
+A later commit skips any node already recorded as stored, and with it the whole subtree below, since an unchanged node cannot have a changed descendant.
+A commit therefore writes only what changed since the last one.
+The store's identity changes whenever a [garbage collection](/new-durable-storage/garbage-collection) removes anything, so the next commit rewrites any nodes it touches instead of trusting a record that may no longer hold.
+
+## Committing
+
+Committing a database happens in two steps.
+First, its [Merkle Worker](/new-durable-storage/merkle-worker) writes the tree's changed nodes to the Merkle store, recording each one under the commit being made, and returns the tree's root hash as the commit id.
+Then `PersistenceLayer::commit` stores the values under that id:
+
+1. If a commit with that id is already published, there is nothing to do: the id is the hash of the state, so that commit holds the same state.
+2. The Merkle store's write-ahead log is synced to disk, so the commit can never refer to a node that a crash could lose.
+3. A RocksDB checkpoint of the database is taken into a temporary staging directory. A checkpoint flushes the database and hard-links its files rather than copying them, so it is cheap.
+4. The staging directory is renamed into place as `databases/commits/<commit_id>/`.
+
+The rename is what publishes the commit, and it either happens or does not.
+A published commit contains RocksDB's `CURRENT` file and is never modified afterwards, so any number of read-only checkouts can read it at the same time.
+If two databases commit the same id at once, one rename wins and the other copy is discarded, since both hold the same state.
+
+## Checking out and cloning
+
+All three operations below create a new database from an existing one with a RocksDB checkpoint, so the files are shared through hard links rather than copied:
+
+- **Checking out** a commit opens it read-only and checkpoints it into a fresh working database, leaving the commit untouched.
+- **Cloning** a database, as `copy_database` and `try_clone` do, checkpoints its working database into a new one.
+- **Upgrading** a read-only database with `to_writeable` checkpoints the commit it reads.
+
+A **read-only checkout** (`ReadOnlyPersistenceLayer`) instead opens the commit directory in place, without copying anything.
+It holds no Merkle tree, only the commit's root hash, so a read-only registry needs no Merkle Worker and no runtime thread.
+
+## Full commits of the Merkle store
+
+Database commits checkpoint values only; the Merkle store is synced on every commit, but it is the only copy of every node in the repository.
+A **full commit** takes a checkpoint of the whole Merkle store into a numbered slot under `merkle-commits/`, giving an image that recovery can open.
+Like any checkpoint it is made of hard links, so taking one costs almost nothing.
+
+Full commits are scheduled by you rather than by the NDS:
+
+- `DirectoryManager::full_commit` takes one.
+- `DirectoryManager::reap_full_commits(keep)` deletes all but the most recent `keep`. A slot's hard links keep alive files that compaction has since replaced, so reaping old slots is what returns that disk space.
+- `DirectoryManager::lease_full_commit` lets another process read a slot without it being reaped from under it.
+
+## Advanced topics
+
+### RocksDB configuration
+
+Every RocksDB instance the Persistence Layer opens shares one base configuration, set in `rocksdb_default_options` in `durable-storage/src/persistence_layer.rs`.
+It is shaped by two facts about how the NDS uses RocksDB: in normal operation, values and node bodies are looked up by whole key, never scanned by range, and commits are retained as checkpoints that share files with the working database.
+
+| Setting | Value | Why |
+|---|---|---|
+| Memtable | Hash linked list, 1,000,000 buckets | Lookups are by whole key, so a hash map's constant-time access suits them better than the default ordered skip list. Concurrent memtable writes are turned off, as only the skip list supports them |
+| Bloom filters | 10 bits per key, about 1% false positives | A lookup can skip files that cannot hold the key. Keys are spread by hash, so without filters a lookup would consult most files |
+| Level-zero compaction trigger | 20 files | Every commit flushes the memtable and so adds a file, so RocksDB's default of 4 would compact every four commits whatever they wrote. Compaction is expensive here: rewriting a file ends the sharing it had with every retained commit, and with hash-spread keys each compaction rewrites the whole base level |
+| Level-zero slowdown and stop triggers | 80 and 160 files | Kept well above the compaction trigger, so that writes are not throttled as soon as a compaction starts |
+
+On top of that base, each kind of instance adds what it needs:
+
+| Instance | Additions |
+|---|---|
+| A new working database | Created if missing, but fails if the directory already holds a database, so one is never overwritten. Adds the `offset_write` merge operator used by `write` |
+| A working database opened from a checkpoint | Adds the merge operator |
+| The `blob` column family | Created with each new working database, without the merge operator |
+| The Merkle store's `default`, `refs` and `written` column families | Created if missing, since the store outlives any one run. No merge operator, as nodes are always written whole |
+| The Merkle store's `meta` column family | RocksDB's defaults, untuned, as it holds only a handful of keys |
+
+The merge operator applies offset writes in full when a value is read or compacted.
+It does not combine pending writes beforehand: a write at a non-zero offset reads the value first anyway, which forces RocksDB to apply every pending write.
+
+#### Tuning for measurement
+
+Builds with the `rocksdb_test_utils` configuration read two environment variables, so the cost of compaction can be measured without rebuilding:
+
+- `OCTEZ_NDS_ROCKSDB_L0_TRIGGER` overrides the level-zero compaction trigger, moving the slowdown and stop triggers with it.
+- `OCTEZ_NDS_ROCKSDB_DISABLE_AUTO_COMPACTION`, if set to anything, turns automatic compaction off.
+
+Ordinary builds ignore both.

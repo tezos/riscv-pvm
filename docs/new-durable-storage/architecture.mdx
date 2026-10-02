@@ -1,0 +1,44 @@
+---
+title: "Architecture"
+description: "How the components of the durable storage fit together"
+---
+
+A registry owns a set of databases.
+Each database pairs a [Persistence Layer](/new-durable-storage/persistence-layer), which stores its values, with a [Merkle Worker](/new-durable-storage/merkle-worker), which maintains the Merkle tree that authenticates them.
+
+```mermaid
+flowchart TB
+    Registry["Registry"]
+
+    subgraph Db0["Database 0"]
+        Worker0["Merkle Worker"]
+        Merkle0["Merkle Layer"]
+        Persistence0["Persistence Layer"]
+        Worker0 --> Merkle0
+        Merkle0 --> Persistence0
+    end
+
+    subgraph Db1["Database 1"]
+        Worker1["Merkle Worker"]
+        Merkle1["Merkle Layer"]
+        Persistence1["Persistence Layer"]
+        Worker1 --> Merkle1
+        Merkle1 --> Persistence1
+    end
+
+    Values0[("RocksDB<br/>values of database 0")]
+    Values1[("RocksDB<br/>values of database 1")]
+    Nodes[("RocksDB<br/>Merkle nodes, shared")]
+
+    Registry --> Db0
+    Registry --> Db1
+    Persistence0 --> Values0
+    Persistence1 --> Values1
+    Persistence0 --> Nodes
+    Persistence1 --> Nodes
+```
+
+- [Registry and databases](/new-durable-storage/registry-and-databases): the interface you use. A registry holds an ordered collection of databases and commits them together. Each database is an independent key-value store.
+- [Merkle Layer](/new-durable-storage/merkle-layer): the AVL tree over a database's keys and values, which gives every state a root hash and supports producing and verifying proofs of operations against it.
+- [Merkle Worker](/new-durable-storage/merkle-worker): keeps each database's Merkle tree up to date in a background task, so writes do not wait for it.
+- [Persistence Layer](/new-durable-storage/persistence-layer): stores each database's values in RocksDB, and the Merkle Layer's nodes in a store shared by the whole repository. Committing a database takes a checkpoint of its values.
