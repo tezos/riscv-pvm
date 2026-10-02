@@ -26,7 +26,7 @@ A repository is a directory tree of databases and commits:
 ```
 
 Each database is a RocksDB instance holding the values you store, keyed by your key.
-Merkle (AVL) node and tree bodies are keyed by content hash and live in one store shared by the whole repository, not in the databases.
+Merkle (AVL) node and tree bodies are keyed by content hash and live in [one store shared by the whole repository](/new-durable-storage/persistence-layer#merkle-nodes), not in the databases.
 
 A database commit is a RocksDB checkpoint of that database, taken with `Checkpoint::create_checkpoint`.
 A checkpoint flushes the memtable and then **hard-links** the SST files, so a commit shares its data with the working database instead of copying it.
