@@ -1,0 +1,70 @@
+---
+title: "Testing"
+description: "How the durable storage is tested"
+---
+
+The NDS is tested at three levels: unit and property-based tests run against every storage backend, long-running property-based tests run nightly, and a worst-case model checks the size of every proof those long tests produce.
+
+## Testing every backend with `kv_test!`
+
+Most tests in `durable-storage` are written with the `kv_test!` macro, defined in `durable-storage/src/storage.rs`.
+A test is written once over a generic store `KV`, and the macro runs its body once per available backend: the [`InMemoryKeyValueStore`](/new-durable-storage/persistence-layer#store-traits) always, and the RocksDB-backed `PersistenceLayer` when the `rocksdb` feature is on.
+The value the body returns is treated as a trace, and the traces of the runs must be equal, so the two backends are checked against each other as well as against the test's own assertions.
+
+The macro has three forms:
+
+| Form | Expands to |
+|---|---|
+| `kv_test!(name, KV: Bound, { body })` | A single test, running the body once per backend |
+| `kv_test!(name, KV: Bound, [args in strategies], { body })` | A `proptest!` over the strategies, running the body once per backend with the same inputs |
+| `kv_test!(name, KV: Bound, setup ..., [args in strategies], { body })` | As above, with a setup run once per backend before the proptest loop. `setup \|repo\|` provides a repository; `setup_runtime \|handle, repo\|` also provides a tokio runtime |
+
+Property-based inputs are cloned to run the body twice, so cloning them must make a deep copy.
+
+`make durable/test` runs the tests with the `rocksdb` feature off, so only the in-memory backend is exercised; the workspace-wide `make test` runs both.
+
+## Long tests
+
+The `long_test` binary runs property-based tests for far longer than a unit test can.
+It has a `database` command, which tests a single `Database`, and a `registry` command, which tests a `Registry` of several databases.
+
+Each run is divided into epochs.
+An epoch advances a shared base state and commits it, then runs a batch of proptest cases against that base.
+Each case applies a sequence of operations, guided by a reference model, to the model and to several implementations at once, and cross-checks them:
+
+- **`database`** runs an in-memory database, a RocksDB-backed one and a production one, comparing their traces, root hashes and proofs.
+- **`registry`** runs an in-memory registry and a RocksDB-backed one, comparing operation results after each step and root hashes at the end of each case. Every provable operation is also proven and verified, and its outcome compared with normal execution. The first `--permanent-databases` databases (5 by default) are never moved, cleared or overwritten. With `--keep-epochs`, epoch bases older than the window are [garbage collected](/new-durable-storage/garbage-collection), so collection is exercised too.
+
+On failure, the shrunk operation sequence and a snapshot of the failing epoch's base are written to `<out-dir>/failure/`.
+`long_test database replay <dir>` or `long_test registry replay <dir>` re-runs that sequence from the snapshot.
+
+To run one locally for ten minutes:
+
+```bash
+make durable/run-database-long-test
+make durable/run-registry-long-test
+```
+
+Short runs of both the Registry and Database long tests are part of CI, longer runs are part of nightly jobs, and even longer multi-week runs are run on dedicated machines.
+
+## Proof size bound
+
+A proof must fit in a Tezos manager operation alongside the WASM PVM's proof, so the NDS budgets 16 KiB for a whole proof.
+Long tests check that every proof they produce respects this, using a model of the worst case in `durable-storage/src/test_helpers/proof_size.rs`.
+
+For each operation, the model computes an upper bound on the size of its proof by assuming:
+
+- The deepest AVL tree possible for the current number of keys (a Fibonacci-minimal tree).
+- Every key at the maximum of 255 bytes.
+- The most expensive rebalancing for the operation: one rotation for an insertion, and `floor((depth - 1) / 2)` for a deletion.
+- The real value sizes and byte ranges of the operation, taken from the reference model.
+
+The bound mirrors the proof encoding, so it is a close upper bound rather than a rough estimate.
+Every proof is checked twice:
+
+1. Its size must be within the modelled bound for that operation. Exceeding it always fails, since it means the model or the proof is wrong.
+2. Its size must be within the ceiling derived from the 16 KiB budget. A database proof is held to a lower ceiling, which leaves room for the registry wrapped around it. Exceeding the ceiling prints a warning, or fails with `--fail-on-warning`.
+
+Long tests only reach trees as deep as their key counts allow.
+`test_size_by_depth_of_read_proofs`, in `durable-storage/src/test_helpers/counterfeit.rs`, covers deeper trees by building counterfeit databases with a single key at depths of up to 500.
+It checks that read proofs at those depths can be verified, and that their size grows by a fixed number of bytes per layer.
