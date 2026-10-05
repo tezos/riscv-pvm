@@ -17,9 +17,6 @@
 //!   provides create, delete, copy & move operations between databases. The main motivation for
 //!   this is to obtain atomicity.
 //!
-//! - **Cache layer**: Layer providing an in-memory cache for the KV operations. The concern is to
-//!   optimise for performance.
-//!
 //! - **Avl**: An implementation of a Merklisable AVL tree.
 //!
 //! - **Merkle layer**: Responsible for arranging the data associated with each database in a way
