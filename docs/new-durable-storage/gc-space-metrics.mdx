@@ -1,0 +1,57 @@
+---
+title: "GC space metrics"
+description: "Measuring how much of a repository's disk use is garbage"
+---
+
+Retaining commits costs disk space, and the cost depends on how much of a commit is shared with the ones before it (see [Garbage collection](/new-durable-storage/garbage-collection)).
+The `gc_space` binary measures this, and CI reports its figures on every pull request so that a regression is caught before it merges.
+
+## What `gc_space` measures
+
+`gc_space` builds a registry of a given shape, then makes a sequence of commits, each modifying some of its keys.
+The default sizes come from an Etherlink trace: 130-byte keys, the length of a storage slot path, and 32-byte values, the median write.
+
+These options can be configured manually in a number of ways, defining the shape of the registry and the workload run against it: the number of databases and keys, the sizes of keys and values (including a share of large values), how many commits are made, and how many keys each one modifies.
+Further options choose how often a commit is sampled, where the repository lives (`--repo-dir`), and where the samples are written as JSON (`--json-out`).
+A run can also end with a garbage collection at some distance behind the latest commit, reporting what it reclaimed.
+`gc_space --help` lists every option with its default.
+
+Building the initial state can take far longer than the commits being measured.
+It is therefore recorded in `--repo-dir` and reused by later runs of the same shape; each run resets the repository to it before measuring.
+
+Each sample records, for the commit it measures:
+
+- **The Merkle store:** the entries and bytes it holds, and how many of them are **live**, meaning reachable from the committed root. The rest is **dead**, which is what collection can reclaim.
+- **Disk usage:** the apparent size of the repository, and its real size with hard-linked files counted once. Since commits are checkpoints that share files, only the latter is what the repository actually costs.
+- **Sharing:** how many of the SST files the commit's database checkpoints pin were already pinned at the previous sample, and how many are new.
+- **The LSM tree:** files and bytes at each RocksDB level, which explains the sharing, since a compaction rewrites files and ends their sharing.
+
+## Metrics
+
+`tools/bench-metrics` turns the samples written with `--json-out` into the metrics CI reports, all prefixed with `ci.riscv.durable_storage`:
+
+| Metric | Unit | Meaning |
+|---|---|---|
+| `dead_node_bytes_per_commit` | bytes | Growth of dead Merkle node bytes per commit |
+| `dead_node_fraction` | percent | Share of the Merkle store that is dead at the last sample |
+| `repo_bytes_per_commit` | bytes | Growth of the repository's real disk usage per commit |
+| `checkpoint_shared_fraction` | percent | Share of the bytes pinned by each commit that were already on disk, over the whole run |
+| `checkpoint_shared_fraction_steady` | percent | The same, excluding samples that followed a compaction |
+
+Rates are taken across the whole run rather than from the last sample, since a single commit's figure swings with whether a compaction landed on it.
+The difference between the two sharing figures is the cost of compaction.
+
+## Running it
+
+The Makefile targets in `durable-storage/Makefile` run `gc_space` and `bench-metrics` together at fixed scales:
+
+| Target | Scale | Used by |
+|---|---|---|
+| `make durable/space-metrics` | 1 database, 100,000 keys, 10 commits of 1,000 keys | Pull requests |
+| `make durable/space-metrics-long` | 1 database, 250,000 keys, 30 commits of 2,500 keys | The merge queue and `main` |
+| `make durable/space-metrics-reference` | 4 databases, 1,000,000 keys each, 20 commits of 25,000 keys | Runs on a reference machine |
+
+All three pass `--collect`.
+Pass `MARKDOWN=--markdown` to print the metrics as a table.
+
+`.github/workflows/durable-space-metrics.yml` runs the pull request scale on every pull request and comments the metrics on it, with the full `gc_space` report attached.

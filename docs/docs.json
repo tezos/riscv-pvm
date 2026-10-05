@@ -54,6 +54,10 @@
               "new-durable-storage/garbage-collection",
               "new-durable-storage/key-comparison"
             ]
+          },
+          {
+            "group": "Testing and benchmarking",
+            "pages": ["new-durable-storage/testing", "new-durable-storage/gc-space-metrics"]
           }
         ]
       }
