@@ -279,8 +279,8 @@ impl DirectoryManager {
 
     /// Claim a full commit for reading, so that reaping leaves it alone while the lease is held.
     ///
-    /// How another process reads a repository's Merkle nodes: the live store cannot be opened by a
-    /// second writer, but a full commit is an immutable image that any number of readers may open.
+    /// A full commit is an immutable image that any number of readers may open, unlike the live
+    /// store, which other processes can only read through [`DirectoryManager::open_read_only`].
     #[cfg(rocksdb)]
     pub fn lease_full_commit(
         &self,
