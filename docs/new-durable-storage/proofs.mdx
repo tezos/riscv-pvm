@@ -1,0 +1,176 @@
+---
+title: "Proof production and verification"
+description: "How the execution of a step can be proven and verified"
+---
+
+A proof is a piece of data which can demonstrate that applying a certain operation on the NDS takes it from one root hash to another.
+This capability is essential for being able to use the NDS as the durable storage solution for Tezos smart rollups since it is what allows a rollup operator to prove correct execution in case a step involving storage access is disputed as part of a [refutation game](https://octez.tezos.com/docs/alpha/smart_rollups.html#refutation).
+
+The documentation in the **Components** section mostly describes the NDS in its `Normal` execution mode, backed by RocksDB. This page talks about the other two.
+The NDS is built on top of a [state framework](/state-framework/index) which supports two further modes, defined in the `octez-riscv-data` crate and shared with the RISC-V PVM:
+
+- **`Prove`** mode can run a step in the same way as `Normal` mode but it additionally keeps a record of which parts of the state were accessed and how the Merkle tree has changed
+- **`Verify`** mode can run on a state populated with data from a proof
+
+Given a Registry in `Normal` mode, a client can enter `Prove` mode, run the step to be proven, and produce a proof.
+To verify it, a `Verify`-mode Registry can be created from it. For a valid proof, the same step should be replayable on this state and result in the expected hash.
+
+<Info>
+TODO RV-985: A proof covers a single step. Proving more than one step is not yet fully supported, nor required, but is possible and would enable more advanced testing.
+</Info>
+
+
+```rust
+use octez_riscv_data::hash::PartialHash;
+use octez_riscv_data::merkle_proof::FromProof;
+use octez_riscv_data::merkle_proof::proof::{deserialise_proof, serialise_proof};
+use octez_riscv_data::merkle_proof::proof_tree::ProofTree;
+use octez_riscv_data::mode::{ProvableExt, Verify};
+use octez_riscv_data::mode::utils::catch_not_found;
+use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
+use octez_riscv_durable_storage::registry::Registry;
+
+// Prover: run the step in Prove mode, then produce the proof.
+let prove = registry.try_start_proof()?;
+prove.database(0)?.read_bytes(&key, 0, 3)?;
+let proof = prove.produce_proof();
+let bytes = serialise_proof(&proof);
+
+// Verifier: parse the proof into a Verify-mode Registry.
+let (proof, _) = deserialise_proof::<_, Registry<PersistenceLayer, Verify>, _>(bytes.into_iter())?;
+if proof.initial_state_hash() != trusted_initial_hash {
+    return Err(ProofRejected);
+}
+let verify = Registry::<PersistenceLayer, Verify>::from_proof(ProofTree::present(proof.tree()))?
+    .into_result();
+
+// Rerun the step. `NotFound` means the proof lacks state the step needs.
+let Ok(result) = catch_not_found(|| verify.database(0).and_then(|db| db.read_bytes(&key, 0, 3)))
+else {
+    return Err(ProofRejected);
+};
+
+// Recompute the final hash. `None` means the proof is invalid.
+let expected_final_hash = proof.final_state_hash();
+let final_hash = PartialHash::from_foldable(Some(proof.into_tree()), &verify).to_hash();
+if final_hash != Some(expected_final_hash) {
+    return Err(ProofRejected);
+}
+```
+
+## Producing a proof
+
+### Entering and running in Prove mode
+
+`try_start_proof` gives each database a Prove-mode [Merkle Layer](/new-durable-storage/merkle-layer), which the database then holds directly, without a [Merkle Worker](/new-durable-storage/merkle-worker).
+A database of a read-only registry, opened with `checkout_read_only`, holds no tree, so its tree is loaded from its commit when proving starts.
+
+#### Initial tree and working tree
+
+A Prove-mode Merkle Layer holds two trees, both starting from the database's tree at the moment proving starts:
+
+- The **initial tree** is never modified. It is the state the proof will eventually describe, since that is what the verifier will start from.
+- The **working tree** is the one the step runs against. Operations modify it as in normal operation, and its root hash after the step is the final state's root hash.
+
+Both are needed because a step can change the tree's shape, not just its data.
+Inserting or deleting a key [rebalances the tree](/new-durable-storage/merkle-layer#the-avl-tree), moving nodes to new positions, so the working tree after the step no longer has the initial tree's shape.
+The proof fold will therefore walk the initial tree, and for each node it reached, look up how the step accessed it in the working tree, by key.
+
+#### The Prove resolver
+
+The working tree is resolved by `ProveResolver`, which wraps the [`LazyResolver`](/new-durable-storage/merkle-layer#resolving) used in normal operation. It keeps track of:
+
+- **Node projection:** when the step resolves a node, the `ProveResolver` loads it through the wrapped `LazyResolver` and turns it into a Prove-mode node, whose fields record how they are accessed. The Prove-mode node is cached in its identifier (`ProveNodeId` or `ProveTreeId`), so later accesses see the same access records.
+- **Access tracking:** it records the hash of every node and subtree it resolves. Since these are hashes from the initial tree, the proof fold can tell which parts of the initial tree the step reached.
+- **Unlinked nodes:** when the step deletes a node, or replaces a database's whole tree by copying, moving or clearing a database, it keeps the access records of each node removed, keyed by its initial hash. Such a node is gone from the working tree, and the initial tree only holds it as a Normal-mode node, which records no accesses, so this is the only place the fold can find them.
+
+#### Recording accesses
+
+For each node of the tree, access is recorded for each of its fields, as defined by the state framework or its composition of state framework components.
+
+- **The balance factor** is an `Atom<i8, M>` component. It keeps its initial value, its current value if it was written, and a flag for whether it was read.
+- **The key** is a `NodeKey<M>`. It records how it was compared, down to its 64-byte pages (see [Key comparison](/new-durable-storage/key-comparison)).
+- **The data** is a `Bytes<M>` component. Since it can contain up to 64 MiB of data, it is split into 1 KiB pages, and records which byte ranges were read and which were written.
+
+The Registry's database list records whether the number of databases was read and which databases were accessed.
+Accessing any database by index reads the number of databases, since the index is checked against it.
+
+From these records, each piece of data works out its **minimum presence**: how much of its initial data the proof must keep.
+
+| Presence | Meaning |
+|---|---|
+| `Present` | The data itself must be in the proof, because the step read it, or because the verifier needs it to recompute a hash after a write |
+| `MayBlind` | The data can be replaced by its hash, but that hash must appear in the proof on its own, because the verifier needs the path down to this data and the hashes of its siblings |
+| `MayOmit` | The data need not appear on its own: it can be absorbed into the hash of an enclosing subtree |
+
+For example, a page of a value that the step read is marked `Present`.
+So is a page that the step wrote only partly, or that a resize truncated or extended, since the verifier needs its untouched bytes to recompute its hash.
+A page that the step overwrote entirely is marked `MayBlind`.
+The verifier does not need its old bytes, since it will write the new ones itself.
+But to recompute the value's root hash after that write, it needs the path down to the page and the hashes of the pages next to it, which an enclosing hash would hide.
+If every page of the value is overwritten, nothing of the old value is needed, and each page is `MayOmit` instead.
+
+### The proof fold
+
+After execution, `produce_proof` folds the Prove-mode Registry with `MerkleProofFold`, which walks the same structure as hashing does but produces a tree.
+Each leaf of the fold carries the initial data together with its minimum presence, and blinding decides what the proof keeps of it.
+
+### Blinding
+
+Blinding replaces subtrees of the proof with their hash. The NDS and its interface are designed so that, once maximally blinded, the proof of any single step fits [within a given size bound](/new-durable-storage/testing#proof-size-bound).
+The fold does it bottom-up:
+
+- A leaf that does not need to be `Present` is blinded straight away, unless its data is shorter than a hash, in which case keeping the data is cheaper.
+<Info>
+TODO TZX-192: The same is not yet done for nodes. A node which encodes shorter than a hash, such as the page tree of an empty key, is still blinded.
+</Info>
+- A node whose children may all be omitted is itself `MayOmit`, and is blinded into a single hash.
+- A node with any child that is `Present` or `MayBlind` must be `Present`, so the path down to that child is kept and its siblings remain as hashes.
+
+On top of this, each database's Merkle Layer blinds any subtree or node of its initial tree that the step never reached, without folding into it.
+A database whose tree the step did not touch at all is reduced to the single hash of its tree.
+At the Registry level, the same rules apply to the list of databases, except that a database accessed by index is at least `MayBlind`, so its hash is kept.
+Only if the step did not access the Registry at all may every part of it be omitted, and the whole proof is then a single hash, the Registry's initial root hash.
+
+The result is a `Proof`, containing:
+- the partial tree, whose root hash is the initial state's root hash
+- the final state's root hash, computed by hashing the Prove-mode Registry after the step
+
+## Verifying a proof
+
+### Parsing a proof into a Verify-mode Registry
+
+The verifier parses the proof against the shape of a Registry with `FromProof`.
+Each component becomes a `Partial` value: `Present` with its data, `Blinded` with only a hash, or `Absent` when an ancestor was blinded.
+A Verify-mode Registry is therefore a Registry in which most of the state is missing.
+If the proof does not match that shape, parsing fails with a `ProofError` and the proof is rejected.
+
+Parsing currently takes two passes.
+`deserialise_proof` reads the bytes in a single stream and rebuilds the `Proof`, but the Registry it returns cannot be hashed, since it does not keep the parts of the proof that hashing needs.
+`Registry::from_proof(ProofTree::present(proof.tree()))` then parses the rebuilt proof again, keeping them.
+
+<Info>
+TODO TZX-161: the stream deserialiser will return a Verify-mode Registry that can be hashed, so `deserialise_proof` alone will produce it in one go and the second `from_proof` pass will no longer be needed.
+</Info>
+
+### Rerunning the step
+
+The verifier attempts to run against the Verify-mode Registry.
+When execution only reads state that the proof carries, it runs as normal.
+When it reads state that was not in the proof, such as a blinded node or a blinded key page, the value cannot be materialised and execution cannot continue.
+
+In this case, Verify-mode execution panics with a special `NotFound` panic, unwinding without calling the panic hook.
+It is therefore wrapped with `catch_not_found`, which turns that panic into `Err(NotFound)` but does not catch any other panic.
+`NotFound` means the proof does not contain what the step needs, so the proof is rejected.
+
+<Warning>
+Use of `not_found` is declared `unsafe` because it must only be called inside Verify-mode code.
+</Warning>
+
+### Checking the hashes
+
+The NDS does not check a proof's hashes itself: it provides the pieces, and the caller verifying the proof compares them.
+A proof should be accepted only when both hashes check out:
+
+- **Initial state:** the root hash of the proof's partial tree, `Proof::initial_state_hash`, must match the root hash the verifier already trusts.
+- **Final state:** after the step, `PartialHash::from_foldable` recomputes the Verify-mode Registry's root hash. Unchanged parts of the state take their hash from the proof. The result must match `Proof::final_state_hash`.

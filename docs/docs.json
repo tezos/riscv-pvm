@@ -52,6 +52,7 @@
             "group": "Concepts",
             "pages": [
               "new-durable-storage/garbage-collection",
+              "new-durable-storage/proofs",
               "new-durable-storage/key-comparison"
             ]
           },
