@@ -48,6 +48,7 @@ Mutating a value clears its hash, which is recomputed when next needed.
 
 Only resolved data is held in memory; the rest of the tree is just hashes.
 Tests use an eager variant, `ArcNodeId` and `ArcTreeId` resolved by `ArcResolver`, which holds the whole tree in memory.
+When producing a proof, the tree is resolved by a `ProveResolver` instead, which wraps `LazyResolver` and records what the step accesses; see [Proof production and verification](/new-durable-storage/proofs#the-prove-resolver).
 
 <Warning>
 There is currently no way to un-resolve data, so a tree's memory use only grows as more of it is read or written.
