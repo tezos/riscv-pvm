@@ -209,8 +209,9 @@ fn walk_live_nodes(
 
 /// Occupancy of a directory tree, counting each inode's blocks once.
 ///
-/// Shared with the long tests, which report the size of their repository as it grows.
-pub(crate) fn disk_usage(root: &Path) -> Result<DiskUsage> {
+/// Shared with the long tests and benchmarks, which report the size of their repository as it
+/// grows.
+pub fn disk_usage(root: &Path) -> Result<DiskUsage> {
     let mut usage = DiskUsage::default();
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
     accumulate_disk_usage(root, &mut usage, &mut seen)?;
