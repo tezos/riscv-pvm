@@ -8,15 +8,14 @@ use bytes::Bytes;
 use octez_riscv_data::mode::Normal;
 use octez_riscv_durable_storage::database::Database;
 use octez_riscv_durable_storage::database::DirectoryManager;
-use octez_riscv_durable_storage::errors::Error;
-use octez_riscv_durable_storage::errors::InvalidArgumentError;
-use octez_riscv_durable_storage::key::Key;
 use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
 use rand::rng;
-use serde::Deserialize;
-use tezos_smart_rollup_constants::core::MAX_FILE_CHUNK_SIZE;
 use tokio::runtime::Handle;
 
+use crate::erc20_trace::Operation;
+use crate::erc20_trace::apply_operation;
+use crate::erc20_trace::database_write_all;
+use crate::erc20_trace::load_store_accesses;
 use crate::random::generate_keys;
 use crate::random::generate_random_bytes;
 use crate::random::generate_random_bytes_in_range;
@@ -39,80 +38,6 @@ pub struct BenchmarkState<'a> {
     pub(crate) read_buffer: Vec<u8>,
     pub(crate) handle: &'a Handle,
     pub(crate) repo: &'a DirectoryManager,
-}
-
-#[derive(Clone)]
-pub(crate) enum Operation {
-    Clone,
-    Delete { key: Key },
-    Exists { key: Key },
-    Hash,
-    Read { key: Key, size: usize },
-    ValueLength { key: Key },
-    Write { key: Key, size: usize },
-}
-
-impl From<SerialisedOperation> for Operation {
-    fn from(serialised_operation: SerialisedOperation) -> Self {
-        match serialised_operation {
-            SerialisedOperation::Copy { .. } => Operation::Clone,
-            SerialisedOperation::Delete { path } => Operation::Delete {
-                key: Key::new(path.as_bytes()).expect("The path should be a valid key"),
-            },
-            SerialisedOperation::Has { path } => Operation::Exists {
-                key: Key::new(path.as_bytes()).expect("The path should be a valid key"),
-            },
-            SerialisedOperation::Hash { path: _ } => Operation::Hash,
-            SerialisedOperation::Read { path, size }
-            | SerialisedOperation::ReadAll { path, size }
-            | SerialisedOperation::ReadSlice { path, size } => Operation::Read {
-                key: Key::new(path.as_bytes()).expect("The path should be a valid key"),
-                size,
-            },
-            SerialisedOperation::ValueSize { path } => Operation::ValueLength {
-                key: Key::new(path.as_bytes()).expect("The path should be a valid key"),
-            },
-            SerialisedOperation::Write { path, size }
-            | SerialisedOperation::WriteAll { path, size } => Operation::Write {
-                key: Key::new(path.as_bytes()).expect("The path should be a valid key"),
-                size,
-            },
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "operation", rename_all = "snake_case")]
-enum SerialisedOperation {
-    #[serde(rename = "store_copy")]
-    #[expect(dead_code, reason = "The result of the copy is ignored")]
-    Copy { from_path: String, to_path: String },
-    #[serde(rename = "store_delete")]
-    Delete { path: String },
-    #[serde(rename = "store_has")]
-    Has { path: String },
-    #[serde(rename = "__internal_store_get_hash")]
-    #[expect(dead_code, reason = "The path of the hash is ignored")]
-    Hash { path: String },
-    #[serde(rename = "store_read")]
-    Read { path: String, size: usize },
-    #[serde(rename = "store_read_all")]
-    ReadAll { path: String, size: usize },
-    #[serde(rename = "store_read_slice")]
-    ReadSlice { path: String, size: usize },
-    #[serde(rename = "store_value_size")]
-    ValueSize { path: String },
-    #[serde(rename = "store_write")]
-    Write { path: String, size: usize },
-    #[serde(rename = "store_write_all")]
-    WriteAll { path: String, size: usize },
-}
-
-#[derive(Deserialize)]
-struct StoreAccesses {
-    setup: Vec<SerialisedOperation>,
-    transaction: Vec<SerialisedOperation>,
-    block_creation: Vec<SerialisedOperation>,
 }
 
 /// Builds the initial durable-storage database and the precomputed ERC-20
@@ -160,10 +85,7 @@ pub fn build_template(
 
     // Load the recorded store-access trace and convert it into the normalised
     // operation representation used by the benchmark runner.
-    let store_accesses_data = include_str!("store_accesses.json");
-    let store_accesses: StoreAccesses = serde_json::from_str(store_accesses_data).expect(
-        "The benchmark data should be a valid serialisation of the store accesses representation",
-    );
+    let store_accesses = load_store_accesses();
 
     let erc_20_setup: Vec<Operation> = store_accesses
         .setup
@@ -238,7 +160,6 @@ pub fn build_template(
 /// it only executes the already-expanded workload so Criterion measures storage
 /// behavior rather than setup overhead.
 pub fn bench_run(mut state: BenchmarkState<'_>) {
-    // `KeyNotFound` errors are allowed. Arbitrary operations may delete keys used later.
     for operation in state.operations {
         match operation {
             Operation::Clone => {
@@ -249,100 +170,15 @@ pub fn bench_run(mut state: BenchmarkState<'_>) {
                         .expect("The clone should succeed"),
                 );
             }
-            Operation::Delete { key } => match state.database.delete(key) {
-                Ok(_) => {}
-                Err(e) => panic!("The deletion should succeed: {e:?}"),
-            },
-            Operation::Exists { key } => {
-                state
-                    .database
-                    .exists(&key)
-                    .expect("The existence check should succeed");
-            }
             Operation::Hash => {
                 black_box(state.database.hash().expect("Hash should be calculated"));
             }
-            Operation::Read { key, size } => {
-                match database_read(
-                    &mut state.database,
-                    key,
-                    size,
-                    &mut state.read_buffer[..size],
-                ) {
-                    Ok(read) => {
-                        assert!(read <= size, "Read more than {size} bytes from storage");
-                    }
-                    Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
-                    Err(e) => panic!("The read should succeed: {e:?}"),
-                }
-            }
-            Operation::ValueLength { key } => match state.database.value_length(&key) {
-                Ok(_) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
-                Err(e) => panic!("The value length calculation should succeed: {e:?}"),
-            },
-            Operation::Write { key, size } => {
-                match database_write_all(&mut state.database, key, &state.random_data[..size]) {
-                    Ok(()) | Err(Error::InvalidArgument(InvalidArgumentError::KeyNotFound)) => {}
-                    Err(e) => panic!("The write should succeed: {e:?}"),
-                }
-            }
+            operation => apply_operation(
+                &mut state.database,
+                operation,
+                &mut state.read_buffer,
+                &state.random_data,
+            ),
         }
     }
-}
-
-/// Read an entire value (possibly larger than [`MAX_FILE_CHUNK_SIZE`]) from the given database.
-///
-/// The database API only supports reading chunks less than `MAX_FILE_CHUNK_SIZE` in length in one
-/// go, for proof safety. This helper exists to read larger values from storage, similarly to how
-/// a kernel might.
-fn database_read(
-    database: &mut Database<PersistenceLayer, Normal>,
-    key: Key,
-    size: usize,
-    buffer: &mut [u8],
-) -> Result<usize, Error> {
-    let mut offset = 0;
-    let mut remaining = size;
-
-    assert!(remaining <= buffer.len(), "{remaining} <= {}", buffer.len());
-
-    while remaining > 0 {
-        let chunk = remaining.min(MAX_FILE_CHUNK_SIZE);
-        database.read(&key, offset, &mut buffer[offset..(offset + chunk)])?;
-
-        offset += chunk;
-        remaining -= chunk;
-    }
-
-    Ok(offset)
-}
-
-/// Write an entire value (possibly larger than [`MAX_FILE_CHUNK_SIZE`]) to the given database.
-///
-/// The database API only supports writing chunks less than `MAX_FILE_CHUNK_SIZE` in length in one
-/// go, for proof safety. This helper exists to write larger values to storage, similarly to how
-/// a kernel might.
-fn database_write_all(
-    database: &mut Database<PersistenceLayer, Normal>,
-    key: Key,
-    data: &[u8],
-) -> Result<(), Error> {
-    if data.is_empty() {
-        return database.set(key, Bytes::new());
-    }
-
-    let set_len = data.len().min(MAX_FILE_CHUNK_SIZE);
-    database.set(key.clone(), Bytes::copy_from_slice(&data[..set_len]))?;
-
-    let mut offset = set_len;
-    while offset < data.len() {
-        let end = (offset + MAX_FILE_CHUNK_SIZE).min(data.len());
-        database.write(
-            key.clone(),
-            offset,
-            Bytes::copy_from_slice(&data[offset..end]),
-        )?;
-        offset = end;
-    }
-    Ok(())
 }
