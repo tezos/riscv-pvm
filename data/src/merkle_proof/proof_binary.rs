@@ -13,6 +13,7 @@ use bincode::error::DecodeError;
 use crate::codec::Bincode;
 use crate::codec::LeafCodec;
 use crate::codec::LeafDecode;
+use crate::components::blake3_bytes::Blake3Proof;
 use crate::hash::Hash;
 use crate::merkle_proof::Deserialiser;
 use crate::merkle_proof::DeserialiserNode;
@@ -20,7 +21,9 @@ use crate::merkle_proof::FromProof;
 use crate::merkle_proof::Partial;
 use crate::merkle_proof::ProofError;
 use crate::merkle_proof::Suspended;
+use crate::merkle_proof::proof_tree::MerkleProof;
 use crate::merkle_proof::proof_tree::OwnedProofTree;
+use crate::merkle_proof::proof_tree::ProofPart;
 use crate::merkle_proof::tag::LeafTag;
 use crate::merkle_proof::tag::Tag;
 use crate::serialisation::deserialise_from;
@@ -182,6 +185,7 @@ impl<'t, C: LeafCodec> Deserialiser for StreamDeserialiser<'t, C> {
 
                     (result, proof)
                 }
+                LeafTag::Blake3 => return Err(ProofError::LeafKindMismatch),
             },
         };
 
@@ -221,10 +225,48 @@ impl<'t, C: LeafCodec> Deserialiser for StreamDeserialiser<'t, C> {
                     let proof = Partial::Present(raw_bytes.to_vec());
                     (result, proof)
                 }
+                LeafTag::Blake3 => return Err(ProofError::LeafKindMismatch),
             },
         };
 
         let proof = OwnedProofTree::leaf_from_partial(proof, std::convert::identity);
+
+        Ok(StreamParserComb {
+            result,
+            proof,
+            deser: self,
+        })
+    }
+
+    fn into_blake3_leaf(mut self) -> Result<Self::Suspended<Partial<Blake3Proof>>, ProofError> {
+        if self.is_absent_or_blinded() {
+            return Ok(StreamParserComb {
+                result: Partial::Absent,
+                proof: OwnedProofTree::leaf_from_partial(Partial::Absent, std::convert::identity),
+                deser: self,
+            });
+        }
+
+        let tag = self.next_tag()?;
+
+        let (result, proof) = match tag {
+            Tag::Node => return Err(ProofError::UnexpectedNode),
+            Tag::Leaf(LeafTag::Read) => return Err(ProofError::LeafKindMismatch),
+            Tag::Leaf(LeafTag::Blind) => {
+                let hash = self.input.deserialise::<Hash>()?;
+                let result = Partial::Blinded(hash);
+                let proof = ProofPart::Present(MerkleProof::leaf_blind(hash));
+                (result, proof)
+            }
+            Tag::Leaf(LeafTag::Blake3) => {
+                // `Blake3Proof::decode` is self-delimiting, so it consumes exactly its own bytes.
+                let (value_proof, _raw) =
+                    self.input.capture_deserialise::<Bincode, Blake3Proof>()?;
+                let proof = ProofPart::Present(MerkleProof::leaf_blake3(value_proof.clone()));
+                let result = Partial::Present(value_proof);
+                (result, proof)
+            }
+        };
 
         Ok(StreamParserComb {
             result,
@@ -245,7 +287,9 @@ impl<'t, C: LeafCodec> Deserialiser for StreamDeserialiser<'t, C> {
         let tag = self.next_tag()?;
 
         match tag {
-            Tag::Leaf(LeafTag::Read) => Err(ProofError::UnexpectedLeaf),
+            Tag::Leaf(LeafTag::Read) | Tag::Leaf(LeafTag::Blake3) => {
+                Err(ProofError::UnexpectedLeaf)
+            }
             Tag::Leaf(LeafTag::Blind) => {
                 let hash = self.input.deserialise::<Hash>()?;
                 let result = Partial::Blinded(hash);

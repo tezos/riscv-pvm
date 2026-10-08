@@ -17,6 +17,8 @@ use super::tag::Tag;
 use crate::codec::Bincode;
 use crate::codec::LeafCodec;
 use crate::codec::LeafDecode;
+use crate::components::blake3_bytes::Blake3Proof;
+use crate::components::blake3_bytes::proof_root_hash;
 use crate::foldable::Fold;
 use crate::foldable::Foldable;
 use crate::foldable::NodeFold;
@@ -47,6 +49,15 @@ impl MerkleProof {
         MerkleProof::Leaf(MerkleProofLeaf::Blind(hash))
     }
 
+    /// Create a new Merkle proof as a BLAKE3 within-value proof leaf.
+    ///
+    /// This leaf carries a length-committed [`Blake3Proof`] and hashes to its committed value hash
+    /// ([`proof_root_hash`]). It occupies the `data` slot of an AVL node when the value is
+    /// represented by [`crate::components::blake3_bytes::Blake3Bytes`].
+    pub fn leaf_blake3(proof: Blake3Proof) -> Self {
+        MerkleProof::Leaf(MerkleProofLeaf::Blake3(proof))
+    }
+
     /// Compute the root hash of the Merkle proof.
     pub fn root_hash(&self) -> Hash {
         // Child nodes are stored in normal order in `nodes`.
@@ -64,6 +75,10 @@ impl MerkleProof {
                         parent_index,
                         Hash::hash_bytes(data.as_slice()),
                     ));
+                }
+                Tree::Leaf(MerkleProofLeaf::Blake3(proof)) => {
+                    // A BLAKE3 value leaf hashes to its committed value hash `combine(H_len, H_data)`.
+                    hash_states.push(HashState::new_leaf(parent_index, proof_root_hash(proof)));
                 }
                 Tree::Node(node) => {
                     hash_states.push(HashState::new_node(parent_index));
@@ -127,6 +142,7 @@ impl From<&MerkleProof> for Tag {
             MerkleProof::Node(_) => Tag::Node,
             MerkleProof::Leaf(MerkleProofLeaf::Blind(_)) => Tag::Leaf(LeafTag::Blind),
             MerkleProof::Leaf(MerkleProofLeaf::Read(_)) => Tag::Leaf(LeafTag::Read),
+            MerkleProof::Leaf(MerkleProofLeaf::Blake3(_)) => Tag::Leaf(LeafTag::Blake3),
         }
     }
 }
@@ -160,6 +176,13 @@ impl bincode::Encode for MerkleProof {
                     Tag::Leaf(LeafTag::Blind).encode(encoder)?;
                     hash.encode(encoder)?;
                 }
+
+                Self::Leaf(MerkleProofLeaf::Blake3(proof)) => {
+                    Tag::Leaf(LeafTag::Blake3).encode(encoder)?;
+                    // `Blake3Proof`'s own encoding is self-delimiting (length prefix + a
+                    // recursively self-delimiting chunk tree), so the decoder knows where it ends.
+                    proof.encode(encoder)?;
+                }
             }
         }
 
@@ -181,6 +204,15 @@ pub enum MerkleProofLeaf {
     /// Contains the read data from the initial state.
     /// The initial hash can be deduced based on the read data.
     Read(Vec<u8>),
+    /// A BLAKE3 within-value partial proof (see [`crate::components::blake3_bytes`]).
+    ///
+    /// Carries a length-committed [`Blake3Proof`] for a byte value; it hashes to the value's
+    /// committed hash `combine(H_len, blake3::hash(bytes))` via [`proof_root_hash`]. Unlike a
+    /// [`MerkleProofLeaf::Read`] (whose hash is `hash_bytes(content)`), its internal structure
+    /// mirrors BLAKE3's own chunk tree so a large value can be partially opened. It only ever
+    /// occupies the `data` slot of an AVL node; type is decided by the parse position and the wire
+    /// tag, never guessed from bytes (invariant I7).
+    Blake3(Blake3Proof),
 }
 
 /// Whether a part of the tree must be present, may be blinded or may be omitted
@@ -252,6 +284,20 @@ impl CompressibleMerkleProof {
 
         CompressibleMerkleProof { constraint, tree }
     }
+
+    /// Create a new compressible BLAKE3 within-value proof leaf.
+    ///
+    /// This method must be private! See note on [`MerkleProofFold::new_leaf`] for details.
+    fn new_blake3_leaf(constraint: MinimumPresence, proof: Blake3Proof) -> Self {
+        let mut tree = MerkleProof::leaf_blake3(proof);
+
+        // If the leaf does not need to be present, compress it to a blind of its value hash.
+        if constraint < MinimumPresence::Present {
+            tree = tree.blind()
+        }
+
+        CompressibleMerkleProof { constraint, tree }
+    }
 }
 
 impl<C: LeafCodec> Foldable<MerkleProofFold<C>> for CompressibleMerkleProof {
@@ -312,6 +358,19 @@ impl<C: LeafCodec> MerkleProofFold<C> {
     /// Fold into a Merkle tree proof leaf.
     pub fn into_leaf(self, constraint: MinimumPresence, data: Vec<u8>) -> CompressibleMerkleProof {
         CompressibleMerkleProof::new_leaf(constraint, data)
+    }
+
+    /// Fold into a BLAKE3 within-value proof leaf carrying `proof`.
+    ///
+    /// When the constraint is below [`MinimumPresence::Present`], the leaf is compressed to a blind
+    /// of the committed value hash (like any other leaf). A [`MinimumPresence::Present`] leaf keeps
+    /// the (possibly partial) [`Blake3Proof`].
+    pub fn into_blake3_leaf(
+        self,
+        constraint: MinimumPresence,
+        proof: Blake3Proof,
+    ) -> CompressibleMerkleProof {
+        CompressibleMerkleProof::new_blake3_leaf(constraint, proof)
     }
 
     /// Create a new compressible Merkle tree proof from a leaf.
@@ -506,6 +565,25 @@ impl<'a, C> ProofTree<'a, C> {
         let leaf = match tree {
             Tree::Leaf(MerkleProofLeaf::Blind(hash)) => Partial::Blinded(*hash),
             Tree::Leaf(MerkleProofLeaf::Read(items)) => Partial::Present(items.as_slice()),
+            Tree::Leaf(MerkleProofLeaf::Blake3(_)) => {
+                return Err(ProofError::LeafKindMismatch);
+            }
+            Tree::Node(_) => return Err(ProofError::UnexpectedNode),
+        };
+
+        Ok(leaf)
+    }
+
+    /// Deserialise the proof tree as a BLAKE3 within-value proof leaf.
+    pub fn as_blake3_leaf(self) -> Result<Partial<Blake3Proof>, ProofError> {
+        let ProofPart::Present(tree) = self.part else {
+            return Ok(Partial::Absent);
+        };
+
+        let leaf = match tree {
+            Tree::Leaf(MerkleProofLeaf::Blind(hash)) => Partial::Blinded(*hash),
+            Tree::Leaf(MerkleProofLeaf::Blake3(proof)) => Partial::Present(proof.clone()),
+            Tree::Leaf(MerkleProofLeaf::Read(_)) => return Err(ProofError::LeafKindMismatch),
             Tree::Node(_) => return Err(ProofError::UnexpectedNode),
         };
 
@@ -521,7 +599,9 @@ impl<'a, C> ProofTree<'a, C> {
         let node = match tree {
             Tree::Leaf(leaf) => match leaf {
                 MerkleProofLeaf::Blind(hash) => Partial::Blinded(*hash),
-                MerkleProofLeaf::Read(_) => return Err(ProofError::UnexpectedLeaf),
+                MerkleProofLeaf::Read(_) | MerkleProofLeaf::Blake3(_) => {
+                    return Err(ProofError::UnexpectedLeaf);
+                }
             },
             Tree::Node(node) => Partial::Present(
                 node.children
@@ -567,6 +647,10 @@ impl<'t, C: LeafCodec> Deserialiser for ProofTree<'t, C> {
             .as_leaf()?
             .map_present_fallible(<T as LeafDecode<C>>::leaf_decode)?;
         Ok(ProofTreeResult::new(result))
+    }
+
+    fn into_blake3_leaf(self) -> Result<Self::Suspended<Partial<Blake3Proof>>, Self::Error> {
+        Ok(ProofTreeResult::new(self.as_blake3_leaf()?))
     }
 
     fn into_node(self) -> Result<Self::DeserialiserNode, Self::Error> {

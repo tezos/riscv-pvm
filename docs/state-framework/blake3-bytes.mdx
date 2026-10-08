@@ -1,0 +1,208 @@
+---
+title: "BLAKE3 byte values"
+description: "How a byte array is hashed, proved and verified, and why its length is committed alongside its bytes"
+---
+
+A byte array is the one state component whose contents are large enough that a proof must be able
+to open *part* of it. `Blake3Bytes` hashes such a value by committing its length and its bytes
+separately, then combining the two:
+
+```
+H_len  = blake3( (len as u64).to_le_bytes() )    // 8-byte little-endian length
+H_data = blake3( bytes )                          // BLAKE3 over the raw bytes
+H(v)   = blake3( H_len ‖ H_data )                 // 64-byte input: two 32-byte digests
+```
+
+`H(v)` is what occupies the value's `data` slot in an AVL node. The AVL layer itself is unchanged:
+a node still hashes `blake3( H(bf) ‖ H(key) ‖ H(data) ‖ H(left) ‖ H(right) )`. Only `H(data)` is
+defined here.
+
+Note that `H(v)` is **not** `blake3::hash(bytes)`. It wraps it in one more compression, and that
+wrapping is the whole point.
+
+## Why the length is committed
+
+<Warning>
+Do not remove the length commitment, and do not replace it with a blinding rule.
+
+An earlier version of this scheme set `H(v) = blake3::hash(bytes)` with no length node, on the
+reasoning that BLAKE3 binds the length implicitly. It does for a *fully present* value, but not
+for a partial proof. A blind is an opaque 32-byte chaining value, and BLAKE3's `merge_subtrees_*`
+take no length input, so an attacker can plant a genuine subtree chaining value of span `S′` into
+a canonical slot of span `S ≠ S′` — a slot only reachable by claiming a different length — and the
+merge reproduces the honest root. That is a length forgery requiring **no collision**.
+
+A proof campaign confirmed it against the production verifier and found 104 accepted forgeries,
+including cases with no ragged tail. The minimal reproduction is a 1025-byte value (one chunk plus
+a one-byte tail) forged to 2048 bytes by planting the genuine tail chaining value into the
+`(offset = 1024, span = 1024)` slot.
+
+Two successive attempts to fix this by restricting *which* subtrees may be blinded — a "maximal
+blind" rule and an "interior-or-maximal" rule — both fell to the same attack. They had to: an
+opaque chaining value cannot be told apart as an `S′`-chunk subtree or an `S`-chunk one, and it is
+the freedom to choose the length that makes the differently-spanned slot legal in the first place.
+No blinding rule over a length-free hash can be secure. The length has to be committed.
+</Warning>
+
+Committing the length reverses that situation entirely. With the length authenticated, the tree
+shape is `canonical(length)` and therefore unique, so every node's `(offset, span)` is fixed and
+any wrong chaining value changes the root. The question of which subtrees are safe to blind — the
+entire subject of the failed analysis — simply disappears, and blinding becomes **unrestricted**.
+
+## Within-value proofs
+
+`H_data` is BLAKE3's own binary tree over 1024-byte chunks (`CHUNK_LEN`). A partial proof opens
+that tree, reached through the [`blake3::hazmat`] guts API:
+
+```rust
+struct Blake3Proof {
+    total_len: usize,   // claimed length, authenticated via H_len
+    data: ProofTree,    // partial view of BLAKE3's chunk tree
+}
+
+enum ProofTree {
+    Chunk(Vec<u8>),                       // a present chunk, real bytes, len <= CHUNK_LEN
+    Blind([u8; 32]),                      // an untouched canonical subtree, one chaining value
+    Node(Box<ProofTree>, Box<ProofTree>), // an internal binary node
+}
+```
+
+Two properties make this both secure and small:
+
+1. **The length is always present** and authenticated. Verify recomputes `H_len` from
+   `total_len` and folds it into the final combine, so a lie about the length changes `H(v)`.
+   A value nobody touched never produces a value proof at all — it is blinded to `H(v)` one level
+   up, at the AVL layer — so there is no case in which the length itself must be blinded.
+2. **Blinding is unrestricted.** Any untouched canonical subtree collapses to a single 32-byte
+   chaining value, at any offset (including 0) and any span (including the ragged right spine and
+   partial final chunks). There is no maximal, interior or spine restriction, and no chunk is ever
+   forced present.
+
+### A top-level blind is not a chaining value
+
+The one distinction the verifier has to keep straight is between the two kinds of `Blind`:
+
+- A **top-level** `data` that is a bare `Blind(h)` means the whole value was untouched and only
+  its length was read. Here `h` is `H_data` itself — a `ROOT`-finalised output — and verify uses
+  it directly.
+- A **nested** `Blind(cv)` inside a `Node` is the *non-root* chaining value of that subtree.
+
+Verify tells them apart by position, and BLAKE3's `ROOT`/`PARENT`/`CHUNK` flags domain-separate
+them cryptographically in any case. Code that constructs or re-derives a blind has to pick the
+right one of the two; getting this wrong at the root is a mistake the type system cannot catch.
+
+## Prove
+
+`prove(data, accessed)` keeps every chunk overlapping an accessed range present and blinds
+everything else:
+
+```
+build(data, offset, span, accessed, is_root):
+    touched = is_root ? (any access is non-empty)
+                      : range_overlaps(offset, span, accessed)
+    if !touched:
+        if is_root: return Blind(blake3::hash(data))                    // = H_data, a ROOT output
+        else:       return Blind(canonical_cv(&data[offset..][..span], offset))
+    if span <= CHUNK_LEN:
+        return Chunk(data[offset..][..span].to_vec())
+    let ll = left_subtree_len(span)
+    return Node(build(.., offset, ll, ..), build(.., offset + ll, span - ll, ..))
+```
+
+`canonical_cv(bytes, offset)` is the reference decomposition: split at `left_subtree_len`, recurse,
+and merge non-root; a lone chunk finalises non-root at its input offset.
+
+## Verify
+
+`verify_root(proof)` recomputes `H(v)` for the caller's equality check. It never trusts
+`total_len` without that check.
+
+```
+H_len  = blake3((proof.total_len as u64).to_le_bytes())
+H_data = data_root(&proof.data, proof.total_len)?
+return combine_hashes([H_len, H_data])
+
+data_root(tree, length):
+    Blind(h) -> h                                  // whole value untouched; h IS H_data
+    Chunk(b) -> if b.len() > CHUNK_LEN                        { ChunkTooLarge }
+                if length > CHUNK_LEN || b.len() != length    { NonCanonicalShape }
+                blake3::hash(b)                    // a single chunk, ROOT-finalised
+    Node(l, r) -> if length <= CHUNK_LEN                      { NonCanonicalShape }
+                  let ll = left_subtree_len(length)
+                  merge_subtrees_root(cv(l, 0, ll), cv(r, ll, length - ll))
+
+cv(tree, offset, span):                            // the non-root chaining value of a subtree
+    Chunk(b) -> if b.len() > CHUNK_LEN                        { ChunkTooLarge }
+                if span > CHUNK_LEN || b.len() != span        { NonCanonicalShape }
+                finalize_non_root(offset, b)
+    Blind(cv) -> cv                                // no blindability check: the shape pins the span
+    Node(l, r) -> if span <= CHUNK_LEN                        { NonCanonicalShape }
+                  let ll = left_subtree_len(span)
+                  merge_subtrees_non_root(cv(l, offset, ll), cv(r, offset + ll, span - ll))
+```
+
+The shape is reconstructed **canonically from `total_len`**, which `H_len` authenticates. A `Blind`
+needs no span check of its own — its span is fixed by the canonical recursion, so a wrong chaining
+value changes `H_data` and hence `H(v)`. The bounds that *are* checked (`ChunkTooLarge`,
+`NonCanonicalShape`) are there for memory safety and canonicity, not for length binding.
+
+## Reads
+
+`proof_read(proof, range)` returns the bytes if `range` lies entirely within present chunks. A
+range extending past `total_len` is `OutOfBounds`; a range touching a blinded or absent subtree
+faults with `Blinded`. It never substitutes zeroes for data it does not have.
+
+`present_ranges(proof)` gives the ascending, coalesced ranges backed by present chunks.
+
+## Security properties
+
+| | |
+|---|---|
+| **S0** | Normal, Prove and Verify all evaluate `combine(H_len, H_data)` over the canonical tree of the same bytes, so they agree on `H(v)` for every honest input. |
+| **S1** | `H(v)` is a composition of `blake3` calls, so distinct values collide only via a BLAKE3 collision. |
+| **S2** | Verify recomputes `H_len` from the *claimed* length, so a claim `L′ ≠ L` needs a second preimage to match. This is what kills the graft: the attack depended on choosing a length that exposed a differently-spanned slot, and the length is no longer free. |
+| **S3** | For a fixed length, substituting any blind's chaining value changes `H_data`. Opening a blinded region to chosen bytes needs a second preimage, and reads of blinded regions fault rather than returning zeroes. |
+| **S4** | A value hash (a 64-byte combine), an AVL node hash (a 160-byte input) and a chunk or parent chaining value cannot be confused: the type is decided by parse position and tag, never guessed from the wire bytes, and BLAKE3's flags separate `ROOT` from `PARENT` from `CHUNK` within a proof. |
+| **S5** | Verify decodes attacker input, so every present chunk is bound-checked against `CHUNK_LEN` and the length is validated before anything is allocated. |
+
+## Load-bearing invariants
+
+The implementation refers to these by number.
+
+- **I1** — Prove and Verify use only canonical BLAKE3 subtree decompositions: chunk-aligned
+  offsets, splits via `left_subtree_len`, and `ROOT` applied exactly once — at the top `Node`, at
+  the single present `Chunk`, or supplied directly as a top-level `Blind`.
+- **I2** — Verify reconstructs the shape canonically from `total_len` and rejects non-canonical
+  shapes and oversized chunks.
+- **I3** — `H_len` is recomputed from `total_len` and folded into `H(v)`; verify always returns the
+  full `H(v)` for the caller's equality check.
+- **I4** — Reads of blinded or absent regions fault. They never yield zeroes or garbage.
+- **I5** — Decoding is bounded: a present chunk is at most `CHUNK_LEN`, the length is validated
+  before allocation, a `Node` appears only where the span exceeds `CHUNK_LEN`, and a `Chunk` only
+  where it does not and its bytes match the span.
+- **I6** — No blindability restriction is needed or added; any canonical subtree may be a `Blind`.
+  If you find yourself adding a span or offset gate on `Blind`, stop: the security comes from
+  `H_len` (I3), not from restricting blinds.
+- **I7** — The value-proof and AVL-node encodings stay structurally disjoint. Type is decided by
+  parse position and tag.
+- **I8** — Normal, Prove and Verify agree on `H(v)` for every input and access pattern.
+
+## Proof size
+
+For a value of `C = ⌈n / 1024⌉` chunks at depth `d = ⌈log₂ C⌉`, a single contiguous access of `a`
+chunks costs the `a` present chunks plus one 32-byte chaining value per level of the
+authentication path, plus the length and a little framing. The cost is `O(a·1024 + d·32)` and is
+**position-independent** — an access at the start, the middle and the end of a value all cost the
+same.
+
+The length hash is a pure function of the length, so the single-chunk range - which is almost
+every value - is served from a precomputed table. That removes one of the three compressions a
+small value pays, and being a cache of a pure function it cannot change a hash.
+
+<Note>
+The dominant cost of hashing a value is the single `blake3::hash` over its bytes; the length hash
+and the final combine are two fixed compressions on top. Large values could be hashed across a
+rayon pool (`blake3::Hasher::update_rayon`), which is a substantial win above a few hundred KiB
+and a loss below it. That is deliberately not wired up: the output would be byte-identical, so it
+can be added later as a pure optimisation without touching any committed hash.
+</Note>

@@ -408,9 +408,10 @@ fn test_bad_structure() {
 #[test]
 fn test_bad_structure_stream() {
     let hash: [u8; Hash::DIGEST_SIZE] = Hash::hash_bytes(&[0, 1, 2]).into();
-    // Place an invalid second tag
+    // Place an invalid second tag. All four 2-bit tag values (0b00 node, 0b01 blake3,
+    // 0b10 blind, 0b11 read) are valid, so use an out-of-range byte (0b100) as the bad tag.
     // Bad tag introduced after the first node
-    let res = run_stream_deserialiser(computation_i16, [TAG_NODE, 0b01].as_ref());
+    let res = run_stream_deserialiser(computation_i16, [TAG_NODE, 0b100].as_ref());
 
     if let ProofError::Deserialise(bincode::error::DecodeError::OtherString(message)) =
         res.unwrap_err()

@@ -38,7 +38,8 @@ use std::sync::OnceLock;
 
 use octez_riscv_data::codec;
 use octez_riscv_data::components::atom::Atom;
-use octez_riscv_data::components::bytes::Bytes;
+// AVL value type: the length-committed BLAKE3 byte component.
+use octez_riscv_data::components::blake3_bytes::Blake3Bytes as Bytes;
 use octez_riscv_data::foldable::Fold;
 use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
@@ -1357,7 +1358,8 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
-    use octez_riscv_data::components::bytes::Bytes;
+    // AVL value type: the length-committed BLAKE3 byte component.
+    use octez_riscv_data::components::blake3_bytes::Blake3Bytes as Bytes;
     use octez_riscv_data::hash::Hash;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::NotFound;
