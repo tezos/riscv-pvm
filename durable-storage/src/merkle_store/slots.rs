@@ -9,10 +9,10 @@
 //! that a commit never refers to a node a crash could take with it, but it leaves the store itself
 //! as the only copy of every node in the repository.
 //!
-//! A **full commit** takes one: a checkpoint of the store into a numbered slot. Recovery opens the
-//! most recent slot. Because a slot is made by a checkpoint it is self-contained and needs no
-//! write-ahead log, and because a checkpoint hard-links rather than copies, taking one costs
-//! almost nothing.
+//! A **Merkle checkpoint** is another copy: the store checkpointed into a numbered slot. Recovery
+//! opens the most recent slot. Because a slot is made by a checkpoint it is self-contained and
+//! needs no write-ahead log, and because a checkpoint hard-links rather than copies, taking one
+//! costs almost nothing.
 //!
 //! # Why slots are numbered
 //!
@@ -26,8 +26,8 @@
 //!
 //! Its hard links hold the files that were live when it was taken, so compaction rewriting those
 //! files does not free them until the slot is reaped. The high-water mark is therefore the live set
-//! plus roughly one full-commit period of garbage, which makes the full-commit cadence the
-//! reclamation cadence.
+//! plus roughly one Merkle checkpoint period of garbage, which makes the Merkle checkpoint cadence
+//! the reclamation cadence.
 
 use std::fs;
 use std::path::Path;
@@ -39,8 +39,8 @@ use crate::errors::OperationalError;
 /// Prefix marking a slot that is still being written.
 ///
 /// A checkpoint creates its directory as it goes, so it is built under a name no reader looks for
-/// and renamed into place once it is complete. A leftover means a full commit was interrupted; it
-/// is not a slot and is replaced by the next attempt.
+/// and renamed into place once it is complete. A leftover means a Merkle checkpoint was
+/// interrupted; it is not a slot and is replaced by the next attempt.
 const PENDING_PREFIX: &str = ".pending-";
 
 /// Suffix of the file a slot's lease is taken on.
@@ -54,7 +54,7 @@ const PENDING_PREFIX: &str = ".pending-";
 /// reading a snapshot mounted read-only - must still be able to take a lease.
 const LEASE_SUFFIX: &str = ".lease";
 
-/// Which full commit a slot holds, counting from one.
+/// Which Merkle checkpoint a slot holds, counting from one.
 pub type SlotId = u64;
 
 /// A held claim on a slot, keeping it from being reaped.
@@ -158,7 +158,7 @@ fn try_flock(file: &fs::File, operation: libc::c_int) -> Result<bool, Operationa
 }
 
 impl MerkleStore {
-    /// Take a full commit: checkpoint this store into a new slot under `slots_dir`.
+    /// Take a Merkle checkpoint: checkpoint this store into a new slot under `slots_dir`.
     ///
     /// Returns the slot taken, which is one past the highest already there. The live store carries
     /// on unchanged - whether to check anything out again afterwards is the caller's decision, not
@@ -207,11 +207,12 @@ pub fn slot_path(slots_dir: &Path, slot: SlotId) -> PathBuf {
 /// Every slot present under `slots_dir`, oldest first.
 ///
 /// Entries that are not slots are ignored, which covers a `.pending-` directory left by an
-/// interrupted full commit as well as anything else that finds its way in.
+/// interrupted Merkle checkpoint as well as anything else that finds its way in.
 pub fn slots(slots_dir: &Path) -> Result<Vec<SlotId>, OperationalError> {
     let entries = match fs::read_dir(slots_dir) {
         Ok(entries) => entries,
-        // A repository that has never taken a full commit has no slots, which is not a failure.
+        // A repository that has never taken a Merkle checkpoint has no slots, which is not a
+        // failure.
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(OperationalError::FileReadFailed { error }),
     };
@@ -420,8 +421,8 @@ mod tests {
         );
     }
 
-    // A repository that has never taken a full commit has no slots, rather than failing on the
-    // missing directory.
+    // A repository that has never taken a Merkle checkpoint has no slots, rather than failing on
+    // the missing directory.
     #[test]
     fn a_repository_without_slots_reports_none() {
         let tmp = TestableTmpdir::new();
@@ -467,10 +468,10 @@ mod tests {
         );
     }
 
-    // A directory left behind by an interrupted full commit is not mistaken for a slot, and the
-    // next attempt replaces it.
+    // A directory left behind by an interrupted Merkle checkpoint is not mistaken for a slot, and
+    // the next attempt replaces it.
     #[test]
-    fn an_interrupted_full_commit_leaves_no_slot() {
+    fn an_interrupted_merkle_checkpoint_leaves_no_slot() {
         let tmp = TestableTmpdir::new();
         let (store, slots_dir) = fixture(&tmp);
 

@@ -67,7 +67,7 @@ pub(super) fn prune_unreachable(
     let started = Instant::now();
     // Blocking here on purpose: a run has to wait for the rewrite to be able to report what it
     // freed. Nothing else does - reclaiming is a background task started separately from collecting
-    // and from taking a full commit, neither of which waits for it.
+    // and from taking a Merkle checkpoint, neither of which waits for it.
     repo.merkle_store().compact();
     outcome.compact_ms = started.elapsed().as_millis() as u64;
 

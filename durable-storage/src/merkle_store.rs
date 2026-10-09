@@ -833,9 +833,9 @@ impl MerkleStore {
     /// Start reclaiming in the background, and return without waiting for it.
     ///
     /// Reclaiming rewrites the store, so it costs the store rather than the garbage and takes far
-    /// longer than anything that would want to trigger it. A full commit in particular must not wait
-    /// for one: taking a slot is a flush and a rename, and pairing it with a rewrite of the whole
-    /// store would make the cheap operation as slow as the expensive one.
+    /// longer than anything that would want to trigger it. A Merkle checkpoint in particular must
+    /// not wait for one: taking a slot is a flush and a rename, and pairing it with a rewrite of
+    /// the whole store would make the cheap operation as slow as the expensive one.
     ///
     /// Returns whether this call started one. A second call while one is running is a no-op rather
     /// than a queued rewrite, since two of these achieve nothing one does not.
