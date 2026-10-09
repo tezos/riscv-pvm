@@ -212,11 +212,11 @@ impl DirectoryManager {
     /// RocksDB directory it was taken from.
     pub fn merkle_slots_dir_in(merkle_dir: &Path) -> PathBuf {
         let mut path = merkle_dir.as_os_str().to_owned();
-        path.push("-commits");
+        path.push("-checkpoints");
         PathBuf::from(path)
     }
 
-    /// Take a full commit: a recoverable image of the Merkle store, in a new slot.
+    /// Take a Merkle checkpoint: a recoverable image of the Merkle store, in a new slot.
     ///
     /// Ordinary committing puts a database's values in a commit directory and syncs the nodes they
     /// refer to, which is enough that a commit never outlives its nodes, but it leaves the store as
@@ -225,19 +225,21 @@ impl DirectoryManager {
     /// it is what returns the disk that compaction has since made redundant.
     ///
     /// The live store carries on unchanged, and so does whatever else is using the repository: a
-    /// full commit is a flush and a rename, and does not wait on the compaction that returns the
-    /// disk a collection freed. That is [`DirectoryManager::start_reclaim`], separately.
+    /// Merkle checkpoint is a flush and a rename, and does not wait on the compaction that returns
+    /// the disk a collection freed. That is [`DirectoryManager::start_reclaim`], separately.
     #[cfg(rocksdb)]
-    pub fn full_commit(&self) -> Result<crate::merkle_store::slots::SlotId, OperationalError> {
+    pub fn checkpoint_merkle_store(
+        &self,
+    ) -> Result<crate::merkle_store::slots::SlotId, OperationalError> {
         self.merkle.take_slot(&self.merkle_slots_dir())
     }
 
     /// Start reclaiming the disk that collection freed, in the background.
     ///
     /// Deleting a node writes a tombstone; the bytes come back when compaction rewrites the files
-    /// without it. That rewrite costs the whole store rather than the garbage, so it is deliberately
-    /// neither part of collecting nor part of taking a full commit - both would then be as slow as
-    /// the most expensive thing they could trigger.
+    /// without it. That rewrite costs the whole store rather than the garbage, so it is
+    /// deliberately neither part of collecting nor part of taking a Merkle checkpoint - both would
+    /// then be as slow as the most expensive thing they could trigger.
     ///
     /// Returns immediately, and returns whether this call started one. Reads, writes and commits
     /// carry on throughout.
@@ -261,28 +263,29 @@ impl DirectoryManager {
         self.merkle.wait_for_compaction()
     }
 
-    /// The most recent full commit, which is the image recovery would open.
+    /// The most recent Merkle checkpoint, which is the image recovery would open.
     #[cfg(rocksdb)]
-    pub fn latest_full_commit(
+    pub fn latest_merkle_checkpoint(
         &self,
     ) -> Result<Option<crate::merkle_store::slots::SlotId>, OperationalError> {
         crate::merkle_store::slots::latest_slot(&self.merkle_slots_dir())
     }
 
-    /// Drop all but the `keep` most recent full commits, returning how many went.
+    /// Drop all but the `keep` most recent Merkle checkpoints, returning how many were removed.
     ///
-    /// A full commit someone holds a lease on is left where it is, for a later round to take.
+    /// A Merkle checkpoint someone holds a lease on is left where it is, for a later round to take.
     #[cfg(rocksdb)]
-    pub fn reap_full_commits(&self, keep: usize) -> Result<usize, OperationalError> {
+    pub fn reap_merkle_checkpoints(&self, keep: usize) -> Result<usize, OperationalError> {
         crate::merkle_store::slots::reap_slots(&self.merkle_slots_dir(), keep)
     }
 
-    /// Claim a full commit for reading, so that reaping leaves it alone while the lease is held.
+    /// Claim a Merkle checkpoint for reading, so that reaping leaves it alone while the lease is
+    /// held.
     ///
-    /// A full commit is an immutable image that any number of readers may open, unlike the live
-    /// store, which other processes can only read through [`DirectoryManager::open_read_only`].
+    /// A Merkle checkpoint is an immutable image that any number of readers may open, unlike the live
+    /// Merkle store, which other processes can only read through [`DirectoryManager::open_read_only`].
     #[cfg(rocksdb)]
-    pub fn lease_full_commit(
+    pub fn lease_merkle_checkpoint(
         &self,
         slot: crate::merkle_store::slots::SlotId,
     ) -> Result<crate::merkle_store::slots::SlotLease, OperationalError> {

@@ -62,10 +62,10 @@ use crate::repo::RegistryRepo;
 
 /// A request for a collection in progress to stop early.
 ///
-/// Collection is the longest thing the storage does, and a full commit or a reap should not have to
-/// wait for one to finish. Both halves check this often enough to stop promptly, and stopping is
-/// safe at any point: each step leaves everything retained intact, and enumerates what is present
-/// rather than what it expected, so the next round finishes what this one left.
+/// Collection is the longest thing the storage does, and a Merkle checkpoint or a reap should not
+/// have to wait for one to finish. Both halves check this often enough to stop promptly, and
+/// stopping is safe at any point: each step leaves everything retained intact, and enumerates what
+/// is present rather than what it expected, so the next round finishes what this one left.
 ///
 /// Cloning shares the request, so the handle given to a collection and the one kept by whoever may
 /// need to interrupt it are the same signal.
@@ -801,8 +801,8 @@ mod node_tests {
         assert_eq!(fixture.repo.merkle_store().store_id(), before);
     }
 
-    // A full commit does not wait on reclaiming, and reclaiming runs alongside ordinary use: the
-    // registry stays committable while the store is being rewritten underneath it.
+    // A Merkle checkpoint does not wait on reclaiming, and reclaiming runs alongside ordinary use:
+    // the registry stays committable while the store is being rewritten underneath it.
     #[test]
     fn reclaiming_does_not_hold_up_the_registry() {
         let mut fixture = Fixture::new();
@@ -823,11 +823,11 @@ mod node_tests {
             "a second request should not queue another rewrite"
         );
 
-        // Taking a full commit and committing again both proceed while it runs.
+        // Taking a Merkle checkpoint and committing again both proceed while it runs.
         fixture
             .repo
-            .full_commit()
-            .expect("a full commit should not wait on reclaiming");
+            .checkpoint_merkle_store()
+            .expect("a Merkle checkpoint should not wait on reclaiming");
 
         let third = fixture.commit(&[b"\x00\x00\x00\x02"], b"2");
 
@@ -1172,7 +1172,7 @@ mod node_tests {
 }
 
 #[cfg(all(test, rocksdb_test_utils))]
-mod full_commit_tests {
+mod merkle_checkpoint_tests {
     use bytes::Bytes;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_test_utils::TestableTmpdir;
@@ -1183,10 +1183,10 @@ mod full_commit_tests {
     use crate::persistence_layer::PersistenceLayer;
     use crate::registry::Registry;
 
-    // A repository whose Merkle store is lost comes back from its last full commit, with the
+    // A repository whose Merkle store is lost comes back from its last Merkle checkpoint, with the
     // committed state still checkoutable and readable.
     #[test]
-    fn a_lost_store_recovers_from_its_last_full_commit() {
+    fn a_lost_store_recovers_from_its_last_merkle_checkpoint() {
         let tmp = TestableTmpdir::new();
         let key = Key::new(b"a").expect("the key should be valid");
 
@@ -1204,10 +1204,13 @@ mod full_commit_tests {
 
             let commit = registry.commit().expect("committing should succeed");
 
-            // The full commit has to come after the nodes are written, since it images them.
-            let slot = repo.full_commit().expect("the full commit should succeed");
+            // The Merkle checkpoint has to come after the nodes are written, since it images them.
+            let slot = repo
+                .checkpoint_merkle_store()
+                .expect("the Merkle checkpoint should succeed");
             assert_eq!(
-                repo.latest_full_commit().expect("reading should succeed"),
+                repo.latest_merkle_checkpoint()
+                    .expect("reading should succeed"),
                 Some(slot)
             );
 
@@ -1256,17 +1259,20 @@ mod full_commit_tests {
                 .set(key, Bytes::copy_from_slice(value))
                 .expect("setting should succeed");
             registry.commit().expect("committing should succeed");
-            repo.full_commit().expect("the full commit should succeed");
+            repo.checkpoint_merkle_store()
+                .expect("the Merkle checkpoint should succeed");
         }
 
         assert_eq!(
-            repo.reap_full_commits(1).expect("reaping should succeed"),
+            repo.reap_merkle_checkpoints(1)
+                .expect("reaping should succeed"),
             2
         );
         assert_eq!(
-            repo.latest_full_commit().expect("reading should succeed"),
+            repo.latest_merkle_checkpoint()
+                .expect("reading should succeed"),
             Some(3),
-            "the newest full commit should be the one left"
+            "the newest Merkle checkpoint should be the one left"
         );
     }
 }
