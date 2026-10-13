@@ -163,8 +163,26 @@ pub trait PersistentKeyValueStore: WriteableKeyValueStore + Sized {
     /// Implementations will treat the path as a directory.
     fn commit_to_path(&self, path: &Path) -> Result<(), OperationalError>;
 
+    /// A snapshot of the key-value state, taken but not yet published under a commit id.
+    type Staged: Send + 'static;
+
+    /// Snapshot the current key-value state, to be published later by
+    /// [`PersistentKeyValueStore::publish_commit`].
+    fn stage_commit(&self, repo: &Self::Repo) -> Result<Self::Staged, OperationalError>;
+
+    /// Publish a staged snapshot under `id`.
+    fn publish_commit(
+        &self,
+        repo: &Self::Repo,
+        staged: Self::Staged,
+        id: &CommitId,
+    ) -> Result<(), OperationalError>;
+
     /// Write the current key-value state to the repository.
-    fn commit(&self, repo: &Self::Repo, id: &CommitId) -> Result<(), OperationalError>;
+    fn commit(&self, repo: &Self::Repo, id: &CommitId) -> Result<(), OperationalError> {
+        let staged = self.stage_commit(repo)?;
+        self.publish_commit(repo, staged, id)
+    }
 
     /// The position the commit about to be made will be recorded at.
     ///

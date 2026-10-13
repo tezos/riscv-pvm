@@ -152,17 +152,39 @@ impl<KV: TreeBackedKeyValueStore> Database<KV, Normal> {
     /// state. The commit can later be restored with [`Database::checkout`].
     pub fn commit(&self, repo: &KV::Repo) -> Result<crate::commit::CommitId, OperationalError>
     where
-        KV: PersistentKeyValueStore,
+        KV: BackgroundPersistentKeyValueStore,
+    {
+        self.start_commit(repo, 0)?.finish(repo)
+    }
+
+    /// Take the synchronous part of a commit: the value checkpoint and a request for a snapshot
+    /// of the Merkle tree. The rest is done by [`DatabaseCommit::finish`].
+    ///
+    /// `pending` is the number of commits started before this one and not yet recorded, which
+    /// will be recorded first.
+    pub(crate) fn start_commit(
+        &self,
+        repo: &KV::Repo,
+        pending: u64,
+    ) -> Result<DatabaseCommit<KV>, OperationalError>
+    where
+        KV: BackgroundPersistentKeyValueStore,
     {
         // Read before the nodes are written, so each is recorded as belonging to the commit being
         // made rather than to whatever came before it.
-        let commit_options = StoreOptions::default()
+        let seq = self.inner.persistent.next_commit_seq(repo)?;
+        let options = StoreOptions::default()
             .without_node_data()
-            .written_at(self.inner.persistent.next_commit_seq(repo)?);
-        let commit_id = self.inner.merkle.commit(commit_options)?;
-        self.inner.persistent.commit(repo, &commit_id)?;
+            .written_at(crate::journal::Seq::from_raw(seq.raw() + pending));
+        let staged = self.inner.persistent.stage_commit(repo)?;
+        let snapshot = self.inner.merkle.snapshot(self.inner.persistent.clone())?;
 
-        Ok(commit_id)
+        Ok(DatabaseCommit {
+            persistent: self.inner.persistent.clone(),
+            options,
+            staged,
+            snapshot: Box::new(snapshot),
+        })
     }
 
     /// Block until the Merkle tree has applied every write made so far, without hashing it.
@@ -172,6 +194,27 @@ impl<KV: TreeBackedKeyValueStore> Database<KV, Normal> {
     #[cfg(test_utils)]
     pub fn wait_for_merkle(&self) -> Result<(), OperationalError> {
         self.inner.merkle.sync()
+    }
+}
+
+/// A database commit whose values are checkpointed, but whose Merkle tree is not yet hashed and
+/// stored, nor the checkpoint published.
+pub(crate) struct DatabaseCommit<KV: PersistentKeyValueStore> {
+    persistent: Arc<KV>,
+    options: StoreOptions,
+    staged: KV::Staged,
+    snapshot: Box<dyn FnOnce() -> Result<MerkleLayer<KV, Normal>, OperationalError> + Send>,
+}
+
+impl<KV: PersistentKeyValueStore> DatabaseCommit<KV> {
+    /// Hash and store the snapshot taken at the start of the commit, then publish the checkpoint
+    /// under its root hash.
+    pub(crate) fn finish(self, repo: &KV::Repo) -> Result<CommitId, OperationalError> {
+        let commit_id = (self.snapshot)()?.commit(&self.options)?;
+        self.persistent
+            .publish_commit(repo, self.staged, &commit_id)?;
+
+        Ok(commit_id)
     }
 }
 

@@ -227,6 +227,11 @@ pub enum GcArgumentError {
     /// went with the round that passed it.
     #[error("No commit was recorded for the collection target {target}")]
     CollectionTargetNotRecorded { target: String },
+
+    /// A registry commit is still being flushed, so the commits and nodes it will reference are not
+    /// yet recorded.
+    #[error("Cannot collect while registry commits are pending")]
+    CommitsPending,
 }
 
 /// Errors that occur during Durable Storage operations

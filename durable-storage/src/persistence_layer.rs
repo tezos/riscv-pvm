@@ -763,8 +763,28 @@ impl PersistentKeyValueStore for PersistenceLayer {
             .map_err(|error| OperationalError::CheckpointCreationFailed { error })
     }
 
-    fn commit(&self, repo: &DirectoryManager, id: &CommitId) -> Result<(), OperationalError> {
+    type Staged = TempDir;
+
+    fn stage_commit(&self, repo: &DirectoryManager) -> Result<TempDir, OperationalError> {
+        // Stage the checkpoint in a directory of its own and move it into place, rather than
+        // checkpointing straight into the commit path: RocksDB stages a checkpoint at
+        // `<destination>.tmp`, so two commits of one id would otherwise share - and clobber - a
+        // staging directory. Staging among the repository's temporary databases keeps the staged
+        // copy on the same filesystem as the commit, which both the publishing rename and the hard
+        // links a checkpoint is made of require.
+        let staging = repo.temp_database_dir()?;
+        self.commit_to_path(&staging.path().join("commit"))?;
+        Ok(staging)
+    }
+
+    fn publish_commit(
+        &self,
+        repo: &DirectoryManager,
+        staging: TempDir,
+        id: &CommitId,
+    ) -> Result<(), OperationalError> {
         let commit_path = repo.database_commit_dir(id);
+        let staged_commit = staging.path().join("commit");
 
         // A commit id is a hash of the state committed under it, so a commit already published
         // under `id` holds the state being committed here and there is nothing left to do.
@@ -775,22 +795,11 @@ impl PersistentKeyValueStore for PersistenceLayer {
             return Ok(());
         }
 
-        // The checkpoint below captures this database's values. The Merkle nodes they are indexed
-        // by live in the repository's store, which the checkpoint does not touch, so they are put
-        // beyond reach of a crash first - otherwise a commit could survive while the nodes it
-        // refers to did not.
+        // The checkpoint captures this database's values. The Merkle nodes they are indexed by live
+        // in the repository's store, which the checkpoint does not touch, so they are put beyond
+        // reach of a crash first - otherwise a commit could survive while the nodes it refers to
+        // did not.
         self.merkle.sync()?;
-
-        // Stage the checkpoint in a directory of its own and move it into place, rather than
-        // checkpointing straight into `commit_path`: RocksDB stages a checkpoint at
-        // `<destination>.tmp`, so two commits of one id would otherwise share - and clobber - a
-        // staging directory. Staging among the repository's temporary databases keeps the staged
-        // copy on the same filesystem as the commit, which both the rename below and the hard links
-        // a checkpoint is made of require.
-        let staging = repo.temp_database_dir()?;
-        let staged_commit = staging.path().join("commit");
-
-        self.commit_to_path(&staged_commit)?;
 
         let Publish::Occupied(_) = publish_staged_commit(&staged_commit, &commit_path)? else {
             return Ok(());

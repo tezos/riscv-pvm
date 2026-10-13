@@ -7,7 +7,9 @@
 
 use bincode::Decode;
 use bincode::Encode;
+use octez_riscv_data::foldable::Foldable;
 use octez_riscv_data::hash::Hash;
+use octez_riscv_data::hash::HashFold;
 
 /// [`CommitId`]'s are used to generate commits & to checkout specific commits
 /// from a `DirectoryManager`.
@@ -27,6 +29,13 @@ impl CommitId {
     /// Returns the hex encoded commit id.
     pub fn hex_encode(&self) -> String {
         hex::encode(self.0)
+    }
+}
+
+/// Folds to the root hash of the committed state, as the database committed under it does.
+impl Foldable<HashFold> for CommitId {
+    fn fold(&self, _builder: HashFold) -> Hash {
+        self.0
     }
 }
 
