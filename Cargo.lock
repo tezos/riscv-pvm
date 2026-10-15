@@ -3111,6 +3111,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "quanta"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73be39b77b45d82a4d1a5793fe9a89a5c143ceaa6ad0d8417982566bb0f34e11"
+dependencies = [
+ "libc",
+ "portable-atomic",
+ "raw-cpuid",
+ "wasip1",
+ "wasip2",
+ "web-sys",
+ "windows-sys 0.61.0",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3574,7 +3589,7 @@ dependencies = [
  "object",
  "octez-riscv",
  "octez-riscv-data",
- "quanta",
+ "quanta 0.13.0",
  "rustc-demangle",
  "serde",
  "serde_json",
@@ -4448,7 +4463,7 @@ source = "git+https://gitlab.com/tezos/tezos.git#9cf2d13ced394b87642008cbb34acf1
 dependencies = [
  "clap",
  "hex",
- "quanta",
+ "quanta 0.12.6",
  "serde",
  "serde_json",
  "tezos-smart-rollup-build-utils",
@@ -5023,6 +5038,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasip1"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5e26842486624357dbeb8f0381cf1fb42f022291fd787d4a816768fec8cc760"
+
+[[package]]
 name = "wasip2"
 version = "1.0.1+wasi-0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5474,6 +5495,9 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+dependencies = [
+ "bitflags 2.11.0",
+]
 
 [[package]]
 name = "wit-bindgen"
