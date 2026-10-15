@@ -17,6 +17,15 @@
 //! removal reclaims them; that needs deletion of the node keys themselves and is a separate
 //! mechanism.
 //!
+//! A partial commit (see [`Registry::commit_partial`]) writes no nodes, but the working state that
+//! made it skips the nodes stored under its Merkle base. Retaining a partial commit therefore
+//! retains its base too, together with the base's journal entry, manifest, database commits and
+//! nodes, so the working state can still commit and the base can still be checked out. A
+//! repository whose only retained commits are partial ones without a base has nothing that can be
+//! checked out writeable.
+//!
+//! [`Registry::commit_partial`]: crate::registry::Registry::commit_partial
+//!
 //! # Interruption
 //!
 //! Collection is safe to interrupt and repeat. It runs in three steps, ordered so that everything
@@ -45,6 +54,7 @@
 #[cfg(rocksdb)]
 pub mod sweep;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 
 #[cfg(rocksdb)]
@@ -54,7 +64,6 @@ use crate::errors::GcArgumentError;
 use crate::errors::GcError;
 use crate::errors::OperationalError;
 use crate::journal;
-#[cfg(rocksdb)]
 use crate::journal::Seq;
 use crate::registry;
 #[cfg(rocksdb)]
@@ -164,7 +173,7 @@ pub fn collect<Repo: RegistryRepo>(
 ) -> Result<Collected, GcError> {
     refuse_while_pending(repo)?;
 
-    let retained_roots = journal::roots_to_retain(&repo.read_commit_journal()?, target)?;
+    let retained_roots: HashSet<CommitId> = retention(repo, target)?.1.into_keys().collect();
 
     // Read before anything is removed. These manifests are all retained, so they would survive the
     // steps below either way, but reading them first keeps the reachable set independent of how
@@ -268,20 +277,20 @@ pub fn collect_nodes(
 
     refuse_while_pending(repo)?;
 
-    let (floor, retained) = journal::retained_positions(&repo.read_commit_journal()?, target)?;
+    let (floor, retained) = retention(repo, target)?;
 
     // A database commit is reached by every registry commit naming it, so it is held until the most
     // recent of them goes. Taking the highest is what stops an older reference from deciding it.
     let mut roots = sweep::RetainedRoots::new();
 
     for (root, seq) in retained {
-        let databases = match registry::database_commits(repo, &root) {
-            Ok(databases) => databases,
+        let manifest = match registry::read_manifest(repo, &root) {
+            Ok(manifest) => manifest,
             Err(OperationalError::CommitNotFound) => continue,
             Err(error) => return Err(error.into()),
         };
 
-        for database in databases {
+        for database in manifest.tree_roots() {
             roots
                 .entry(*database.as_hash())
                 .and_modify(|held: &mut Seq| *held = (*held).max(seq))
@@ -290,6 +299,35 @@ pub fn collect_nodes(
     }
 
     sweep::sweep(repo.merkle_store(), &roots, floor, suspend).map_err(GcError::from)
+}
+
+/// The roots a round keeps, each at the position it is held at: the journal's retention, plus the
+/// Merkle base of every retained partial commit, held at the newest partial commit naming it.
+///
+/// One hop suffices: a base is only ever a Merkle commit.
+fn retention<Repo: RegistryRepo>(
+    repo: &Repo,
+    target: &CommitId,
+) -> Result<(Seq, HashMap<CommitId, Seq>), GcError> {
+    let (floor, mut retained) = journal::retained_positions(&repo.read_commit_journal()?, target)?;
+
+    let mut bases = Vec::new();
+    for (root, seq) in &retained {
+        match registry::read_manifest(repo, root) {
+            Ok(manifest) => bases.extend(manifest.base().map(|base| (base, *seq))),
+            Err(OperationalError::CommitNotFound) => continue,
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    for (base, seq) in bases {
+        retained
+            .entry(base)
+            .and_modify(|held| *held = (*held).max(seq))
+            .or_insert(seq);
+    }
+
+    Ok((floor, retained))
 }
 
 /// The database commits referenced by any of `roots`.
@@ -319,6 +357,7 @@ fn reachable_database_commits<Repo: RegistryRepo>(
 #[cfg(all(test, rocksdb_test_utils))]
 mod tests {
     use bytes::Bytes;
+    use octez_riscv_data::hash::Hash;
     use octez_riscv_data::mode::Normal;
     use octez_riscv_test_utils::TestableTmpdir;
 
@@ -371,6 +410,36 @@ mod tests {
             self.registry.commit().expect("committing should succeed")
         }
 
+        /// Set `key` to `value` in the registry's first database and commit partially under `id`.
+        fn commit_partial(&mut self, key: &[u8], value: &[u8], id: &[u8]) -> CommitId {
+            set(&mut self.registry, key, value);
+            let id = CommitId::from(Hash::hash_bytes(id));
+            self.registry
+                .commit_partial(id)
+                .expect("committing partially should succeed");
+            id
+        }
+
+        fn journal_roots(&self) -> HashSet<CommitId> {
+            self.repo
+                .read_commit_journal()
+                .expect("reading the journal should succeed")
+                .iter()
+                .map(|entry| entry.root)
+                .collect()
+        }
+
+        /// The database commits the manifests of `roots` name.
+        fn named_database_commits(&self, roots: &[CommitId]) -> HashSet<CommitId> {
+            roots
+                .iter()
+                .flat_map(|root| {
+                    registry::database_commits(&self.repo, root)
+                        .expect("reading the manifest should succeed")
+                })
+                .collect()
+        }
+
         fn registry_commits(&self) -> HashSet<CommitId> {
             self.repo
                 .registry_commits()
@@ -386,6 +455,111 @@ mod tests {
                 .into_iter()
                 .collect()
         }
+    }
+
+    fn set(registry: &mut Registry<PersistenceLayer, Normal>, key: &[u8], value: &[u8]) {
+        registry
+            .database_mut(0)
+            .expect("the database should exist")
+            .set(
+                Key::new(key).expect("the key should be valid"),
+                Bytes::copy_from_slice(value),
+            )
+            .expect("setting should succeed");
+    }
+
+    // A partial target keeps its Merkle base, with the base's journal entry, manifest and database
+    // commits, while the Merkle and partial commits before them go.
+    #[test]
+    fn collecting_at_a_partial_target_keeps_its_base() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(b"a", b"0");
+        fixture.commit_partial(b"a", b"1", b"p0");
+        let base = fixture.commit(b"a", b"2");
+        let target = fixture.commit_partial(b"a", b"3", b"p1");
+
+        collect(&fixture.repo, &target, &Suspend::new()).expect("collection should succeed");
+
+        assert_eq!(fixture.registry_commits(), HashSet::from([base, target]));
+        assert_eq!(fixture.journal_roots(), HashSet::from([base, target]));
+        assert_eq!(
+            fixture.database_commits(),
+            fixture.named_database_commits(&[base, target])
+        );
+
+        Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), base)
+            .expect("the base should still check out");
+    }
+
+    // Once a later round's partial target names a newer base, the old base goes.
+    #[test]
+    fn a_newer_base_releases_the_old_one() {
+        let mut fixture = Fixture::new();
+
+        let old_base = fixture.commit(b"a", b"1");
+        let first = fixture.commit_partial(b"a", b"2", b"p1");
+        let new_base = fixture.commit(b"a", b"3");
+        let second = fixture.commit_partial(b"a", b"4", b"p2");
+
+        collect(&fixture.repo, &first, &Suspend::new()).expect("collection should succeed");
+        assert_eq!(
+            fixture.registry_commits(),
+            HashSet::from([old_base, first, new_base, second])
+        );
+
+        collect(&fixture.repo, &second, &Suspend::new()).expect("collection should succeed");
+        assert_eq!(
+            fixture.registry_commits(),
+            HashSet::from([new_base, second])
+        );
+        assert_eq!(
+            fixture.database_commits(),
+            fixture.named_database_commits(&[new_base, second])
+        );
+    }
+
+    // A partial commit made without a base retains nothing beyond itself.
+    #[test]
+    fn a_partial_commit_without_a_base_pins_nothing() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(b"a", b"1");
+
+        let mut fresh = Registry::<PersistenceLayer, Normal>::new(fixture.repo.clone());
+        fresh.resize_tick(1).expect("resizing should succeed");
+        set(&mut fresh, b"a", b"2");
+        let target = CommitId::from(Hash::hash_bytes(b"p"));
+        fresh
+            .commit_partial(target)
+            .expect("committing partially should succeed");
+
+        collect(&fixture.repo, &target, &Suspend::new()).expect("collection should succeed");
+
+        assert_eq!(fixture.registry_commits(), HashSet::from([target]));
+        assert_eq!(
+            fixture.database_commits(),
+            fixture.named_database_commits(&[target])
+        );
+    }
+
+    // A Merkle target drops the partial commits before it, with their checkpoints.
+    #[test]
+    fn collecting_at_a_merkle_target_drops_earlier_partial_commits() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(b"a", b"1");
+        fixture.commit_partial(b"a", b"2", b"p1");
+        fixture.commit_partial(b"a", b"3", b"p2");
+        let target = fixture.commit(b"a", b"4");
+
+        collect(&fixture.repo, &target, &Suspend::new()).expect("collection should succeed");
+
+        assert_eq!(fixture.registry_commits(), HashSet::from([target]));
+        assert_eq!(
+            fixture.database_commits(),
+            fixture.named_database_commits(&[target])
+        );
     }
 
     // Collecting at the newest root keeps it and drops the ones before it, and the retained root
@@ -664,6 +838,24 @@ mod node_tests {
             self.registry.commit().expect("committing should succeed")
         }
 
+        /// Write several keys and commit partially under `id`.
+        fn commit_partial(&mut self, keys: &[&[u8]], value: &[u8], id: &[u8]) -> CommitId {
+            for key in keys {
+                let key = Key::new(key).expect("the key should be valid");
+                self.registry
+                    .database_mut(0)
+                    .expect("the database should exist")
+                    .set(key, Bytes::copy_from_slice(value))
+                    .expect("setting should succeed");
+            }
+
+            let id = CommitId::from(octez_riscv_data::hash::Hash::hash_bytes(id));
+            self.registry
+                .commit_partial(id)
+                .expect("committing partially should succeed");
+            id
+        }
+
         /// How many node bodies the repository's Merkle store holds.
         fn nodes(&self) -> usize {
             let mut nodes = 0;
@@ -721,6 +913,57 @@ mod node_tests {
                     .expect("the key should still be readable")
                     .as_ref(),
                 b"3"
+            );
+        }
+    }
+
+    // The base of a partial target keeps its nodes through the sweep, while older commits' go, and
+    // the working registry can still make a Merkle commit afterwards.
+    #[test]
+    fn a_partial_target_keeps_its_base_nodes() {
+        let mut fixture = Fixture::new();
+
+        fixture.commit(&[b"a", b"b", b"c"], b"1");
+        let base = fixture.commit(&[b"a", b"b", b"c"], b"2");
+        let target = fixture.commit_partial(&[b"a"], b"3", b"p");
+
+        let swept = collect_all(&fixture.repo, &target, &Suspend::new())
+            .expect("collection should succeed")
+            .swept;
+        assert!(swept.nodes > 0, "the first commit should have left nodes");
+
+        let restored = Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), base)
+            .expect("the base should check out");
+        for key in [b"a", b"b", b"c"] {
+            let key = Key::new(key).expect("the key should be valid");
+            assert_eq!(
+                restored
+                    .database(0)
+                    .expect("the database should exist")
+                    .read_bytes(&key, 0, 32)
+                    .expect("the base's nodes should have survived")
+                    .as_ref(),
+                b"2"
+            );
+        }
+
+        let next = fixture.commit(&[b"b"], b"4");
+        let restored = Registry::<PersistenceLayer, Normal>::checkout(fixture.repo.clone(), next)
+            .expect("the commit made after collecting should check out");
+        for (key, expected) in [
+            (b"a".as_slice(), b"3".as_slice()),
+            (b"b", b"4"),
+            (b"c", b"2"),
+        ] {
+            let key = Key::new(key).expect("the key should be valid");
+            assert_eq!(
+                restored
+                    .database(0)
+                    .expect("the database should exist")
+                    .read_bytes(&key, 0, 32)
+                    .expect("the key should be readable")
+                    .as_ref(),
+                expected
             );
         }
     }
