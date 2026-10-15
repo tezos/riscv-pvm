@@ -46,8 +46,10 @@ pub(super) fn measure(
 ) -> Result<(Sample, FileSet)> {
     let started = Instant::now();
 
-    let database_commits = crate::registry::database_commits(repo, registry_commit)
+    let manifest = crate::registry::read_manifest(repo, registry_commit)
         .context("reading the registry manifest being measured")?;
+    let database_commits = manifest.database_commits();
+    let tree_roots = manifest.tree_roots();
 
     let mut value_entries = 0;
     let mut value_stored_bytes = 0;
@@ -69,7 +71,9 @@ pub(super) fn measure(
                 )
             })?;
 
-        walk_live_nodes(&committed, database_commit, &mut live, &mut live_bytes)?;
+        if tree_roots.contains(database_commit) {
+            walk_live_nodes(&committed, database_commit, &mut live, &mut live_bytes)?;
+        }
 
         let values = committed
             .value_totals()

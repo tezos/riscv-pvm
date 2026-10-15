@@ -78,6 +78,23 @@ impl RegistryManifest {
             Self::Partial { checkpoints, .. } => checkpoints,
         }
     }
+
+    /// The Merkle roots of the databases, none for a partial commit.
+    #[cfg(rocksdb)]
+    pub(crate) fn tree_roots(&self) -> &[CommitId] {
+        match self {
+            Self::Merkle { database_hashes } => database_hashes,
+            Self::Partial { .. } => &[],
+        }
+    }
+
+    /// The Merkle commit a partial commit was built on.
+    pub(crate) fn base(&self) -> Option<CommitId> {
+        match self {
+            Self::Merkle { .. } => None,
+            Self::Partial { base, .. } => *base,
+        }
+    }
 }
 
 /// Read the manifest of the registry committed at `commit_id`.
