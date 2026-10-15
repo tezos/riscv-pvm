@@ -53,25 +53,57 @@ use crate::storage::ReadOnlyKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
 use crate::storage::StoreId;
 
-#[derive(Debug, Encode, Decode)]
 /// Structure to store the result of serialising a registry.
-struct RegistryManifest {
-    database_hashes: Vec<CommitId>,
+#[derive(Debug, PartialEq, Eq, Encode, Decode)]
+pub(crate) enum RegistryManifest {
+    /// Database commit ids are Merkle roots; the registry commit id is their fold.
+    Merkle { database_hashes: Vec<CommitId> },
+
+    /// Value checkpoints only, under ids derived from the registry commit id - see
+    /// [`Registry::commit_partial`].
+    Partial {
+        checkpoints: Vec<CommitId>,
+
+        /// The Merkle commit the working state was built on. Collection keeps it alive with this
+        /// commit.
+        base: Option<CommitId>,
+    },
+}
+
+impl RegistryManifest {
+    /// The database commits the registry commit pins, of either kind.
+    pub(crate) fn database_commits(&self) -> &[CommitId] {
+        match self {
+            Self::Merkle { database_hashes } => database_hashes,
+            Self::Partial { checkpoints, .. } => checkpoints,
+        }
+    }
+}
+
+/// Read the manifest of the registry committed at `commit_id`.
+///
+/// Through the repository alone: collection has no key-value store to reach it through.
+pub(crate) fn read_manifest<Repo: RegistryRepo>(
+    repo: &Repo,
+    commit_id: &CommitId,
+) -> Result<RegistryManifest, OperationalError> {
+    deserialise(&repo.read_registry_commit(commit_id)?).map_err(OperationalError::from)
 }
 
 /// The database commits referenced by the registry committed at `commit_id`.
-///
-/// Reads the manifest through the repository alone. Collection needs this to decide which database
-/// commits a retained registry commit still holds alive, and has no key-value store to reach it
-/// through.
 pub(crate) fn database_commits<Repo: RegistryRepo>(
     repo: &Repo,
     commit_id: &CommitId,
 ) -> Result<Vec<CommitId>, OperationalError> {
-    let manifest: RegistryManifest =
-        deserialise(&repo.read_registry_commit(commit_id)?).map_err(OperationalError::from)?;
+    Ok(read_manifest(repo, commit_id)?.database_commits().to_vec())
+}
 
-    Ok(manifest.database_hashes)
+/// The id of database `index`'s checkpoint within the partial commit `id`.
+fn partial_checkpoint_id(id: &CommitId, index: usize) -> CommitId {
+    let mut bytes = Vec::with_capacity(Hash::DIGEST_SIZE + 8);
+    bytes.extend_from_slice(id.as_hash().as_ref());
+    bytes.extend_from_slice(&(index as u64).to_le_bytes());
+    CommitId::from(Hash::hash_bytes(&bytes))
 }
 
 /// Registry that owns a set of databases and the repository used to manage
@@ -149,14 +181,6 @@ impl<KV: ReadableKeyValueStore> Registry<KV, Normal>
 where
     KV::Repo: RegistryRepo,
 {
-    fn read_checkout_manifest(
-        repo: &KV::Repo,
-        commit_id: &CommitId,
-    ) -> Result<RegistryManifest, OperationalError> {
-        let commit_bytes = repo.read_registry_commit(commit_id)?;
-        deserialise(&commit_bytes).map_err(OperationalError::from)
-    }
-
     /// Assemble a registry from databases restored from the commits the manifest of `commit_id`
     /// referenced, verifying the reconstructed registry root against `commit_id`.
     ///
@@ -203,11 +227,13 @@ where
     ///
     /// The restored databases are checked out from the database commits referenced by the
     /// manifest, then the reconstructed registry root is verified against the requested
-    /// `commit_id`.
+    /// `commit_id`. A partial commit is refused with [`OperationalError::PartialCommit`].
     pub fn checkout(repo: KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
-        let manifest = Self::read_checkout_manifest(&repo, &commit_id)?;
+        let RegistryManifest::Merkle { database_hashes } = read_manifest(&repo, &commit_id)? else {
+            return Err(OperationalError::PartialCommit.into());
+        };
         let runtime = LazyRuntime::default();
-        let databases = Self::checkout_databases(&runtime, &repo, &manifest.database_hashes)?;
+        let databases = Self::checkout_databases(&runtime, &repo, &database_hashes)?;
 
         Self::from_restored_databases(repo, runtime, databases, commit_id)
     }
@@ -298,7 +324,7 @@ where
                         database_hashes.clone(),
                     )));
 
-                let manifest = RegistryManifest { database_hashes };
+                let manifest = RegistryManifest::Merkle { database_hashes };
                 let encoded = serialise(&manifest)
                     .expect("Serialising the registry manifest should not fail");
 
@@ -327,6 +353,88 @@ where
         drop(base);
 
         Ok(PendingCommit(receiver))
+    }
+
+    /// Checkpoint the values of every database under `id`, without hashing or storing the Merkle
+    /// trees.
+    ///
+    /// The commit can be read with [`Registry::checkout_read_only`], but [`Registry::checkout`]
+    /// refuses it, and it cannot be hashed, proved or made writeable. Database `i`'s checkpoint is
+    /// stored under an id derived from `id` and `i`. The manifest names the Merkle commit the
+    /// working state was built on, which collection keeps alive with it.
+    ///
+    /// Committing an id again reuses the checkpoints already stored under it and records it again.
+    /// Derive `id` from something that identifies the state, such as a block hash.
+    ///
+    /// TODO: Unlike a Merkle commit id, `id` is not derived from the state, so a different state
+    /// committed under an existing id is silently dropped. Comparing the states would need hashing,
+    /// which partial commits avoid. Consider refusing an id that is already committed or queued,
+    /// leaving idempotence to the caller.
+    ///
+    /// Ordered after the commits started by [`Registry::commit_async`] before it, and waits for
+    /// them to complete.
+    pub fn commit_partial(&self, id: CommitId) -> Result<(), OperationalError> {
+        // Held while the commit is queued, as in `commit_async`, so commits complete in the order
+        // they were started. No collected base is checked for: no nodes are written.
+        let base = self
+            .inner
+            .base
+            .0
+            .lock()
+            .map_err(|_| OperationalError::LockPoisoned)?;
+
+        let staged = self
+            .databases
+            .iter()
+            .map(|database| database.stage_partial_commit(&self.inner.repo))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let repo = self.inner.repo.clone();
+        let shared_base = self.inner.base.0.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        let job = move || {
+            let result = (|| {
+                let checkpoints = staged
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, staged)| {
+                        let checkpoint = partial_checkpoint_id(&id, index);
+                        staged.finish(&repo, &checkpoint)?;
+                        Ok(checkpoint)
+                    })
+                    .collect::<Result<Vec<_>, OperationalError>>()?;
+
+                // Every Merkle commit queued before this one has advanced it by now.
+                let base = shared_base
+                    .lock()
+                    .map_err(|_| OperationalError::LockPoisoned)?
+                    .map(|(root, _)| root);
+
+                let manifest = RegistryManifest::Partial { checkpoints, base };
+                let encoded = serialise(&manifest)
+                    .expect("Serialising the registry manifest should not fail");
+
+                repo.write_registry_commit(&id, &encoded)?;
+                repo.record_commit(&id)?;
+                Ok(())
+            })();
+
+            repo.pending_commits().fetch_sub(1, Ordering::AcqRel);
+            let _ = sender.send(result);
+        };
+
+        let pending = self.inner.repo.pending_commits();
+        pending.fetch_add(1, Ordering::AcqRel);
+        if let Err(error) = self.inner.runtime.flush(Box::new(job)) {
+            pending.fetch_sub(1, Ordering::AcqRel);
+            return Err(error);
+        }
+        drop(base);
+
+        receiver
+            .recv()
+            .map_err(|_| OperationalError::WorkerThreadDied)?
     }
 }
 
@@ -373,17 +481,38 @@ where
     ///
     /// Where [`Registry::checkout`] copies every database commit into a working state, this reads
     /// them where they lie.
+    ///
+    /// A partial commit (see [`Registry::commit_partial`]) is read as well. Its databases have no
+    /// root hash: [`Database::hash`] fails with [`OperationalError::PartialCommit`], and so do
+    /// proving and [`Registry::to_writeable`].
     pub fn checkout_read_only(repo: KV::Repo, commit_id: CommitId) -> Result<Self, Error> {
-        let manifest = Self::read_checkout_manifest(&repo, &commit_id)?;
-
         // TODO RV-946: Investigate parallelising the checkouts of individual databases.
-        let databases = manifest
-            .database_hashes
-            .iter()
-            .map(|&db_hash| Database::checkout_read_only(&repo, db_hash))
-            .collect::<Result<Vec<_>, _>>()?;
+        match read_manifest(&repo, &commit_id)? {
+            RegistryManifest::Merkle { database_hashes } => {
+                let databases = database_hashes
+                    .iter()
+                    .map(|&db_hash| Database::checkout_read_only(&repo, db_hash))
+                    .collect::<Result<Vec<_>, _>>()?;
 
-        Self::from_restored_databases(repo, LazyRuntime::default(), databases, commit_id)
+                Self::from_restored_databases(repo, LazyRuntime::default(), databases, commit_id)
+            }
+            RegistryManifest::Partial { checkpoints, .. } => {
+                let databases = checkpoints
+                    .iter()
+                    .map(|&checkpoint| Database::checkout_read_only_partial(&repo, checkpoint))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                // No root to verify against, and none to fold: the databases have no hashes.
+                Ok(Registry {
+                    inner: NormalImpl {
+                        repo,
+                        runtime: LazyRuntime::default(),
+                        base: Base::none(),
+                    },
+                    databases: Vector::new(databases),
+                })
+            }
+        }
     }
 
     /// Create another registry over the same committed state.
@@ -957,7 +1086,6 @@ pub(super) mod tests {
     use octez_riscv_data::mode::Prove;
     use octez_riscv_data::mode::Verify;
     use octez_riscv_data::mode::utils::catch_not_found;
-    use octez_riscv_data::serialisation::deserialise;
     use octez_riscv_data::serialisation::serialise;
 
     use super::LazyRuntime;
@@ -1313,18 +1441,18 @@ pub(super) mod tests {
     {
         /// Read and deserialise the manifest for `commit_id`.
         fn read_manifest(&self, commit_id: &CommitId) -> RegistryManifest {
-            let bytes = self
-                .inner
-                .repo
-                .read_registry_commit(commit_id)
-                .expect("Manifest should be readable");
-            deserialise(&bytes).expect("Manifest should be deserialisable")
+            super::read_manifest(&self.inner.repo, commit_id).expect("Manifest should be readable")
         }
 
         /// Assert that the manifest written for `commit_id` contains the expected database commit IDs.
         fn verify_manifest(&self, commit_id: &CommitId, expected_db_hashes: &[CommitId]) {
             let manifest = self.read_manifest(commit_id);
-            assert_eq!(manifest.database_hashes, expected_db_hashes);
+            assert_eq!(
+                manifest,
+                RegistryManifest::Merkle {
+                    database_hashes: expected_db_hashes.to_vec()
+                }
+            );
         }
     }
 
@@ -1534,6 +1662,120 @@ pub(super) mod tests {
         }
     });
 
+    fn partial_id(name: &[u8]) -> CommitId {
+        CommitId::from(Hash::hash_bytes(name))
+    }
+
+    fn journal_roots(repo: &impl RegistryRepo) -> Vec<CommitId> {
+        repo.read_commit_journal()
+            .expect("Reading the journal should succeed")
+            .iter()
+            .map(|entry| entry.root)
+            .collect()
+    }
+
+    fn partial_base<KV>(registry: &Registry<KV, Normal>, id: &CommitId) -> Option<CommitId>
+    where
+        KV: BackgroundPersistentKeyValueStore,
+        KV::Repo: RegistryRepo,
+    {
+        match registry.read_manifest(id) {
+            RegistryManifest::Partial { base, .. } => base,
+            manifest => panic!("Expected a partial manifest, got {manifest:?}"),
+        }
+    }
+
+    kv_test!(test_commit_partial_writes_a_partial_manifest, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo.clone());
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"alpha");
+
+        let first = partial_id(b"first");
+        registry.commit_partial(first).expect("Partial commit should succeed");
+        assert_eq!(
+            registry.read_manifest(&first),
+            RegistryManifest::Partial {
+                checkpoints: vec![
+                    super::partial_checkpoint_id(&first, 0),
+                    super::partial_checkpoint_id(&first, 1),
+                ],
+                base: None,
+            }
+        );
+
+        let merkle = registry.commit().expect("Commit should succeed");
+        let second = partial_id(b"second");
+        registry.commit_partial(second).expect("Partial commit should succeed");
+        assert_eq!(partial_base(&registry, &second), Some(merkle));
+
+        let checked_out = Registry::<KV, Normal>::checkout(repo.clone(), merkle)
+            .expect("Checkout should succeed");
+        let third = partial_id(b"third");
+        checked_out.commit_partial(third).expect("Partial commit should succeed");
+        assert_eq!(partial_base(&checked_out, &third), Some(merkle));
+
+        assert_eq!(journal_roots(&repo), [first, merkle, second, third]);
+    });
+
+    kv_test!(test_checkout_of_a_partial_commit_is_refused, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let registry = setup_size_2_registry::<KV>(repo.clone());
+
+        let id = partial_id(b"partial");
+        registry.commit_partial(id).expect("Partial commit should succeed");
+
+        assert!(matches!(
+            Registry::<KV, Normal>::checkout(repo, id),
+            Err(Error::Operational(OperationalError::PartialCommit))
+        ));
+    });
+
+    kv_test!(test_commit_partial_is_ordered_after_pending_commits, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo.clone());
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"alpha");
+
+        let pending = registry.commit_async().expect("Starting a commit should succeed");
+        let id = partial_id(b"partial");
+        registry.commit_partial(id).expect("Partial commit should succeed");
+        let merkle = pending.wait().expect("Commit should succeed");
+
+        assert_eq!(journal_roots(&repo), [merkle, id]);
+        assert_eq!(partial_base(&registry, &id), Some(merkle));
+    });
+
+    kv_test!(test_partial_commits_name_the_latest_merkle_commit, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo);
+
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"m1");
+        let m1 = registry.commit().expect("Commit should succeed");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"p1");
+        let p1 = partial_id(b"p1");
+        registry.commit_partial(p1).expect("Partial commit should succeed");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"p2");
+        let p2 = partial_id(b"p2");
+        registry.commit_partial(p2).expect("Partial commit should succeed");
+        let m2 = registry.commit().expect("Commit should succeed");
+        let p3 = partial_id(b"p3");
+        registry.commit_partial(p3).expect("Partial commit should succeed");
+
+        assert_eq!(partial_base(&registry, &p1), Some(m1));
+        assert_eq!(partial_base(&registry, &p2), Some(m1));
+        assert_eq!(partial_base(&registry, &p3), Some(m2));
+    });
+
+    kv_test!(test_recommitting_a_partial_id_records_it_again, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let registry = setup_size_2_registry::<KV>(repo.clone());
+
+        let id = partial_id(b"partial");
+        registry.commit_partial(id).expect("Partial commit should succeed");
+        registry.commit_partial(id).expect("Recommitting should succeed");
+
+        assert_eq!(journal_roots(&repo), [id, id]);
+    });
+
     kv_test!(test_collect_refuses_while_commits_are_pending, KV: BackgroundPersistentKeyValueStore, {
         let (_keepalive, repo) = KV::setup_repo();
         let registry = setup_size_2_registry::<KV>(repo.clone());
@@ -1640,6 +1882,57 @@ pub(super) mod tests {
         let reloaded = Registry::<PersistenceLayer, Normal>::checkout(repo, root_commit)
             .expect("Checking out the original commit should succeed");
         assert_eq!(CommitId::from(Hash::from_foldable(&reloaded)), root_commit);
+    }
+
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_registry_checkout_read_only_of_a_partial_commit() {
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+        use crate::storage::TestKeyValueStoreSetup;
+
+        let (_keepalive, repo) = PersistenceLayer::setup_repo();
+        let mut registry = setup_size_2_registry::<PersistenceLayer>(repo.clone());
+        populate_database_with_key_value::<PersistenceLayer>(&mut registry, 0, &[1], b"alpha");
+        registry.commit().expect("Commit should succeed");
+        populate_database_with_key_value::<PersistenceLayer>(&mut registry, 1, &[2], b"beta");
+
+        let id = partial_id(b"partial");
+        registry
+            .commit_partial(id)
+            .expect("Partial commit should succeed");
+        populate_database_with_key_value::<PersistenceLayer>(&mut registry, 0, &[1], b"later");
+        populate_database_with_key_value::<PersistenceLayer>(&mut registry, 1, &[3], b"later");
+
+        let read_only = Registry::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only(repo, id)
+            .expect("Read-only checkout should succeed");
+
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+        let key_c = Key::new(&[3]).expect("Size less than KEY_MAX_SIZE");
+        read_only.databases[0].assert_database_value(&key_a, b"alpha");
+        read_only.databases[1].assert_database_value(&key_b, b"beta");
+        assert!(
+            !read_only.databases[1]
+                .exists(&key_c)
+                .expect("Checking should succeed")
+        );
+
+        let clone = read_only.clone_read_only();
+        clone.databases[0].assert_database_value(&key_a, b"alpha");
+
+        assert!(matches!(
+            read_only.databases[0].hash(),
+            Err(OperationalError::PartialCommit)
+        ));
+        assert!(matches!(
+            read_only.try_start_proof(),
+            Err(OperationalError::PartialCommit)
+        ));
+        assert!(matches!(
+            read_only.to_writeable(),
+            Err(OperationalError::PartialCommit)
+        ));
     }
 
     #[cfg(rocksdb)]
@@ -2863,7 +3156,7 @@ mod rocksdb_tests {
         let manifest_bytes = std::fs::read(&manifest_path).expect("Manifest should be readable");
         let manifest: RegistryManifest =
             deserialise(&manifest_bytes).expect("Manifest should be deserialisable");
-        std::fs::remove_dir_all(repo.database_commit_dir(&manifest.database_hashes[0]))
+        std::fs::remove_dir_all(repo.database_commit_dir(&manifest.database_commits()[0]))
             .expect("Database commit should be removable");
 
         assert!(matches!(

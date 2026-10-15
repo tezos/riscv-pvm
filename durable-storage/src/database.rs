@@ -206,6 +206,47 @@ pub(crate) struct DatabaseCommit<KV: PersistentKeyValueStore> {
     snapshot: Box<dyn FnOnce() -> Result<MerkleLayer<KV, Normal>, OperationalError> + Send>,
 }
 
+impl<KV: TreeBackedKeyValueStore> Database<KV, Normal> {
+    /// Checkpoint the current values under `id`, without hashing or storing the Merkle tree.
+    ///
+    /// The commit can be read with [`Database::checkout_read_only_partial`], but not checked out
+    /// writeable, hashed or proved.
+    pub fn commit_partial(&self, repo: &KV::Repo, id: &CommitId) -> Result<(), OperationalError>
+    where
+        KV: BackgroundPersistentKeyValueStore,
+    {
+        self.stage_partial_commit(repo)?.finish(repo, id)
+    }
+
+    /// Take the synchronous part of a partial commit: the value checkpoint. The rest is done by
+    /// [`PartialDatabaseCommit::finish`].
+    pub(crate) fn stage_partial_commit(
+        &self,
+        repo: &KV::Repo,
+    ) -> Result<PartialDatabaseCommit<KV>, OperationalError>
+    where
+        KV: BackgroundPersistentKeyValueStore,
+    {
+        Ok(PartialDatabaseCommit {
+            staged: self.inner.persistent.stage_commit(repo)?,
+            persistent: self.inner.persistent.clone(),
+        })
+    }
+}
+
+/// A partial database commit whose values are checkpointed, but not yet published.
+pub(crate) struct PartialDatabaseCommit<KV: PersistentKeyValueStore> {
+    persistent: Arc<KV>,
+    staged: KV::Staged,
+}
+
+impl<KV: PersistentKeyValueStore> PartialDatabaseCommit<KV> {
+    /// Publish the checkpoint under `id`.
+    pub(crate) fn finish(self, repo: &KV::Repo, id: &CommitId) -> Result<(), OperationalError> {
+        self.persistent.publish_commit(repo, self.staged, id)
+    }
+}
+
 impl<KV: PersistentKeyValueStore> DatabaseCommit<KV> {
     /// Hash and store the snapshot taken at the start of the commit, then publish the checkpoint
     /// under its root hash.
@@ -242,6 +283,24 @@ impl<KV: ReadOnlyKeyValueStore> Database<KV, Normal> {
         })
     }
 
+    /// Read a checkpoint published by a partial commit, without making a working copy.
+    ///
+    /// The database has no root hash: [`Database::hash`] and [`Database::to_writeable`] fail with
+    /// [`OperationalError::PartialCommit`].
+    pub(crate) fn checkout_read_only_partial(
+        repo: &KV::Repo,
+        checkpoint: CommitId,
+    ) -> Result<Self, Error> {
+        let persistent = Arc::new(KV::checkout_read_only(repo, &checkpoint)?);
+
+        Ok(Database {
+            inner: NormalImpl {
+                persistent,
+                merkle: CommittedRoot::partial(),
+            },
+        })
+    }
+
     /// Create another handle on the same committed state.
     ///
     /// Copies nothing and cannot fail - the store handle is shared and the root hash is a value -
@@ -268,10 +327,10 @@ impl<KV: ReadOnlyKeyValueStore> Database<KV, Normal> {
     where
         KV::Writeable: BackgroundPersistentKeyValueStore,
     {
+        let commit_id = self.inner.merkle.commit_id()?;
         let persistent = Arc::new(self.inner.persistent.to_writeable(repo)?);
 
-        let merkle =
-            MerkleWorker::checkout(handle, persistent.clone(), self.inner.merkle.commit_id())?;
+        let merkle = MerkleWorker::checkout(handle, persistent.clone(), commit_id)?;
 
         Ok(Database {
             inner: NormalImpl { persistent, merkle },
@@ -1158,6 +1217,40 @@ pub(crate) mod tests {
 
     // Not `kv_test!`s: the in-memory backend copies a commit into memory either way, so it has no
     // read-only store.
+    #[cfg(rocksdb)]
+    #[test]
+    fn test_database_commit_partial_round_trip() {
+        use super::Database;
+        use crate::commit::CommitId;
+        use crate::persistence_layer::PersistenceLayer;
+        use crate::persistence_layer::ReadOnlyPersistenceLayer;
+
+        let (_runtime, _keepalive, repo, mut database) =
+            new_persistent_database::<PersistenceLayer>();
+
+        let key = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        database
+            .set(key.clone(), Bytes::from_static(b"committed"))
+            .expect("Writing should succeed");
+        let id = CommitId::from(octez_riscv_data::hash::Hash::hash_bytes(b"partial"));
+        database
+            .inner()
+            .commit_partial(&repo, &id)
+            .expect("Partial commit should succeed");
+        database
+            .set(key.clone(), Bytes::from_static(b"later"))
+            .expect("Writing should succeed");
+
+        let read_only =
+            Database::<ReadOnlyPersistenceLayer, Normal>::checkout_read_only_partial(&repo, id)
+                .expect("Read-only checkout should succeed");
+        read_only.assert_database_value(&key, b"committed");
+        assert!(matches!(
+            read_only.hash(),
+            Err(crate::errors::OperationalError::PartialCommit)
+        ));
+    }
+
     #[cfg(rocksdb)]
     #[test]
     fn test_database_checkout_read_only_reads_the_commit() {
