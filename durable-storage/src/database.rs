@@ -164,6 +164,15 @@ impl<KV: TreeBackedKeyValueStore> Database<KV, Normal> {
 
         Ok(commit_id)
     }
+
+    /// Block until the Merkle tree has applied every write made so far, without hashing it.
+    ///
+    /// Used in benchmarks in order to split the cost of waiting for the Merkle worker to catch up
+    /// from the cost of hashing.
+    #[cfg(test_utils)]
+    pub fn wait_for_merkle(&self) -> Result<(), OperationalError> {
+        self.inner.merkle.sync()
+    }
 }
 
 /// A database reading a commit in place, through a [`ReadOnlyKeyValueStore`].

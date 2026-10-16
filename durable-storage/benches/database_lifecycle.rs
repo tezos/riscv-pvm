@@ -56,6 +56,7 @@
 //! [`Database`]: octez_riscv_durable_storage::database::Database
 
 mod random;
+mod registry_common;
 
 use std::hint::black_box;
 use std::path::Path;
@@ -67,12 +68,9 @@ use criterion::BatchSize;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
-use octez_riscv_data::mode::Normal;
 use octez_riscv_durable_storage::commit::CommitId;
 use octez_riscv_durable_storage::database::DirectoryManager;
 use octez_riscv_durable_storage::key::Key;
-use octez_riscv_durable_storage::persistence_layer::PersistenceLayer;
-use octez_riscv_durable_storage::registry::Registry;
 use octez_riscv_test_utils::TestableTmpdir;
 use rand::prelude::*;
 use rand::rng;
@@ -81,9 +79,8 @@ use serde::Serialize;
 
 use crate::random::generate_keys;
 use crate::random::generate_random_bytes_in_range;
-
-/// A Normal-mode registry backed by the persistent (RocksDB) key-value store.
-type Reg = Registry<PersistenceLayer, Normal>;
+use crate::registry_common::Reg;
+use crate::registry_common::env_usize;
 
 /// Number of keys to prepopulate *each* database with, controlling how "large"
 /// the databases under test are. Override with the `PREPOPULATED_NODE_KEYS_COUNT`
@@ -109,16 +106,6 @@ const KEY_SAMPLE_PER_DB: usize = 100_000;
 /// File name (within `LIFECYCLE_REGISTRY_DIR`) of the manifest describing a
 /// prepopulated registry that can be reused across runs.
 const PREPOPULATED_MANIFEST_FILE: &str = "prepopulated_lifecycle.json";
-
-fn env_usize(name: &str, default: usize) -> usize {
-    std::env::var(name)
-        .ok()
-        .map(|v| {
-            v.parse()
-                .unwrap_or_else(|_| panic!("{name} must be a number"))
-        })
-        .unwrap_or(default)
-}
 
 /// Manifest persisted alongside a prepopulated registry so a later run can skip
 /// the (slow) populate phase.
@@ -188,65 +175,22 @@ fn save_prepopulated(
 /// Returns the (checked-out, lazily-loaded) registry, the keys of each database
 /// — so the commit benchmark can modify existing entries — and the commit id of
 /// the populated registry, used by the checkout benchmark.
-///
-/// The registry is built one database at a time: after populating each database
-/// we commit and check the registry back out, which flushes the just-built
-/// database to disk and reloads every database lazily. This keeps only a single
-/// fully-materialised database tree in memory at a time — populating all of them
-/// at once may exhaust memory.
 fn populate_registry(repo: &DirectoryManager) -> (Reg, Vec<Vec<Key>>, CommitId) {
     let database_count = env_usize("REGISTRY_DATABASE_COUNT", REGISTRY_DATABASE_COUNT);
     let node_keys_count = env_usize("PREPOPULATED_NODE_KEYS_COUNT", PREPOPULATED_NODE_KEYS_COUNT);
 
     let mut rng = rng();
-    let mut all_keys = Vec::with_capacity(database_count);
-
-    let mut registry = Registry::new(repo.clone());
-    let mut commit_id = None;
-
-    for index in 0..database_count {
-        // Reload the previously-built databases lazily so they do not sit fully
-        // materialised in memory while we build the next one. (The very first
-        // database starts from the empty in-memory registry above.)
-        if let Some(commit_id) = commit_id {
-            registry = Reg::checkout(repo.clone(), commit_id)
-                .expect("Checking out the partially-populated registry should succeed");
-        }
-
-        registry
-            .resize_tick(index + 1)
-            .expect("Growing the registry should succeed");
-
+    registry_common::populate_registry(repo, database_count, |_, database| {
         let keys = generate_keys(&mut rng, node_keys_count);
-        {
-            let database = registry
-                .database_mut(index)
-                .expect("The database index should be valid");
-            for key in &keys {
-                let value = Bytes::from(generate_random_bytes_in_range(&mut rng, 1..32));
-                database.set(key.clone(), value).ok();
-            }
+        for key in &keys {
+            let value = Bytes::from(generate_random_bytes_in_range(&mut rng, 1..32));
+            database.set(key.clone(), value).ok();
         }
         // Retain only a bounded random sample of keys for the modification
         // scenarios; the keys are already random, so the first `KEY_SAMPLE_PER_DB`
         // are a fine sample. Keeping all of them would cost gigabytes.
-        all_keys.push(keys.into_iter().take(KEY_SAMPLE_PER_DB).collect());
-
-        commit_id = Some(
-            registry
-                .commit()
-                .expect("Committing the partially-populated registry should succeed"),
-        );
-    }
-
-    let commit_id = commit_id.expect("At least one database should have been populated");
-
-    // Check out once more so the returned source holds lazily-loaded (low-memory)
-    // trees, matching the state the scenarios clone from.
-    let source = Reg::checkout(repo.clone(), commit_id)
-        .expect("Checking out the populated registry should succeed");
-
-    (source, all_keys, commit_id)
+        keys.into_iter().take(KEY_SAMPLE_PER_DB).collect()
+    })
 }
 
 /// Apply `count` random modifications to existing keys, spread across the

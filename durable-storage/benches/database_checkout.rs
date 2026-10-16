@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 mod erc20_core;
+mod erc20_trace;
 mod random;
 
 use std::time::Duration;
