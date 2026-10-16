@@ -19,6 +19,7 @@ In normal operation you use `Registry<PersistenceLayer, Normal>`, created over a
 | `checkout(repo, commit_id)` | Restore a committed Registry into a working state you can modify |
 | `checkout_read_only(repo, commit_id)` | Restore a committed Registry for reading only, reading its databases where they lie on disk |
 | `commit()` | Commit every database and the Registry itself, returning the Registry's `CommitId` |
+| `commit_partial(id)` | Checkpoint every database's values under a caller-supplied `CommitId`, without hashing or storing the Merkle trees |
 | `len()`, `is_empty()` | The number of databases |
 | `resize_tick(new_size)` | Grow or shrink the Registry by at most one database. New databases are empty; shrinking drops the last one |
 | `database(index)`, `database_mut(index)` | Reach a database to operate on it |
@@ -78,6 +79,23 @@ Several registry commits can name the same database commit, since a database com
 If the hash does not match the commit id, the checkout fails with `RegistryCommitMismatch`.
 `checkout_read_only` reads the databases where they lie instead of copying them into a working state (see [Checking out and cloning](/new-durable-storage/persistence-layer#checking-out-and-cloning)).
 Each database then takes its hash from the manifest rather than from its own tree, so the check only catches a manifest that does not match its id, not a database that does not match its commit.
+
+### Partial commits
+
+`commit_partial(id)` is the cheap per-block commit: it checkpoints each database's values and writes a manifest, but hashes nothing and writes nothing to the Merkle node store.
+You supply the `CommitId`, since there is no root hash to name the commit by.
+Database `i`'s checkpoint is stored under the hash of `id` and `i`.
+
+The manifest of a partial commit lists those checkpoint ids and the **base**: the Merkle commit the working state was checked out at or last committed, if any.
+The commit is recorded in the journal like any other, after the Merkle commits started before it with `commit_async`, which it waits for.
+
+As with a Merkle commit, the id asserts the state.
+Committing the same id again reuses the checkpoints already stored under it and records the id again.
+Derive the id from something that identifies the state, such as the block hash.
+
+You can read a partial commit with `checkout_read_only`.
+`checkout` refuses it with `PartialCommit`, and so do hashing its databases, proving and `to_writeable`, since its databases have no root hash.
+To resume writing, check out the base and apply the blocks since.
 
 ## Databases
 

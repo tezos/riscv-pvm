@@ -73,32 +73,40 @@ impl<KV: ReadableKeyValueStore<Merkle = MerkleWorker<KV>>> TreeBackedKeyValueSto
 /// [`MerkleLayer::commit`] - so a database that can only ever read that one commit already knows
 /// its root hash, and needs neither a tree nor a worker thread to answer for it. Proving requires a
 /// tree, so [`MerkleHandle::start_proof`] loads one on demand.
+///
+/// A database read from a partial commit has no root hash: hashing and proving it fail with
+/// [`OperationalError::PartialCommit`].
 #[derive(Debug, Clone, Copy)]
-pub struct CommittedRoot(CommitId);
+pub struct CommittedRoot(Option<CommitId>);
 
 impl CommittedRoot {
+    /// The root of a database read from a partial commit, which has none.
+    pub(crate) fn partial() -> Self {
+        Self(None)
+    }
+
     /// The commit this database reads.
-    pub(crate) fn commit_id(&self) -> CommitId {
-        self.0
+    pub(crate) fn commit_id(&self) -> Result<CommitId, OperationalError> {
+        self.0.ok_or(OperationalError::PartialCommit)
     }
 }
 
 impl From<CommitId> for CommittedRoot {
     fn from(commit: CommitId) -> Self {
-        Self(commit)
+        Self(Some(commit))
     }
 }
 
 impl<KV: ReadableKeyValueStore> MerkleHandle<KV> for CommittedRoot {
     fn hash(&self) -> Result<Hash, OperationalError> {
-        Ok(*self.0.as_hash())
+        Ok(*self.commit_id()?.as_hash())
     }
 
     fn start_proof(
         &self,
         store: Arc<KV>,
     ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError> {
-        Ok(MerkleLayer::checkout(store, self.0)?.start_proof())
+        Ok(MerkleLayer::checkout(store, self.commit_id()?)?.start_proof())
     }
 }
 
