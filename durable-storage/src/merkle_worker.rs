@@ -263,6 +263,29 @@ impl<KV> Command<KV> {
         (receive, this)
     }
 
+    /// Construct a command that does nothing, other than signal it has been reached.
+    ///
+    /// Used in benchmarks in order to split the cost of waiting for the Merkle worker
+    /// to catch up from the cost of the blocking operation that is waiting for it.
+    #[cfg(test_utils)]
+    fn new_sync() -> (impl FnOnce() -> Result<(), OperationalError>, Self) {
+        let (sender, receiver) = oneshot::channel();
+
+        let this = Self(Box::new(
+            move |_layer: &mut MerkleLayer<KV, Normal>, _consistency: &mut BTreeSet<Key>| {
+                let _ = sender.send(());
+            },
+        ));
+
+        let receive = || {
+            receiver
+                .blocking_recv()
+                .map_err(|_error| OperationalError::WorkerThreadDied)
+        };
+
+        (receive, this)
+    }
+
     /// Construct a command that performs a [`MerkleLayer::hash`].
     fn new_hash() -> (impl FnOnce() -> Result<Hash, OperationalError>, Self)
     where
@@ -383,6 +406,20 @@ impl<KV> MerkleWorker<KV> {
         let worker = Self::from_layer(handle, layer);
 
         Ok(worker)
+    }
+
+    /// Block until every command queued so far has been applied.
+    ///
+    /// Used in benchmarks in order to split the cost of waiting for the Merkle worker
+    /// to catch up from the cost of the blocking operation that is waiting for it.
+    #[cfg(test_utils)]
+    pub(crate) fn sync(&self) -> Result<(), OperationalError> {
+        let (receive, command) = Command::new_sync();
+        self.sender
+            .send(command)
+            .map_err(|_error| OperationalError::WorkerThreadDied)?;
+
+        receive()
     }
 
     /// Non-blocking version of [`MerkleLayer::write`].
