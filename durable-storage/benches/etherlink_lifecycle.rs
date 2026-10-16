@@ -17,12 +17,14 @@
 //! runs against the mirrors, and moves them back at its end.
 //!
 //! A number of warm-up blocks are run, then the measured ones, all on one chain. Each block is
-//! timed in parts: storage access (replaying its accesses, and copying and moving the mirrors), and
-//! the end of the block: hashing the two accounts keyspaces (as the kernel does for its state
-//! roots), if enabled, and committing the registry. Checkouts and garbage collections, with their
-//! compactions, are timed separately. At the end of the run, each part, the end of the block, the
-//! whole block, the checkouts and the collections are summarised over the measured blocks,
-//! followed by the throughput in transactions per second over the measured blocks' durations.
+//! timed in parts: storage access, split into its critical part (replaying its accesses, and
+//! copying and moving the mirrors) and the catch-up (waiting for the accounts keyspaces' Merkle
+//! workers to apply the block's writes, if they are hashed), and the end of the block: hashing the
+//! two accounts keyspaces (as the kernel does for its state roots), if enabled, and committing the
+//! registry. Checkouts and garbage collections, with their compactions, are timed separately. At
+//! the end of the run, each part, the end of the block, the whole block, the checkouts and the
+//! collections are summarised over the measured blocks, followed by the throughput in transactions
+//! per second over the measured blocks' durations.
 //!
 //! After each block, a summary is printed: the block's duration, split into its parts, how much the
 //! committed state on disk grew, and the sizes of the committed state and of the working databases.
@@ -711,8 +713,12 @@ struct Chain<'a> {
 
 /// The timed parts of a block.
 struct BlockTimes {
-    /// Replaying the block, copying the safe roots into their mirrors and promoting them back.
+    /// The critical part of storage access: replaying the block, copying the safe roots into their
+    /// mirrors and promoting them back.
     storage_access: Duration,
+    /// The catch-up part of storage access: waiting for the accounts keyspaces' Merkle trees to
+    /// apply the block's writes, before hashing.
+    merkle_catch_up: Duration,
     /// The accounts keyspaces, if they are hashed before committing.
     hashing: Duration,
     commit: Duration,
@@ -731,7 +737,7 @@ impl BlockTimes {
     }
 
     fn block(&self) -> Duration {
-        self.storage_access + self.end()
+        self.storage_access + self.merkle_catch_up + self.end()
     }
 }
 
@@ -795,6 +801,18 @@ impl Chain<'_> {
         let start = Instant::now();
         if self.config.hash_before_commit {
             for index in [ETH_ACCOUNTS_DB, TEZ_ACCOUNTS_DB] {
+                self.registry
+                    .database(index)
+                    .expect("The database index should be valid")
+                    .wait_for_merkle()
+                    .expect("Waiting for the Merkle tree should succeed");
+            }
+        }
+        let merkle_catch_up = start.elapsed();
+
+        let start = Instant::now();
+        if self.config.hash_before_commit {
+            for index in [ETH_ACCOUNTS_DB, TEZ_ACCOUNTS_DB] {
                 black_box(
                     self.registry
                         .database(index)
@@ -811,6 +829,7 @@ impl Chain<'_> {
         let commit = start.elapsed();
         let times = BlockTimes {
             storage_access,
+            merkle_catch_up,
             hashing,
             commit,
         };
@@ -822,10 +841,12 @@ impl Chain<'_> {
         self.blocks_since_checkout += 1;
 
         let summary = format!(
-            "{label}: {:.2} ms (storage access {:.2} ms, hashing {:.2} ms, commit {:.2} ms), \
-             commit {:+.2} MiB, committed {:.2} MiB, working {:.2} MiB",
+            "{label}: {:.2} ms (storage access - critical {:.2} ms, storage access - catch-up {:.2} ms, \
+             hashing {:.2} ms, commit {:.2} ms), commit {:+.2} MiB, committed {:.2} MiB, \
+             working {:.2} MiB",
             millis(times.block()),
             millis(times.storage_access),
+            millis(times.merkle_catch_up),
             millis(times.hashing),
             millis(times.commit),
             mib(size_after as i64 - size_before as i64),
@@ -853,15 +874,16 @@ impl Chain<'_> {
         eprintln!("Timed parts of {} measured blocks:", self.times.len());
 
         print_stats(
-            "storage access",
+            "storage access - critical",
             self.times.iter().map(|times| times.storage_access),
+        );
+        print_stats(
+            "storage access - catch-up",
+            self.times.iter().map(|times| times.merkle_catch_up),
         );
         print_stats("hashing", self.times.iter().map(|times| times.hashing));
         print_stats("commit", self.times.iter().map(|times| times.commit));
-        print_stats(
-            "end of block (hashing + committing)",
-            self.times.iter().map(BlockTimes::end),
-        );
+        print_stats("end of block", self.times.iter().map(BlockTimes::end));
         print_stats("block", self.times.iter().map(BlockTimes::block));
         print_stats(
             &format!("checkout ({} checkouts)", self.checkout_times.len()),
