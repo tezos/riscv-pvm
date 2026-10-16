@@ -19,12 +19,13 @@
 //! A number of warm-up blocks are run, then the measured ones, all on one chain. Each block is
 //! timed in parts: storage access, split into its critical part (replaying its accesses, and
 //! copying and moving the mirrors) and the catch-up (waiting for the accounts keyspaces' Merkle
-//! workers to apply the block's writes, if they are hashed), and the end of the block: hashing the
-//! two accounts keyspaces (as the kernel does for its state roots), if enabled, and committing the
-//! registry. Checkouts and garbage collections, with their compactions, are timed separately. At
-//! the end of the run, each part, the end of the block, the whole block, the checkouts and the
-//! collections are summarised over the measured blocks, followed by the throughput in transactions
-//! per second over the measured blocks' durations.
+//! workers to apply the block's writes, if they are hashed), waiting for pending asynchronous
+//! commits before a checkout, and the end of the block: hashing the two accounts keyspaces (as the
+//! kernel does for its state roots), if enabled, and committing the registry. Checkouts and
+//! garbage collections, with their compactions, are timed separately. At the end of the run, each
+//! part, the end of the block, the whole block, the checkouts and the collections are summarised
+//! over the measured blocks, followed by the throughput in transactions per second over the
+//! measured blocks' durations.
 //!
 //! After each block, a summary is printed: the block's duration, split into its parts, how much the
 //! committed state on disk grew, and the sizes of the committed state and of the working databases.
@@ -43,6 +44,12 @@
 //! - `CHECKOUT_INTERVAL_BLOCKS`: check the registry out afresh from the last commit every this
 //!   many blocks, instead of continuing from the in-memory state. `0` never checks out.
 //! - `HASH_BEFORE_COMMIT`: whether to hash the accounts keyspaces before committing.
+//! - `ASYNC_COMMITS`: whether to commit with [`Registry::commit_async`]. The timed commit is then
+//!   the call alone. Commits stay in flight, overlapping the following blocks, and are collected
+//!   once complete. They are waited for only before a checkout (the flush wait), before a
+//!   collection (untimed), and at the end of the run (the final flush wait, which the time per
+//!   block spreads over the measured blocks). The growth reported with each block is that of the
+//!   committed state since the previous block, and the sizes are those before its commit.
 //! - `GC_INTERVAL_BLOCKS`: collect garbage every this many blocks. `0` never collects.
 //! - `GC_KEEP_COMMITS`: how many of the most recent commits a collection retains.
 //! - `ETH_ACCOUNT_COUNT`, `EVM_WORLD_STATE_KEYS_COUNT`, `TEZ_ACCOUNTS_KEYS_COUNT`,
@@ -72,6 +79,7 @@
 //! purge` on macOS, `echo 3 | sudo tee /proc/sys/vm/drop_caches` on Linux).
 //!
 //! [`Registry`]: octez_riscv_durable_storage::registry::Registry
+//! [`Registry::commit_async`]: octez_riscv_durable_storage::registry::Registry::commit_async
 
 mod erc20_trace;
 mod random;
@@ -92,6 +100,7 @@ use octez_riscv_durable_storage::commit::CommitId;
 use octez_riscv_durable_storage::database::DirectoryManager;
 use octez_riscv_durable_storage::gc_space::disk_usage;
 use octez_riscv_durable_storage::key::Key;
+use octez_riscv_durable_storage::registry::PendingCommit;
 use rand::prelude::*;
 use rand::rngs::SmallRng;
 use serde::Deserialize;
@@ -152,6 +161,7 @@ const WARM_UP_BLOCKS: usize = 3;
 const TRANSACTIONS_PER_BLOCK: usize = 1_000;
 const CHECKOUT_INTERVAL_BLOCKS: usize = 0;
 const HASH_BEFORE_COMMIT: bool = true;
+const ASYNC_COMMITS: bool = false;
 const GC_INTERVAL_BLOCKS: usize = 0;
 const GC_KEEP_COMMITS: usize = 1;
 const ETH_ACCOUNT_COUNT: usize = 5_000_000;
@@ -205,6 +215,7 @@ struct Config {
     transactions_per_block: usize,
     checkout_interval_blocks: usize,
     hash_before_commit: bool,
+    async_commits: bool,
     gc_interval_blocks: usize,
     gc_keep_commits: usize,
     shape: Shape,
@@ -225,6 +236,11 @@ impl std::fmt::Display for Shape {
 }
 
 impl Config {
+    /// Whether blocks can wait for pending asynchronous commits before a checkout.
+    fn has_flush_wait(&self) -> bool {
+        self.async_commits && self.checkout_interval_blocks > 0
+    }
+
     fn print(&self) {
         let every = |interval: usize| match interval {
             0 => "never".to_owned(),
@@ -249,6 +265,7 @@ impl Config {
             every(self.checkout_interval_blocks)
         );
         eprintln!("  hash before commit       {}", self.hash_before_commit);
+        eprintln!("  async commits            {}", self.async_commits);
         eprintln!("  GC                       {gc}");
     }
 
@@ -262,6 +279,7 @@ impl Config {
                 CHECKOUT_INTERVAL_BLOCKS,
             ),
             hash_before_commit: env_bool("HASH_BEFORE_COMMIT", HASH_BEFORE_COMMIT),
+            async_commits: env_bool("ASYNC_COMMITS", ASYNC_COMMITS),
             gc_interval_blocks: env_usize("GC_INTERVAL_BLOCKS", GC_INTERVAL_BLOCKS),
             gc_keep_commits: env_usize("GC_KEEP_COMMITS", GC_KEEP_COMMITS),
             shape: Shape {
@@ -700,6 +718,12 @@ struct Chain<'a> {
     registry: Reg,
     /// Most recent last, trimmed to `GC_KEEP_COMMITS` whenever garbage is collected.
     recent_commits: VecDeque<CommitId>,
+    /// The commits started by `ASYNC_COMMITS` and not yet collected, oldest first.
+    pending: VecDeque<PendingCommit>,
+    /// The committed size measured with the previous block, under `ASYNC_COMMITS`.
+    last_committed_size: Option<u64>,
+    /// Waiting for the pending commits at the end of the run.
+    final_flush_wait: Duration,
     block_number: usize,
     blocks_since_checkout: usize,
     rng: ThreadRng,
@@ -716,6 +740,8 @@ struct BlockTimes {
     /// The critical part of storage access: replaying the block, copying the safe roots into their
     /// mirrors and promoting them back.
     storage_access: Duration,
+    /// Waiting for the pending asynchronous commits before a checkout.
+    flush_wait: Duration,
     /// The catch-up part of storage access: waiting for the accounts keyspaces' Merkle trees to
     /// apply the block's writes, before hashing.
     merkle_catch_up: Duration,
@@ -737,7 +763,7 @@ impl BlockTimes {
     }
 
     fn block(&self) -> Duration {
-        self.storage_access + self.merkle_catch_up + self.end()
+        self.storage_access + self.merkle_catch_up + self.flush_wait + self.end()
     }
 }
 
@@ -754,8 +780,10 @@ impl Chain<'_> {
             format!("warm-up block {}", self.block_number + 1)
         };
 
+        let mut flush_wait = Duration::ZERO;
         let interval = self.config.checkout_interval_blocks;
         if interval > 0 && self.blocks_since_checkout >= interval {
+            flush_wait = self.resolve_pending();
             let start = Instant::now();
             let registry = Reg::checkout(self.repo.clone(), self.last_commit())
                 .expect("Checking out the last commit should succeed");
@@ -796,7 +824,14 @@ impl Chain<'_> {
         }
         let storage_access = start.elapsed();
 
+        self.collect_finished();
+
         let size_before = self.committed_size();
+        // Measured before an asynchronous commit, so that measuring does not overlap its flush.
+        let total_before = self
+            .config
+            .async_commits
+            .then(|| self.disk_usage(self.repo_dir));
 
         let start = Instant::now();
         if self.config.hash_before_commit {
@@ -825,31 +860,58 @@ impl Chain<'_> {
         let hashing = start.elapsed();
 
         let start = Instant::now();
-        let commit_id = self.registry.commit().expect("Committing should succeed");
+        if self.config.async_commits {
+            let pending = self
+                .registry
+                .commit_async()
+                .expect("Starting a commit should succeed");
+            self.pending.push_back(pending);
+        } else {
+            let commit_id = self.registry.commit().expect("Committing should succeed");
+            self.recent_commits.push_back(commit_id);
+        }
         let commit = start.elapsed();
         let times = BlockTimes {
             storage_access,
+            flush_wait,
             merkle_catch_up,
             hashing,
             commit,
         };
 
-        let size_after = self.committed_size();
-        let total = self.disk_usage(self.repo_dir);
-        self.recent_commits.push_back(commit_id);
+        let (size_after, total) = match total_before {
+            Some(total) => (size_before, total),
+            None => (self.committed_size(), self.disk_usage(self.repo_dir)),
+        };
+        let growth = if self.config.async_commits {
+            let previous = self.last_committed_size.replace(size_before);
+            size_before as i64 - previous.unwrap_or(size_before) as i64
+        } else {
+            size_after as i64 - size_before as i64
+        };
         self.block_number += 1;
         self.blocks_since_checkout += 1;
 
+        let flush_wait = if self.config.has_flush_wait() {
+            format!("flush wait {:.2} ms, ", millis(times.flush_wait))
+        } else {
+            String::new()
+        };
         let summary = format!(
-            "{label}: {:.2} ms (storage access - critical {:.2} ms, storage access - catch-up {:.2} ms, \
-             hashing {:.2} ms, commit {:.2} ms), commit {:+.2} MiB, committed {:.2} MiB, \
+            "{label}: {:.2} ms (storage access - critical {:.2} ms, {flush_wait}storage access - catch-up {:.2} ms, \
+             hashing {:.2} ms, commit {:.2} ms), {} {:+.2} MiB, committed {:.2} MiB, \
              working {:.2} MiB",
             millis(times.block()),
             millis(times.storage_access),
             millis(times.merkle_catch_up),
             millis(times.hashing),
             millis(times.commit),
-            mib(size_after as i64 - size_before as i64),
+            if self.config.async_commits {
+                format!("{} pending, committed state", self.pending.len())
+            } else {
+                "commit".to_owned()
+            },
+            mib(growth),
             mib(size_after as i64),
             mib(total as i64 - size_after as i64),
         );
@@ -877,6 +939,12 @@ impl Chain<'_> {
             "storage access - critical",
             self.times.iter().map(|times| times.storage_access),
         );
+        if self.config.has_flush_wait() {
+            print_stats(
+                "flush wait",
+                self.times.iter().map(|times| times.flush_wait),
+            );
+        }
         print_stats(
             "storage access - catch-up",
             self.times.iter().map(|times| times.merkle_catch_up),
@@ -899,6 +967,18 @@ impl Chain<'_> {
             self.gc_times.iter().map(|times| times.compact),
         );
 
+        if self.config.async_commits && !self.times.is_empty() {
+            let blocks: Duration = self.times.iter().map(BlockTimes::block).sum();
+            let per_block = (blocks + self.final_flush_wait) / self.times.len() as u32;
+            eprintln!(
+                "  {:<36} {:>13.2} ms",
+                "final flush wait",
+                millis(self.final_flush_wait)
+            );
+            eprintln!("  {:<36} {:>13.2} ms", "time per block", millis(per_block));
+        }
+
+        // The final flush wait is left out, as a continuously running chain never waits for it.
         let blocks: Duration = self.times.iter().map(BlockTimes::block).sum();
         if !blocks.is_zero() {
             let transactions = self.times.len() * self.config.transactions_per_block;
@@ -908,6 +988,25 @@ impl Chain<'_> {
                 transactions as f64 / blocks.as_secs_f64()
             );
         }
+    }
+
+    /// Collect the pending commits that have completed, without waiting.
+    fn collect_finished(&mut self) {
+        while let Some(result) = self.pending.front().and_then(PendingCommit::try_get) {
+            self.pending.pop_front();
+            let commit_id = result.expect("Committing should succeed");
+            self.recent_commits.push_back(commit_id);
+        }
+    }
+
+    /// Wait for every pending commit, returning how long that took.
+    fn resolve_pending(&mut self) -> Duration {
+        let start = Instant::now();
+        while let Some(pending) = self.pending.pop_front() {
+            let commit_id = pending.wait().expect("Committing should succeed");
+            self.recent_commits.push_back(commit_id);
+        }
+        start.elapsed()
     }
 
     fn last_commit(&self) -> CommitId {
@@ -948,6 +1047,8 @@ impl Chain<'_> {
     /// The store is compacted straight away, so that the freed space is measured rather than left
     /// to RocksDB's background compaction.
     fn collect_garbage(&mut self) -> (String, GcTimes) {
+        // Collection is refused while a commit is pending.
+        self.resolve_pending();
         while self.recent_commits.len() > self.config.gc_keep_commits {
             self.recent_commits.pop_front();
         }
@@ -1178,6 +1279,9 @@ fn main() {
         repo_dir: &run_dir,
         registry,
         recent_commits: VecDeque::from([manifest.commit_id]),
+        pending: VecDeque::new(),
+        last_committed_size: None,
+        final_flush_wait: Duration::ZERO,
         block_number: 0,
         blocks_since_checkout: 0,
         rng: rand::rng(),
@@ -1199,5 +1303,6 @@ fn main() {
         }
     }
 
+    chain.final_flush_wait = chain.resolve_pending();
     chain.print_summary();
 }
