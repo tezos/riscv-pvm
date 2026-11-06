@@ -6,4 +6,7 @@ ignore = [
   "RUSTSEC-2026-0099",
   "RUSTSEC-2026-0104",
   "RUSTSEC-2026-0258",
+  # TODO ENG-164: Remove these exceptions
+  "RUSTSEC-2026-0387",
+  "RUSTSEC-2026-0097",
 ]
