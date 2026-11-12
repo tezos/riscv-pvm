@@ -24,6 +24,9 @@
 //!   commit) and with `COMMIT_MODIFIED_KEYS_COUNT` modifications, which *settle
 //!   the writes* (see below) so that the hashing — but not the execution work —
 //!   falls inside the measurement.
+//! - **Partial commit** — `Registry::commit_partial`: value checkpoints only,
+//!   with no Merkle work, after the same modifications as the commit above, and
+//!   as the second of two partial commits.
 //! - **Hash** — `Database::hash`: on a clean database, whose root hash the
 //!   checkout cached, and on one with settled modifications, where the dirty
 //!   paths must be rehashed.
@@ -51,7 +54,8 @@
 //! on a **large filesystem** to persist the prepopulated registry there and
 //! reuse it across runs. The manifest saved alongside it records the config it
 //! was built with, so a mismatched directory is rebuilt rather than misused.
-//! Unset → ephemeral temp dir, populate every run.
+//! Unset → ephemeral temp dir, populate every run. A kept registry from before
+//! the partial-commit manifest format must be deleted.
 //!
 //! [`Database`]: octez_riscv_durable_storage::database::Database
 
@@ -61,13 +65,19 @@ mod registry_common;
 use std::hint::black_box;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::LazyLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
 use criterion::BatchSize;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use octez_riscv_data::hash::Hash;
 use octez_riscv_durable_storage::commit::CommitId;
 use octez_riscv_durable_storage::database::DirectoryManager;
 use octez_riscv_durable_storage::key::Key;
@@ -279,6 +289,48 @@ fn clone_for_second_commit_fresh_checkout(
         .expect("Checking out the first commit should succeed");
     modify_n(&mut fresh, all_keys, database_count, count, &mut rng);
     fresh
+        .try_clone()
+        .expect("Settling the modifications should succeed")
+}
+
+/// A fresh id for a partial commit.
+///
+/// Salted per run: committing an id again reuses the checkpoints already stored
+/// under it, so ids repeated against a kept `LIFECYCLE_REGISTRY_DIR` would
+/// measure nothing.
+fn next_partial_commit_id() -> CommitId {
+    static SALT: LazyLock<u128> = LazyLock::new(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time should be after the epoch")
+            .as_nanos()
+    });
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    let mut bytes = Vec::with_capacity(24);
+    bytes.extend_from_slice(&SALT.to_le_bytes());
+    bytes.extend_from_slice(&COUNTER.fetch_add(1, Ordering::Relaxed).to_le_bytes());
+    CommitId::from(Hash::hash_bytes(&bytes))
+}
+
+/// Like [`clone_for_second_commit`], but the first commit is partial. The
+/// returned registry is ready for a timed second partial commit.
+fn clone_for_second_commit_partial(
+    source: &Reg,
+    all_keys: &[Vec<Key>],
+    database_count: usize,
+    count: usize,
+) -> Reg {
+    let mut working = source
+        .try_clone()
+        .expect("Cloning the registry should succeed");
+    let mut rng = rng();
+    modify_n(&mut working, all_keys, database_count, count, &mut rng);
+    working
+        .commit_partial(next_partial_commit_id())
+        .expect("The first partial commit should succeed");
+    modify_n(&mut working, all_keys, database_count, count, &mut rng);
+    working
         .try_clone()
         .expect("Settling the modifications should succeed")
 }
@@ -517,6 +569,42 @@ fn database_lifecycle_benchmark(c: &mut Criterion) {
             |registry| {
                 let commit_id = registry.commit().expect("Committing should succeed");
                 black_box(commit_id);
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // A partial commit: value checkpoints and a manifest, no Merkle work.
+    group.bench_function("Commit registry partial (with modifications)", |b| {
+        b.iter_batched(
+            || clone_modified_spread(&source, &all_keys, database_count, modified_keys_count),
+            |registry| {
+                registry
+                    .commit_partial(next_partial_commit_id())
+                    .expect("Committing partially should succeed");
+                registry
+            },
+            BatchSize::PerIteration,
+        )
+    });
+
+    // The second of two partial commits, including whatever flush or compaction
+    // the first checkpoint left in flight.
+    group.bench_function("Commit registry partial (second commit)", |b| {
+        b.iter_batched(
+            || {
+                clone_for_second_commit_partial(
+                    &source,
+                    &all_keys,
+                    database_count,
+                    modified_keys_count,
+                )
+            },
+            |registry| {
+                registry
+                    .commit_partial(next_partial_commit_id())
+                    .expect("Committing partially should succeed");
                 registry
             },
             BatchSize::PerIteration,

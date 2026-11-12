@@ -125,6 +125,11 @@ pub enum OperationalError {
     #[error("The root hash of restored registry does not match the commit id.")]
     RegistryCommitMismatch,
 
+    #[error(
+        "The commit is partial: it has no root hash, so it cannot be checked out writeable, hashed, proved or upgraded"
+    )]
+    PartialCommit,
+
     #[error("This repository was opened for reading only")]
     RepositoryIsReadOnly,
 
