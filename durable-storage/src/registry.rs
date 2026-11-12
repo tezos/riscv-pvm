@@ -11,6 +11,7 @@
 use std::convert::Infallible;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use bincode::Decode;
 use bincode::Encode;
@@ -230,9 +231,20 @@ where
     /// The registry state commit ID is computed as the Merkle root of the commit IDs
     /// of all underlying databases through the [`Foldable<HashFold>`] implementation,
     /// and the registry manifest is stored at the corresponding commit path.
+    ///
+    /// Equivalent to [`Registry::commit_async`] followed by [`PendingCommit::wait`].
     pub fn commit(&self) -> Result<CommitId, OperationalError> {
-        // Held for the whole commit, so the base checked is the one committed on top of.
-        let mut base = self
+        self.commit_async()?.wait()
+    }
+
+    /// Commit the registry state, returning before the Merkle trees are hashed and stored.
+    ///
+    /// The values are checkpointed before this returns, so writes made afterwards are not part of
+    /// the commit. Nothing is visible, and nothing can be checked out, until the returned
+    /// [`PendingCommit`] resolves.
+    pub fn commit_async(&self) -> Result<PendingCommit, OperationalError> {
+        // Held while the commit is started, so the base checked is the one committed on top of.
+        let base = self
             .inner
             .base
             .0
@@ -242,6 +254,8 @@ where
         // Read before checking, so a collection finishing afterwards is noticed next time.
         let store_id = self.inner.repo.merkle_store_id();
 
+        // Collection is refused while commits are pending, so a base not yet advanced past a
+        // pending commit can still only have been collected before that commit started.
         if let Some((root, seen)) = *base {
             // A round prunes the journal before it removes anything, so a base missing from it after
             // a removal is one whose subtree may be partly gone.
@@ -259,29 +273,86 @@ where
             }
         }
 
-        let mut database_hashes = Vec::with_capacity(self.databases.len());
+        let pending = self.inner.repo.pending_commits();
+        let started = pending.load(Ordering::Acquire);
 
-        for database in self.databases.iter() {
-            let hash = database.commit(&self.inner.repo)?;
-            database_hashes.push(hash);
+        let database_commits = self
+            .databases
+            .iter()
+            .map(|database| database.start_commit(&self.inner.repo, started))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let repo = self.inner.repo.clone();
+        let shared_base = self.inner.base.0.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        let job = move || {
+            let result = (|| {
+                let database_hashes = database_commits
+                    .into_iter()
+                    .map(|commit| commit.finish(&repo))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let registry_commit =
+                    CommitId::from(Hash::from_foldable(&Vector::<CommitId, Normal>::new(
+                        database_hashes.clone(),
+                    )));
+
+                let manifest = RegistryManifest { database_hashes };
+                let encoded = serialise(&manifest)
+                    .expect("Serialising the registry manifest should not fail");
+
+                repo.write_registry_commit(&registry_commit, &encoded)?;
+
+                // Recorded after the manifest, so that an interrupted commit leaves a manifest that
+                // collection can reclaim, rather than a recorded root with nothing behind it.
+                repo.record_commit(&registry_commit)?;
+                *shared_base
+                    .lock()
+                    .map_err(|_| OperationalError::LockPoisoned)? =
+                    Some((registry_commit, store_id));
+
+                Ok(registry_commit)
+            })();
+
+            repo.pending_commits().fetch_sub(1, Ordering::AcqRel);
+            let _ = sender.send(result);
+        };
+
+        pending.fetch_add(1, Ordering::AcqRel);
+        if let Err(error) = self.inner.runtime.flush(Box::new(job)) {
+            pending.fetch_sub(1, Ordering::AcqRel);
+            return Err(error);
         }
+        drop(base);
 
-        let registry_commit = CommitId::from(Hash::from_foldable(&self));
+        Ok(PendingCommit(receiver))
+    }
+}
 
-        let manifest = RegistryManifest { database_hashes };
-        let encoded =
-            serialise(&manifest).expect("Serialising the registry manifest should not fail");
+/// A registry commit started by [`Registry::commit_async`], resolving to its [`CommitId`] once the
+/// Merkle trees are flushed and the commit is recorded.
+pub struct PendingCommit(std::sync::mpsc::Receiver<Result<CommitId, OperationalError>>);
 
-        self.inner
-            .repo
-            .write_registry_commit(&registry_commit, &encoded)?;
+impl PendingCommit {
+    /// Block until the commit is complete.
+    pub fn wait(self) -> Result<CommitId, OperationalError> {
+        self.0
+            .recv()
+            .map_err(|_| OperationalError::WorkerThreadDied)?
+    }
 
-        // Recorded after the manifest, so that an interrupted commit leaves a manifest that
-        // collection can reclaim, rather than a recorded root with nothing behind it.
-        self.inner.repo.record_commit(&registry_commit)?;
-        *base = Some((registry_commit, store_id));
-
-        Ok(registry_commit)
+    /// The outcome of the commit if it is complete, without blocking.
+    ///
+    /// The outcome is returned once. Later calls report [`OperationalError::WorkerThreadDied`].
+    pub fn try_get(&self) -> Option<Result<CommitId, OperationalError>> {
+        match self.0.try_recv() {
+            Ok(result) => Some(result),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                Some(Err(OperationalError::WorkerThreadDied))
+            }
+        }
     }
 }
 
@@ -776,16 +847,18 @@ struct NormalImpl<KV: ReadableKeyValueStore> {
 ///
 /// A commit skips what it holds as already stored, and all of that descends from this root. Sound
 /// while the root is retained, since a round removes only what no retained root reaches.
-struct Base(std::sync::Mutex<Option<(CommitId, StoreId)>>);
+///
+/// Shared with the flush thread, which advances it when a commit completes.
+struct Base(Arc<std::sync::Mutex<Option<(CommitId, StoreId)>>>);
 
 impl Base {
     /// No base: nothing was loaded, so nothing skipped can have been collected.
     fn none() -> Self {
-        Self(std::sync::Mutex::new(None))
+        Self(Arc::new(std::sync::Mutex::new(None)))
     }
 
     fn at(root: CommitId, store_id: StoreId) -> Self {
-        Self(std::sync::Mutex::new(Some((root, store_id))))
+        Self(Arc::new(std::sync::Mutex::new(Some((root, store_id)))))
     }
 }
 
@@ -796,7 +869,7 @@ impl Clone for Base {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Self(std::sync::Mutex::new(base))
+        Self(Arc::new(std::sync::Mutex::new(base)))
     }
 }
 
@@ -808,8 +881,19 @@ impl Clone for Base {
 /// [`to_writeable`](Registry::to_writeable), ask for a handle.
 ///
 /// Clones share the runtime, so upgrading a read-only registry twice builds only one.
+///
+/// It also hosts the thread that completes commits started by [`Registry::commit_async`], spawned
+/// when first needed. One thread serialises the flushes, so they do not compete for the disk, and
+/// completes commits in the order they were started. It exits once every clone is dropped and the
+/// commits queued to it are complete.
 #[derive(Clone, Default)]
-struct LazyRuntime(Arc<OnceCell<Runtime>>);
+struct LazyRuntime(
+    Arc<OnceCell<Runtime>>,
+    Arc<OnceCell<std::sync::mpsc::Sender<FlushJob>>>,
+);
+
+/// The background part of a commit, run by the flush thread.
+type FlushJob = Box<dyn FnOnce() + Send>;
 
 impl LazyRuntime {
     /// A handle to the runtime, building it if this is the first caller to need one.
@@ -827,6 +911,22 @@ impl LazyRuntime {
         })?;
 
         Ok(runtime.handle())
+    }
+
+    /// Queue `job` to the flush thread, spawning it if this is the first job.
+    fn flush(&self, job: FlushJob) -> Result<(), OperationalError> {
+        let sender = self.1.get_or_try_init(|| {
+            let (sender, receiver) = std::sync::mpsc::channel::<FlushJob>();
+            std::thread::Builder::new()
+                .name("durable-storage-flush".to_owned())
+                .spawn(move || receiver.into_iter().for_each(|job| job()))
+                .map_err(|error| OperationalError::WorkerRuntimeCreationFailed { error })?;
+            Ok::<_, OperationalError>(sender)
+        })?;
+
+        sender
+            .send(job)
+            .map_err(|_| OperationalError::WorkerThreadDied)
     }
 }
 
@@ -1400,6 +1500,56 @@ pub(super) mod tests {
             CommitId::from(Hash::from_foldable(&checked_out)),
             root_commit
         );
+    });
+
+    kv_test!(test_commit_async_excludes_later_writes_and_completes_in_order, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let mut registry = setup_size_2_registry::<KV>(repo.clone());
+        let key_a = Key::new(&[1]).expect("Size less than KEY_MAX_SIZE");
+        let key_b = Key::new(&[2]).expect("Size less than KEY_MAX_SIZE");
+
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"first");
+        let first = registry.commit_async().expect("Starting a commit should succeed");
+        populate_database_with_key_value::<KV>(&mut registry, 0, &[1], b"second");
+        let second = registry.commit_async().expect("Starting a commit should succeed");
+        populate_database_with_key_value::<KV>(&mut registry, 1, &[2], b"uncommitted");
+
+        let second = second.wait().expect("Commit should succeed");
+        let first = first.wait().expect("Commit should succeed");
+        assert_eq!(repo.pending_commits().load(std::sync::atomic::Ordering::Acquire), 0);
+
+        let journal: Vec<_> = repo
+            .read_commit_journal()
+            .expect("Reading the journal should succeed")
+            .iter()
+            .map(|entry| entry.root)
+            .collect();
+        assert_eq!(journal, [first, second]);
+
+        for (commit, value) in [(first, b"first".as_slice()), (second, b"second".as_slice())] {
+            let checked_out = Registry::<KV, Normal>::checkout(repo.clone(), commit)
+                .expect("Checkout should succeed");
+            checked_out.databases[0].assert_database_value(&key_a, value);
+            assert!(!checked_out.databases[1].exists(&key_b).expect("Checking should succeed"));
+        }
+    });
+
+    kv_test!(test_collect_refuses_while_commits_are_pending, KV: BackgroundPersistentKeyValueStore, {
+        let (_keepalive, repo) = KV::setup_repo();
+        let registry = setup_size_2_registry::<KV>(repo.clone());
+        let root = registry.commit().expect("Commit should succeed");
+        let suspend = crate::collect::Suspend::new();
+
+        repo.pending_commits().fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        assert!(matches!(
+            crate::collect::collect(&repo, &root, &suspend),
+            Err(crate::errors::GcError::InvalidArgument(
+                crate::errors::GcArgumentError::CommitsPending
+            ))
+        ));
+
+        repo.pending_commits().fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        crate::collect::collect(&repo, &root, &suspend).expect("Collecting should succeed");
     });
 
     kv_test!(test_copied_database_commits_shared_nodes_into_its_own_store, KV: BackgroundPersistentKeyValueStore, {

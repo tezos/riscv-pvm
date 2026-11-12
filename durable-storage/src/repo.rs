@@ -56,6 +56,9 @@ pub struct DirectoryManager {
     /// the next. Cloning a handle shares the store, as it shares everything else here.
     #[cfg(rocksdb)]
     merkle: std::sync::Arc<MerkleStore>,
+
+    /// Registry commits started through this handle or its clones but not yet complete.
+    pending_commits: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl DirectoryManager {
@@ -104,6 +107,7 @@ impl DirectoryManager {
             #[cfg(rocksdb)]
             merkle: crate::merkle_store::open_shared(&merkle_dir)?,
             merkle_dir,
+            pending_commits: Default::default(),
         })
     }
 
@@ -131,6 +135,7 @@ impl DirectoryManager {
             registries_dir,
             merkle: crate::merkle_store::open_read_only(&Self::merkle_dir_in(path))?,
             merkle_dir: Self::merkle_dir_in(path),
+            pending_commits: Default::default(),
         })
     }
 
@@ -329,7 +334,7 @@ impl DirectoryManager {
 }
 
 /// Persistence interface for a [`crate::registry::Registry`] repo.
-pub trait RegistryRepo: Clone {
+pub trait RegistryRepo: Clone + Send + 'static {
     /// Read the registry manifest bytes associated with `id`.
     ///
     /// Fails with [`OperationalError::CommitNotFound`] if no manifest exists for `id`.
@@ -379,6 +384,9 @@ pub trait RegistryRepo: Clone {
     /// Replaced by every collection that removes a node, so an unchanged identity means nothing has
     /// been removed since it was read.
     fn merkle_store_id(&self) -> StoreId;
+
+    /// The number of registry commits started but not yet complete, shared by clones.
+    fn pending_commits(&self) -> &std::sync::atomic::AtomicU64;
 
     /// Remove the manifest for the registry commit `id`.
     ///
@@ -475,6 +483,10 @@ impl RegistryRepo for DirectoryManager {
 
     fn registry_commits(&self) -> Result<Vec<CommitId>, OperationalError> {
         commit_ids_in(&self.registry_commits_dir)
+    }
+
+    fn pending_commits(&self) -> &std::sync::atomic::AtomicU64 {
+        &self.pending_commits
     }
 
     fn merkle_store_id(&self) -> StoreId {
