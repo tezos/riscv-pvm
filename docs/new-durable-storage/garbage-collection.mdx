@@ -91,6 +91,10 @@ The target itself is read the other way about: its *earliest* position is the fl
 A commit id stays the registry root hash, so committing the same state twice remains idempotent.
 Sequence numbers are recorded beside a root, not folded into its identity.
 
+A [partial commit](/new-durable-storage/registry-and-databases#partial-commits) retains its base as well, with the base's journal entry, manifest, database commits and nodes.
+The working state that made the partial commit skips nodes already stored under its base, so dropping the base would stop it from making another Merkle commit, and leave nothing to check out writeable.
+The base is held at the position of the newest retained partial commit that names it.
+
 Database commits are content-addressed and therefore shared: unrelated registry commits name the same database commit whenever their states agree.
 Removal follows reachability rather than recorded order, so a database commit survives for as long as any retained registry commit still names it.
 

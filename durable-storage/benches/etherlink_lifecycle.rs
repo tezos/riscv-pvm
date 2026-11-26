@@ -51,14 +51,19 @@
 //!   many blocks, instead of continuing from the in-memory state. `0` never checks out. Must be a
 //!   multiple of `COMMIT_INTERVAL_BLOCKS`, so that no uncommitted block is dropped.
 //! - `HASH_STATE_ROOTS`: whether to hash the accounts keyspaces at the end of every block.
-//! - `ASYNC_COMMITS`: whether to commit with [`Registry::commit_async`]. The timed commit is then
-//!   the call alone. Commits stay in flight, overlapping the following blocks, and are collected
-//!   once complete. They are waited for only before a checkout (the flush wait), before a
-//!   collection (untimed), and at the end of the run (the final flush wait, which the time per
-//!   block spreads over the measured blocks). The growth reported with each block that commits is
-//!   that of the committed state since the previous measurement, and the sizes are those before its
-//!   commit. They are measured only when no earlier commit is in flight, so that measuring overlaps
-//!   no flush.
+//! - `COMMIT_TYPE`: how blocks commit, one of:
+//!   - `full` (the default): a Merkle commit with [`Registry::commit`].
+//!   - `async`: a Merkle commit with [`Registry::commit_async`]. The timed commit is then the call
+//!     alone. Commits stay in flight, overlapping the following blocks, and are collected once
+//!     complete. They are waited for only before a checkout (the flush wait), before a collection
+//!     (untimed), and at the end of the run (the final flush wait, which the time per block spreads
+//!     over the measured blocks). The growth reported with each block that commits is that of the
+//!     committed state since the previous measurement, and the sizes are those before its commit.
+//!     They are measured only when no earlier commit is in flight, so that measuring overlaps no
+//!     flush.
+//!   - `partial`: the first commit is a Merkle commit and every later one a partial commit
+//!     ([`Registry::commit_partial`]). Checkouts are then all from that first commit, and
+//!     collections retain it as the base of the partial commits they target.
 //! - `GC_INTERVAL_BLOCKS`: collect garbage every this many blocks. `0` never collects. Must be a
 //!   multiple of `COMMIT_INTERVAL_BLOCKS`.
 //! - `GC_KEEP_COMMITS`: how many of the most recent commits a collection retains.
@@ -89,7 +94,9 @@
 //! purge` on macOS, `echo 3 | sudo tee /proc/sys/vm/drop_caches` on Linux).
 //!
 //! [`Registry`]: octez_riscv_durable_storage::registry::Registry
+//! [`Registry::commit`]: octez_riscv_durable_storage::registry::Registry::commit
 //! [`Registry::commit_async`]: octez_riscv_durable_storage::registry::Registry::commit_async
+//! [`Registry::commit_partial`]: octez_riscv_durable_storage::registry::Registry::commit_partial
 
 mod erc20_trace;
 mod random;
@@ -102,8 +109,11 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
+use octez_riscv_data::hash::Hash;
 use octez_riscv_durable_storage::collect::Suspend;
 use octez_riscv_durable_storage::collect::collect_all;
 use octez_riscv_durable_storage::commit::CommitId;
@@ -172,7 +182,7 @@ const TRANSACTIONS_PER_BLOCK: usize = 1_000;
 const COMMIT_INTERVAL_BLOCKS: usize = 1;
 const CHECKOUT_INTERVAL_BLOCKS: usize = 0;
 const HASH_STATE_ROOTS: bool = true;
-const ASYNC_COMMITS: bool = false;
+const COMMIT_TYPE: CommitType = CommitType::Full;
 const GC_INTERVAL_BLOCKS: usize = 0;
 const GC_KEEP_COMMITS: usize = 1;
 const ETH_ACCOUNT_COUNT: usize = 5_000_000;
@@ -206,6 +216,36 @@ const RUN_DIR: &str = "run";
 const ACCOUNT_INFO_SIZE: usize = 77;
 const BALANCE_SIZE: usize = 32;
 
+/// How a block commits.
+#[derive(Clone, Copy, PartialEq)]
+enum CommitType {
+    Full,
+    Async,
+    Partial,
+}
+
+impl CommitType {
+    fn from_env(name: &str, default: Self) -> Self {
+        match std::env::var(name).as_deref() {
+            Ok("full") => CommitType::Full,
+            Ok("async") => CommitType::Async,
+            Ok("partial") => CommitType::Partial,
+            Ok(_) => panic!("{name} must be full, async or partial"),
+            Err(_) => default,
+        }
+    }
+}
+
+impl std::fmt::Display for CommitType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            CommitType::Full => "full",
+            CommitType::Async => "async",
+            CommitType::Partial => "partial",
+        })
+    }
+}
+
 fn env_bool(name: &str, default: bool) -> bool {
     match std::env::var(name).as_deref() {
         Ok("1" | "true") => true,
@@ -231,7 +271,7 @@ struct Config {
     commit_interval_blocks: usize,
     checkout_interval_blocks: usize,
     hash_state_roots: bool,
-    async_commits: bool,
+    commit_type: CommitType,
     gc_interval_blocks: usize,
     gc_keep_commits: usize,
     shape: Shape,
@@ -252,9 +292,13 @@ impl std::fmt::Display for Shape {
 }
 
 impl Config {
+    fn async_commits(&self) -> bool {
+        self.commit_type == CommitType::Async
+    }
+
     /// Whether blocks can wait for pending asynchronous commits before a checkout.
     fn has_flush_wait(&self) -> bool {
-        self.async_commits && self.checkout_interval_blocks > 0
+        self.async_commits() && self.checkout_interval_blocks > 0
     }
 
     fn print(&self) {
@@ -285,7 +329,7 @@ impl Config {
             every(self.checkout_interval_blocks)
         );
         eprintln!("  hash state roots         {}", self.hash_state_roots);
-        eprintln!("  async commits            {}", self.async_commits);
+        eprintln!("  commit type              {}", self.commit_type);
         eprintln!("  GC                       {gc}");
     }
 
@@ -300,7 +344,7 @@ impl Config {
                 CHECKOUT_INTERVAL_BLOCKS,
             ),
             hash_state_roots: env_bool("HASH_STATE_ROOTS", HASH_STATE_ROOTS),
-            async_commits: env_bool("ASYNC_COMMITS", ASYNC_COMMITS),
+            commit_type: CommitType::from_env("COMMIT_TYPE", COMMIT_TYPE),
             gc_interval_blocks: env_usize("GC_INTERVAL_BLOCKS", GC_INTERVAL_BLOCKS),
             gc_keep_commits: env_usize("GC_KEEP_COMMITS", GC_KEEP_COMMITS),
             shape: Shape {
@@ -666,15 +710,21 @@ fn populate(repo: &DirectoryManager, config: &Config, workload: &Workload) -> Ma
     });
 
     Manifest {
+        format: STORAGE_FORMAT,
         shape: config.shape,
         commit_id,
         key_counts,
     }
 }
 
+/// The storage format of the prepopulated repository, bumped when an older one cannot be read.
+const STORAGE_FORMAT: u32 = 1;
+
 /// Describes the prepopulated repository kept in `ETHERLINK_BENCH_DIR`.
 #[derive(Serialize, Deserialize)]
 struct Manifest {
+    #[serde(default)]
+    format: u32,
     shape: Shape,
     commit_id: CommitId,
     key_counts: Vec<usize>,
@@ -691,6 +741,9 @@ fn prepopulated(bench_dir: &Path, config: &Config, workload: &Workload) -> Manif
         .and_then(|file| serde_json::from_reader::<_, Manifest>(file).ok());
     let shape = config.shape;
     let reason = match existing {
+        Some(manifest) if manifest.format != STORAGE_FORMAT => {
+            Some("it was built with an older storage format".to_owned())
+        }
         Some(manifest) if manifest.shape == shape && repo_dir.exists() => {
             eprintln!(
                 "Reusing the prepopulated repository at {}.",
@@ -796,9 +849,16 @@ struct Chain<'a> {
     repo: DirectoryManager,
     repo_dir: &'a Path,
     registry: Reg,
-    /// Most recent last, trimmed to `GC_KEEP_COMMITS` whenever garbage is collected.
+    /// Merkle and partial commits, most recent last, trimmed to `GC_KEEP_COMMITS` whenever garbage
+    /// is collected.
     recent_commits: VecDeque<CommitId>,
-    /// The commits started by `ASYNC_COMMITS` and not yet collected, oldest first.
+    /// What checkouts start from.
+    last_merkle_commit: CommitId,
+    /// Whether the chain has made a commit of its own.
+    has_committed: bool,
+    /// Makes partial commit ids unique to the run.
+    partial_salt: u128,
+    /// The Merkle commits started under `COMMIT_TYPE=async` and not yet collected, oldest first.
     pending: VecDeque<PendingCommit>,
     /// The committed state's size on disk, as last measured.
     last_committed_size: u64,
@@ -866,8 +926,8 @@ impl Chain<'_> {
         if interval > 0 && self.blocks_since_checkout >= interval {
             flush_wait = self.resolve_pending();
             let start = Instant::now();
-            let registry = Reg::checkout(self.repo.clone(), self.last_commit())
-                .expect("Checking out the last commit should succeed");
+            let registry = Reg::checkout(self.repo.clone(), self.last_merkle_commit)
+                .expect("Checking out the last Merkle commit should succeed");
             let checkout_time = start.elapsed();
             self.registry = registry;
             self.blocks_since_checkout = 0;
@@ -882,7 +942,7 @@ impl Chain<'_> {
         // An asynchronous commit is measured before it starts and before storage access, while the
         // Merkle workers are idle, and only when no earlier commit is in flight, so that measuring
         // overlaps no flush.
-        let sizes_before = if commits && self.config.async_commits {
+        let sizes_before = if commits && self.config.async_commits() {
             self.collect_finished();
             self.pending
                 .is_empty()
@@ -946,18 +1006,34 @@ impl Chain<'_> {
         }
         let hashing = start.elapsed();
 
+        let kind = match self.config.commit_type {
+            CommitType::Partial if !self.has_committed => CommitType::Full,
+            commit_type => commit_type,
+        };
         let commit = commits.then(|| {
             let start = Instant::now();
-            if self.config.async_commits {
-                let pending = self
-                    .registry
-                    .commit_async()
-                    .expect("Starting a commit should succeed");
-                self.pending.push_back(pending);
-            } else {
-                let commit_id = self.registry.commit().expect("Committing should succeed");
-                self.recent_commits.push_back(commit_id);
+            match kind {
+                CommitType::Async => {
+                    let pending = self
+                        .registry
+                        .commit_async()
+                        .expect("Starting a commit should succeed");
+                    self.pending.push_back(pending);
+                }
+                CommitType::Full => {
+                    let commit_id = self.registry.commit().expect("Committing should succeed");
+                    self.recent_commits.push_back(commit_id);
+                    self.last_merkle_commit = commit_id;
+                }
+                CommitType::Partial => {
+                    let commit_id = self.partial_id();
+                    self.registry
+                        .commit_partial(commit_id)
+                        .expect("Committing partially should succeed");
+                    self.recent_commits.push_back(commit_id);
+                }
             }
+            self.has_committed = true;
             start.elapsed()
         });
         let times = BlockTimes {
@@ -979,7 +1055,11 @@ impl Chain<'_> {
         // A synchronous commit is measured after it completes, which leaves the Merkle workers idle.
         let commit = match times.commit {
             Some(commit) => {
-                let sizes = if self.config.async_commits {
+                let commit_label = match kind {
+                    CommitType::Full | CommitType::Async => "commit",
+                    CommitType::Partial => "partial commit",
+                };
+                let sizes = if self.config.async_commits() {
                     sizes_before
                 } else {
                     Some((self.committed_size(), self.disk_usage(self.repo_dir)))
@@ -988,14 +1068,14 @@ impl Chain<'_> {
                     Some((size, total)) => {
                         let growth = size as i64 - self.last_committed_size as i64;
                         self.last_committed_size = size;
-                        let growth_label = if self.config.async_commits {
+                        let growth_label = if self.config.async_commits() {
                             format!("{} pending, committed state", self.pending.len())
                         } else {
                             "commit".to_owned()
                         };
                         format!(
-                            "commit {:.2} ms), {growth_label} {:+.2} MiB, committed {:.2} MiB, \
-                             working {:.2} MiB",
+                            "{commit_label} {:.2} ms), {growth_label} {:+.2} MiB, committed \
+                             {:.2} MiB, working {:.2} MiB",
                             millis(commit),
                             mib(growth),
                             mib(size as i64),
@@ -1003,7 +1083,7 @@ impl Chain<'_> {
                         )
                     }
                     None => format!(
-                        "commit {:.2} ms), {} pending, sizes not measured",
+                        "{commit_label} {:.2} ms), {} pending, sizes not measured",
                         millis(commit),
                         self.pending.len(),
                     ),
@@ -1075,7 +1155,7 @@ impl Chain<'_> {
             self.gc_times.iter().map(|times| times.compact),
         );
 
-        if self.config.async_commits && !self.times.is_empty() {
+        if self.config.async_commits() && !self.times.is_empty() {
             let blocks: Duration = self.times.iter().map(BlockTimes::block).sum();
             let per_block = (blocks + self.final_flush_wait) / self.times.len() as u32;
             eprintln!(
@@ -1104,6 +1184,7 @@ impl Chain<'_> {
             self.pending.pop_front();
             let commit_id = result.expect("Committing should succeed");
             self.recent_commits.push_back(commit_id);
+            self.last_merkle_commit = commit_id;
         }
     }
 
@@ -1113,15 +1194,17 @@ impl Chain<'_> {
         while let Some(pending) = self.pending.pop_front() {
             let commit_id = pending.wait().expect("Committing should succeed");
             self.recent_commits.push_back(commit_id);
+            self.last_merkle_commit = commit_id;
         }
         start.elapsed()
     }
 
-    fn last_commit(&self) -> CommitId {
-        *self
-            .recent_commits
-            .back()
-            .expect("There is always at least one commit")
+    /// The id of the current block's partial commit.
+    fn partial_id(&self) -> CommitId {
+        let mut bytes = Vec::with_capacity(24);
+        bytes.extend_from_slice(&self.partial_salt.to_le_bytes());
+        bytes.extend_from_slice(&(self.block_number as u64).to_le_bytes());
+        CommitId::from(Hash::hash_bytes(&bytes))
     }
 
     /// Bytes `dir` occupies on disk, counting hard-linked files once.
@@ -1388,6 +1471,12 @@ fn main() {
         repo_dir: &run_dir,
         registry,
         recent_commits: VecDeque::from([manifest.commit_id]),
+        last_merkle_commit: manifest.commit_id,
+        has_committed: false,
+        partial_salt: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time should be after the epoch")
+            .as_nanos(),
         pending: VecDeque::new(),
         last_committed_size: 0,
         final_flush_wait: Duration::ZERO,
