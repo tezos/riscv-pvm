@@ -50,6 +50,7 @@ use std::collections::HashSet;
 #[cfg(rocksdb)]
 pub use self::sweep::SweptNodes;
 use crate::commit::CommitId;
+use crate::errors::GcArgumentError;
 use crate::errors::GcError;
 use crate::errors::OperationalError;
 use crate::journal;
@@ -136,6 +137,18 @@ impl Round {
     }
 }
 
+/// Refuse to collect while a registry commit of `repo` is still pending.
+fn refuse_while_pending<Repo: RegistryRepo>(repo: &Repo) -> Result<(), GcError> {
+    if repo
+        .pending_commits()
+        .load(std::sync::atomic::Ordering::Acquire)
+        > 0
+    {
+        return Err(GcArgumentError::CommitsPending.into());
+    }
+    Ok(())
+}
+
 /// Drop everything the repository no longer needs to serve `target` and the commits after it.
 ///
 /// Retains every registry commit recorded at or after `target`, and every database commit one of
@@ -149,6 +162,8 @@ pub fn collect<Repo: RegistryRepo>(
     target: &CommitId,
     suspend: &Suspend,
 ) -> Result<Collected, GcError> {
+    refuse_while_pending(repo)?;
+
     let retained_roots = journal::roots_to_retain(&repo.read_commit_journal()?, target)?;
 
     // Read before anything is removed. These manifests are all retained, so they would survive the
@@ -250,6 +265,8 @@ pub fn collect_nodes(
     if repo.merkle_read_only() {
         return Err(OperationalError::RepositoryIsReadOnly.into());
     }
+
+    refuse_while_pending(repo)?;
 
     let (floor, retained) = journal::retained_positions(&repo.read_commit_journal()?, target)?;
 

@@ -29,7 +29,6 @@ use crate::key::Key;
 use crate::merkle_layer::MerkleLayer;
 use crate::storage::PersistentKeyValueStore;
 use crate::storage::ReadableKeyValueStore;
-use crate::storage::StoreOptions;
 use crate::storage::WriteableKeyValueStore;
 
 trait_set! {
@@ -313,36 +312,6 @@ impl<KV> Command<KV> {
 
         (receive, this)
     }
-
-    /// Construct a command that performs a [`MerkleLayer::commit`].
-    fn new_commit(
-        options: StoreOptions,
-    ) -> (impl FnOnce() -> Result<CommitId, OperationalError>, Self)
-    where
-        KV: PersistentKeyValueStore,
-    {
-        let (sender, receiver) = oneshot::channel();
-
-        let this = Self(Box::new(
-            move |layer: &mut MerkleLayer<KV, Normal>, consistency: &mut BTreeSet<Key>| {
-                assert!(
-                    consistency.is_empty(),
-                    "Inconsistent layer on commit: {consistency:?}"
-                );
-
-                let result = layer.commit(&options);
-                let _ = sender.send(result);
-            },
-        ));
-
-        let receive = || {
-            receiver
-                .blocking_recv()
-                .map_err(|_error| OperationalError::WorkerThreadDied)?
-        };
-
-        (receive, this)
-    }
 }
 
 /// Merkle worker that processes commands asynchronously in a background thread
@@ -397,15 +366,33 @@ impl<KV> MerkleWorker<KV> {
     where
         KV: BackgroundReadableKeyValueStore,
     {
+        let layer = self.snapshot(store)?()?;
+        let worker = Self::from_layer(handle, layer);
+
+        Ok(worker)
+    }
+
+    /// Request a clone of the Merkle layer, as it stands once every queued command is applied,
+    /// sharing `store`.
+    ///
+    /// Returns without waiting for the worker. The returned function blocks until the clone is
+    /// ready.
+    pub(crate) fn snapshot(
+        &self,
+        store: Arc<KV>,
+    ) -> Result<
+        impl FnOnce() -> Result<MerkleLayer<KV, Normal>, OperationalError> + Send + 'static,
+        OperationalError,
+    >
+    where
+        KV: BackgroundReadableKeyValueStore,
+    {
         let (receive, command) = Command::new_clone_with(store);
         self.sender
             .send(command)
             .map_err(|_error| OperationalError::WorkerThreadDied)?;
 
-        let layer = receive()?;
-        let worker = Self::from_layer(handle, layer);
-
-        Ok(worker)
+        Ok(receive)
     }
 
     /// Block until every command queued so far has been applied.
@@ -475,19 +462,6 @@ impl<KV> MerkleWorker<KV> {
         let worker = MerkleWorker::from_layer(async_handle, layer);
         Ok(worker)
     }
-
-    /// See [`MerkleLayer::commit`].
-    pub(crate) fn commit(&self, options: StoreOptions) -> Result<CommitId, OperationalError>
-    where
-        KV: PersistentKeyValueStore,
-    {
-        let (receive, command) = Command::new_commit(options);
-        self.sender
-            .send(command)
-            .map_err(|_| OperationalError::WorkerThreadDied)?;
-
-        receive()
-    }
 }
 
 impl<KV: BackgroundReadableKeyValueStore> MerkleHandle<KV> for MerkleWorker<KV> {
@@ -504,12 +478,7 @@ impl<KV: BackgroundReadableKeyValueStore> MerkleHandle<KV> for MerkleWorker<KV> 
         &self,
         store: Arc<KV>,
     ) -> Result<MerkleLayer<KV, Prove<'static>>, OperationalError> {
-        let (receive, command) = Command::new_clone_with(store);
-        self.sender
-            .send(command)
-            .map_err(|_error| OperationalError::WorkerThreadDied)?;
-
-        let layer = receive()?;
+        let layer = self.snapshot(store)?()?;
 
         Ok(layer.start_proof())
     }
@@ -572,6 +541,7 @@ mod tests {
             handle: &Handle,
             repo: &KV::Repo,
             worker: &mut MerkleWorker<KV>,
+            worker_store: &mut Arc<KV>,
             layer: &mut MerkleLayer<KV, Normal>,
         ) {
             match self {
@@ -602,7 +572,11 @@ mod tests {
                 Self::Commit => {
                     let options = crate::storage::StoreOptions::default().with_node_data();
                     let commit2 = layer.commit(&options).expect("Commit should succeed");
-                    let commit1 = worker.commit(options).expect("Commit should succeed");
+                    let commit1 = worker
+                        .snapshot(worker_store.clone())
+                        .and_then(|snapshot| snapshot())
+                        .and_then(|mut snapshot| snapshot.commit(&options))
+                        .expect("Commit should succeed");
                     assert_eq!(commit1, commit2);
                 }
 
@@ -614,9 +588,9 @@ mod tests {
 
                     let persistence_worker =
                         KV::new(repo).expect("Creating a persistence layer should succeed");
-                    let persistence_worker = Arc::new(persistence_worker);
+                    *worker_store = Arc::new(persistence_worker);
                     *worker = worker
-                        .clone_with(handle, persistence_worker)
+                        .clone_with(handle, worker_store.clone())
                         .expect("Cloning a Merkle worker should succeed");
                 }
             }
@@ -687,11 +661,11 @@ mod tests {
         let mut merkle_layer = MerkleLayer::new(persistence_layer);
 
         let persistence_worker = KV::new(repo).expect("Creating a persistence layer should succeed");
-        let persistence_worker = Arc::new(persistence_worker);
-        let mut merkle_worker = MerkleWorker::new(handle, persistence_worker);
+        let mut persistence_worker = Arc::new(persistence_worker);
+        let mut merkle_worker = MerkleWorker::new(handle, persistence_worker.clone());
 
         for command in commands {
-            command.run::<KV>(handle, repo, &mut merkle_worker, &mut merkle_layer);
+            command.run::<KV>(handle, repo, &mut merkle_worker, &mut persistence_worker, &mut merkle_layer);
         }
 
         let layer_hash = merkle_layer.hash();

@@ -38,6 +38,10 @@ pub struct InMemoryRepo {
     /// The order in which registry commits were recorded, oldest first.
     #[cfg(test_utils)]
     journal: std::sync::Arc<RwLock<Vec<crate::journal::JournalEntry>>>,
+
+    /// Registry commits started but not yet complete.
+    #[cfg(test_utils)]
+    pending_commits: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 #[cfg(test_utils)]
@@ -332,9 +336,27 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
             .map_err(|error| OperationalError::FileWriteFailed { error })
     }
 
-    fn commit(
+    /// The values only. Node bodies live in the store itself and are written by the flush after
+    /// staging, so they are taken when the commit is published.
+    type Staged = HashMap<Bytes, Bytes>;
+
+    fn stage_commit(
+        &self,
+        _repo: &InMemoryRepo,
+    ) -> Result<HashMap<Bytes, Bytes>, OperationalError> {
+        Ok(self
+            .values
+            .read()
+            .map_err(|_| OperationalError::LockPoisoned)?
+            .iter()
+            .map(|(k, v)| (k.clone(), Bytes::copy_from_slice(v)))
+            .collect())
+    }
+
+    fn publish_commit(
         &self,
         repo: &InMemoryRepo,
+        values: HashMap<Bytes, Bytes>,
         id: &crate::commit::CommitId,
     ) -> Result<(), OperationalError> {
         let blobs = self
@@ -342,13 +364,6 @@ impl super::PersistentKeyValueStore for InMemoryKeyValueStore {
             .read()
             .map_err(|_| OperationalError::LockPoisoned)?
             .clone();
-        let values = self
-            .values
-            .read()
-            .map_err(|_| OperationalError::LockPoisoned)?
-            .iter()
-            .map(|(k, v)| (k.clone(), Bytes::copy_from_slice(v)))
-            .collect();
         repo.commits
             .write()
             .map_err(|_| OperationalError::LockPoisoned)?
@@ -551,6 +566,10 @@ impl crate::repo::RegistryRepo for InMemoryRepo {
             .map_err(|_| OperationalError::LockPoisoned)?
             .retain(|entry| retained.contains(&entry.root));
         Ok(())
+    }
+
+    fn pending_commits(&self) -> &std::sync::atomic::AtomicU64 {
+        &self.pending_commits
     }
 
     fn merkle_store_id(&self) -> StoreId {
